@@ -37,6 +37,21 @@ impl DbObject {
     }
 }
 
+/// A table or view found by searching a whole database.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Relation {
+    pub schema: String,
+    pub name: String,
+    pub kind: ObjectKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RelationList {
+    /// The database searched, resolved even when the connection leaves it unset.
+    pub database: String,
+    pub relations: Vec<Relation>,
+}
+
 /// Identifies a table or view to read rows from.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TableRef {
@@ -163,6 +178,20 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_objects(connection, password, path).await,
+            other => Err(AppError::Unsupported(other.label())),
+        }
+    })
+    .await
+}
+
+pub async fn list_relations(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+) -> Result<RelationList> {
+    with_timeout(async {
+        match connection.engine {
+            Engine::Postgres => postgres::list_relations(connection, password, database).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })

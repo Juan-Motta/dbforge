@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
-use crate::drivers::{self, DbObject, RowsPage, TableRef, TableStructure};
+use crate::drivers::{self, DbObject, RelationList, RowsPage, TableRef, TableStructure};
 use crate::error::Result;
 
 /// Lists the objects under `path` in a saved connection (see `drivers::list_objects`).
@@ -15,6 +15,19 @@ pub async fn list_objects(
     let connection = store.get(&connection_id)?;
     let password = secrets::get_password(&connection.id)?;
     drivers::list_objects(&connection, password.as_deref(), &path).await
+}
+
+/// Lists every table and view in a database, for the command palette's search.
+/// `database` defaults to the connection's own.
+#[tauri::command]
+pub async fn list_relations(
+    store: State<'_, ConnectionStore>,
+    connection_id: String,
+    database: Option<String>,
+) -> Result<RelationList> {
+    let connection = store.get(&connection_id)?;
+    let password = secrets::get_password(&connection.id)?;
+    drivers::list_relations(&connection, password.as_deref(), database.as_deref()).await
 }
 
 const MAX_PAGE_SIZE: u32 = 1000;

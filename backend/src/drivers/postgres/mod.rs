@@ -9,7 +9,7 @@ mod structure;
 
 pub use structure::table_structure;
 
-use super::{Column, DbObject, ObjectKind, QueryOutcome, RowsPage, StatementResult, TableRef};
+use super::{Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowsPage, StatementResult, TableRef};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -87,6 +87,37 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
         }
     };
     Ok(objects)
+}
+
+/// Every table and view in `database` (the connection's own when `None`), for search.
+pub async fn list_relations(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+) -> Result<RelationList> {
+    let mut conn = connect(connection, password, database).await?;
+    // The connection's own database may be unset; ask the server which one it picked.
+    let database: String = sqlx::query_scalar("SELECT current_database()::text").fetch_one(&mut conn).await?;
+    let rows: Vec<(String, String, bool)> = sqlx::query_as(
+        "SELECT n.nspname::text, c.relname::text, c.relkind IN ('r', 'p')
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE c.relkind IN ('r', 'p', 'v', 'm')
+           AND n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\\_%'
+         ORDER BY n.nspname, c.relname",
+    )
+    .fetch_all(&mut conn)
+    .await?;
+    conn.close().await?;
+
+    let relations = rows
+        .into_iter()
+        .map(|(schema, name, is_table)| Relation {
+            schema,
+            name,
+            kind: if is_table { ObjectKind::Table } else { ObjectKind::View },
+        })
+        .collect();
+    Ok(RelationList { database, relations })
 }
 
 /// Reads one page of a table or view, ordered by primary key when there is one.
@@ -410,6 +441,30 @@ mod tests {
         let error = outcome.unwrap_err();
         assert!(error.to_string().contains("canceling statement"), "{error}");
         assert!(session.run("SELECT 1", 10).await.is_ok(), "the session stays usable after a cancel");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn lists_every_table_and_view_of_a_database() {
+        let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
+        sqlx::raw_sql(
+            "DROP SCHEMA IF EXISTS dbforge_search CASCADE;
+             CREATE SCHEMA dbforge_search;
+             CREATE TABLE dbforge_search.orders (id int);
+             CREATE VIEW dbforge_search.open_orders AS SELECT id FROM dbforge_search.orders;",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        let list = list_relations(&local(), PASSWORD, None).await.unwrap();
+        assert_eq!(list.database, "shop");
+        let found: Vec<_> =
+            list.relations.iter().filter(|r| r.schema == "dbforge_search").map(|r| (r.name.as_str(), r.kind)).collect();
+        assert_eq!(found, [("open_orders", ObjectKind::View), ("orders", ObjectKind::Table)]);
+        assert!(list.relations.iter().all(|r| !r.schema.starts_with("pg_")));
+
+        sqlx::query("DROP SCHEMA dbforge_search CASCADE").execute(&mut conn).await.unwrap();
     }
 
     #[tokio::test]

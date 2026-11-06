@@ -1,0 +1,132 @@
+.palette {
+  width: min(720px, calc(100% - 32px));
+  max-height: min(520px, calc(100% - 120px));
+  margin: 88px auto auto;
+  padding: 0;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: var(--elev);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.palette::backdrop {
+  background: var(--scrim);
+}
+
+.palette[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.search {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: 15px var(--font-sans);
+}
+
+.icon {
+  flex: none;
+  color: var(--text3);
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px 8px;
+}
+
+.groupTitle {
+  padding: 10px 12px 4px;
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--text3);
+  font-size: 12.5px;
+}
+
+.item {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.item[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+
+.label {
+  white-space: nowrap;
+}
+
+.label mark {
+  background: transparent;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text3);
+  font-size: 12px;
+}
+
+.footer {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text3);
+  font-size: 11.5px;
+  flex: none;
+}
+
+.footer kbd {
+  margin-right: 4px;
+  padding: 1px 5px;
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  font: 10.5px var(--font-sans);
+}
+
+.tip {
+  margin-left: auto;
+}
+
+.tip code {
+  color: var(--text2);
+  font-family: var(--font-mono);
+}

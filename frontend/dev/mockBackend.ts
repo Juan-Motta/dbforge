@@ -120,6 +120,18 @@ export function installMockBackend() {
           ],
         })
       }
+      case 'list_relations':
+        return delay({
+          database: payload.database ?? 'shop',
+          relations: [
+            { schema: 'analytics', name: 'v_orders_daily', kind: 'view' },
+            { schema: 'public', name: 'customers', kind: 'table' },
+            { schema: 'public', name: 'order_items', kind: 'table' },
+            { schema: 'public', name: 'orders', kind: 'table' },
+            { schema: 'public', name: 'payments', kind: 'table' },
+            { schema: 'public', name: 'sales_order', kind: 'table' },
+          ],
+        })
       case 'table_structure':
         return delay(mockStructure)
       case 'cancel_query':

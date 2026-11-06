@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Connection } from '../domain/connection'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
 import { Explorer } from '../features/explorer/Explorer'
+import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
 import { useTheme } from '../features/settings/useTheme'
 import { ActivityRail, type Activity } from '../features/shell/ActivityRail'
@@ -27,6 +28,7 @@ export function App() {
   const [dialog, setDialog] = useState<DialogState>(null)
   const [tabs, setTabs] = useState(NO_TABS)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const theme = useTheme()
 
   const activeConnection = connections.find((c) => c.id === selection?.connectionId)
@@ -36,6 +38,29 @@ export function App() {
   const newQuery = activeConnection
     ? () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
     : undefined
+
+  // ⌘K / Ctrl+K toggles the palette from anywhere, the SQL editor included.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [])
+
+  const commands: Command[] = [
+    ...(newQuery
+      ? [{ id: 'new-query', label: 'New query', detail: activeConnection?.name, run: newQuery }]
+      : []),
+    { id: 'new-connection', label: 'New connection', run: () => setDialog({}) },
+    { id: 'theme-dark', label: 'Theme: Dark', run: () => theme.choose('dark') },
+    { id: 'theme-light', label: 'Theme: Light', run: () => theme.choose('light') },
+    { id: 'theme-system', label: 'Theme: Match system', run: () => theme.choose('system') },
+    { id: 'settings', label: 'Open settings', run: () => setSettingsOpen(true) },
+  ]
 
   const removeConnection = async (id: string) => {
     await remove(id)
@@ -49,6 +74,7 @@ export function App() {
         path={activePath}
         onNewQuery={newQuery}
         onOpenSettings={() => setSettingsOpen(true)}
+        onSearch={() => setPaletteOpen(true)}
       />
 
       <div className={styles.body}>
@@ -90,6 +116,21 @@ export function App() {
           onSave={save}
           onDelete={removeConnection}
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {paletteOpen && (
+        <CommandPalette
+          source={
+            activeConnection && {
+              connectionId: activeConnection.id,
+              connectionName: activeConnection.name,
+              database: activePath[0],
+            }
+          }
+          commands={commands}
+          onOpenTable={(connectionId, table) => setTabs((state) => openTableTab(state, connectionId, table))}
+          onClose={() => setPaletteOpen(false)}
         />
       )}
 

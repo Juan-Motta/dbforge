@@ -13,9 +13,10 @@ interface TitleBarProps {
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
   onOpenSettings: () => void
+  onSearch: () => void
 }
 
-export function TitleBar({ connection, path, onNewQuery, onOpenSettings }: TitleBarProps) {
+export function TitleBar({ connection, path, onNewQuery, onOpenSettings, onSearch }: TitleBarProps) {
   return (
     <header
       className={styles.titleBar}
@@ -56,7 +57,7 @@ export function TitleBar({ connection, path, onNewQuery, onOpenSettings }: Title
 
       <span className={styles.spacer} data-tauri-drag-region />
 
-      <Button className={styles.search}>
+      <Button className={styles.search} onClick={onSearch}>
         <Icon name="search" />
         Search everywhere…
         <kbd className={styles.kbd}>⌘K</kbd>

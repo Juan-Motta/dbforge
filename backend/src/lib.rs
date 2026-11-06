@@ -24,6 +24,7 @@ pub fn run() {
             commands::delete_connection,
             commands::test_connection,
             explorer::list_objects,
+            explorer::list_relations,
             explorer::fetch_rows,
             explorer::table_structure,
             query::run_query,
