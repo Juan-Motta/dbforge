@@ -74,6 +74,10 @@ impl ConnectionInput {
         if name.is_empty() {
             return Err(AppError::Invalid("Name is required".into()));
         }
+        // A SQLite connection is its file: without it there is nothing to open.
+        if self.engine == Engine::Sqlite && self.database.trim().is_empty() {
+            return Err(AppError::Invalid("Choose the SQLite database file".into()));
+        }
         let connection = Connection {
             id: self.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             name,
@@ -119,6 +123,12 @@ mod tests {
     fn existing_connection_keeps_its_id() {
         let (connection, _) = input("local", Some("abc")).into_parts().unwrap();
         assert_eq!(connection.id, "abc");
+    }
+
+    #[test]
+    fn sqlite_needs_its_file() {
+        let sqlite = ConnectionInput { engine: Engine::Sqlite, database: "  ".into(), ..input("local", None) };
+        assert!(sqlite.into_parts().unwrap_err().to_string().contains("SQLite database file"));
     }
 
     #[test]

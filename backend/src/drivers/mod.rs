@@ -3,6 +3,7 @@
 mod edit_sql;
 mod mysql;
 mod postgres;
+mod sqlite;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -244,6 +245,7 @@ pub async fn server_version(connection: &Connection, password: Option<&str>) -> 
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::server_version(connection, password).await,
+            Engine::Sqlite => sqlite::server_version(connection).await,
             Engine::Mysql | Engine::Mariadb => mysql::server_version(connection, password).await,
             other => Err(AppError::Unsupported(other.label())),
         }
@@ -255,6 +257,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_objects(connection, password, path).await,
+            Engine::Sqlite => sqlite::list_objects(connection, path).await,
             Engine::Mysql | Engine::Mariadb => mysql::list_objects(connection, password, path).await,
             other => Err(AppError::Unsupported(other.label())),
         }
@@ -270,6 +273,7 @@ pub async fn list_relations(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_relations(connection, password, database).await,
+            Engine::Sqlite => sqlite::list_relations(connection).await,
             Engine::Mysql | Engine::Mariadb => mysql::list_relations(connection, password, database).await,
             other => Err(AppError::Unsupported(other.label())),
         }
@@ -287,6 +291,7 @@ pub async fn stream_table(
 ) -> Result<()> {
     match connection.engine {
         Engine::Postgres => postgres::stream_table(connection, password, table, sink).await,
+        Engine::Sqlite => sqlite::stream_table(connection, table, sink).await,
         Engine::Mysql | Engine::Mariadb => mysql::stream_table(connection, password, table, sink).await,
         other => Err(AppError::Unsupported(other.label())),
     }
@@ -302,6 +307,7 @@ pub async fn fetch_rows(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::fetch_rows(connection, password, table, offset, limit).await,
+            Engine::Sqlite => sqlite::fetch_rows(connection, table, offset, limit).await,
             Engine::Mysql | Engine::Mariadb => mysql::fetch_rows(connection, password, table, offset, limit).await,
             other => Err(AppError::Unsupported(other.label())),
         }
@@ -318,6 +324,7 @@ pub async fn schema_diagram(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::schema_diagram(connection, password, database, schema).await,
+            Engine::Sqlite => sqlite::schema_diagram(connection).await,
             Engine::Mysql | Engine::Mariadb => mysql::schema_diagram(connection, password, database, schema).await,
             other => Err(AppError::Unsupported(other.label())),
         }
@@ -335,6 +342,7 @@ pub async fn apply_changes(
 ) -> Result<ApplySummary> {
     match connection.engine {
         Engine::Postgres => postgres::apply_changes(connection, password, table, changes).await,
+        Engine::Sqlite => sqlite::apply_changes(connection, table, changes).await,
         Engine::Mysql | Engine::Mariadb => mysql::apply_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
@@ -349,6 +357,7 @@ pub async fn preview_changes(
 ) -> Result<Vec<String>> {
     match connection.engine {
         Engine::Postgres => postgres::preview_changes(connection, password, table, changes).await,
+        Engine::Sqlite => sqlite::preview_changes(connection, table, changes).await,
         Engine::Mysql | Engine::Mariadb => mysql::preview_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
@@ -362,6 +371,7 @@ pub async fn table_structure(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::table_structure(connection, password, table).await,
+            Engine::Sqlite => sqlite::table_structure(connection, table).await,
             Engine::Mysql | Engine::Mariadb => mysql::table_structure(connection, password, table).await,
             other => Err(AppError::Unsupported(other.label())),
         }
@@ -374,19 +384,27 @@ pub async fn table_structure(
 pub enum Session {
     Postgres(postgres::Session),
     Mysql(mysql::Session),
+    Sqlite(sqlite::Session),
 }
 
 /// What a cancel request needs to find a session's running query on the server.
 #[derive(Debug, Clone, Copy)]
 pub enum CancelTarget {
-    Postgres { pid: i32 },
-    Mysql { id: u64 },
+    Postgres {
+        pid: i32,
+    },
+    Mysql {
+        id: u64,
+    },
+    /// SQLite can't stop a query from another connection.
+    Unavailable,
 }
 
 pub async fn open_session(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Session> {
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => Ok(Session::Postgres(postgres::open_session(connection, password, database).await?)),
+            Engine::Sqlite => Ok(Session::Sqlite(sqlite::open_session(connection).await?)),
             Engine::Mysql | Engine::Mariadb => {
                 Ok(Session::Mysql(mysql::open_session(connection, password, database).await?))
             }
@@ -401,6 +419,7 @@ impl Session {
         match self {
             Session::Postgres(session) => CancelTarget::Postgres { pid: session.pid() },
             Session::Mysql(session) => CancelTarget::Mysql { id: session.id() },
+            Session::Sqlite(_) => CancelTarget::Unavailable,
         }
     }
 
@@ -409,6 +428,7 @@ impl Session {
         match self {
             Session::Postgres(session) => session.run(sql, row_limit).await,
             Session::Mysql(session) => session.run(sql, row_limit).await,
+            Session::Sqlite(session) => session.run(sql, row_limit).await,
         }
     }
 
@@ -418,6 +438,7 @@ impl Session {
             Ok(match self {
                 Session::Postgres(session) => session.is_alive().await,
                 Session::Mysql(session) => session.is_alive().await,
+                Session::Sqlite(session) => session.is_alive().await,
             })
         };
         with_timeout(check).await.unwrap_or(false)
@@ -434,6 +455,7 @@ pub async fn explain(
 ) -> Result<serde_json::Value> {
     match connection.engine {
         Engine::Postgres => postgres::explain(connection, password, database, sql, analyze).await,
+        Engine::Sqlite => sqlite::explain(connection, sql, analyze).await,
         Engine::Mysql | Engine::Mariadb => mysql::explain(connection, password, database, sql, analyze).await,
         other => Err(AppError::Unsupported(other.label())),
     }
@@ -450,6 +472,7 @@ pub async fn cancel(
         match target {
             CancelTarget::Postgres { pid } => postgres::cancel(connection, password, database, pid).await,
             CancelTarget::Mysql { id } => mysql::cancel(connection, password, id).await,
+            CancelTarget::Unavailable => Err(AppError::Invalid("This database can't cancel a running query.".into())),
         }
     })
     .await
