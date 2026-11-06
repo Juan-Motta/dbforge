@@ -1,0 +1,150 @@
+.grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: max-content;
+  font: 12px var(--font-mono);
+}
+
+.grid th,
+.grid td {
+  height: 26px;
+  max-width: 320px;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 30px;
+  background: var(--panel);
+  font: 600 11.5px var(--font-sans);
+}
+
+.grid tbody tr:hover td {
+  background: var(--hover);
+}
+
+.grid td {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key {
+  color: var(--num);
+}
+
+.type {
+  font: 400 10px var(--font-mono);
+  color: var(--text3);
+}
+
+.rowNumber {
+  position: sticky;
+  left: 0;
+  min-width: 48px;
+  text-align: right !important;
+  background: var(--panel);
+  color: var(--text3);
+}
+
+.grid th.rowNumber {
+  z-index: 2;
+}
+
+.numeric {
+  text-align: right !important;
+}
+
+.null {
+  color: var(--text3);
+  font-style: italic;
+}
+
+/* Editing states, on top of the read-only grid's look. */
+.grid tbody tr[aria-selected='true'] td {
+  background: var(--accent-soft);
+}
+
+.grid .rowNumber {
+  cursor: default;
+}
+
+.edited {
+  background: color-mix(in srgb, var(--warn) 14%, transparent) !important;
+}
+
+.inserted td {
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+}
+
+.inserted .rowNumber {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.deleted td {
+  color: var(--text3);
+  text-decoration: line-through;
+  background: color-mix(in srgb, var(--err) 7%, transparent);
+}
+
+.deleted .rowNumber {
+  color: var(--err);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.unset {
+  color: var(--text3);
+  font-style: italic;
+}
+
+.editingCell {
+  padding: 0 !important;
+  max-width: none !important;
+}
+
+.editor {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  min-width: 180px;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.editor input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px var(--font-mono);
+}
+
+.editor button {
+  height: 20px;
+  margin-right: 3px;
+  padding: 0 6px;
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text2);
+  font: 600 10px var(--font-sans);
+  cursor: pointer;
+}

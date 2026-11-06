@@ -2,6 +2,7 @@
 
 mod postgres;
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::time::Duration;
 
@@ -50,6 +51,31 @@ pub struct RelationList {
     /// The database searched, resolved even when the connection leaves it unset.
     pub database: String,
     pub relations: Vec<Relation>,
+}
+
+/// One edit to a table row. Keys and values are the server's text form; `None` is NULL.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RowChange {
+    /// `key` holds every primary key column with the value the row was loaded with.
+    Update {
+        key: BTreeMap<String, Option<String>>,
+        values: BTreeMap<String, Option<String>>,
+    },
+    /// Columns left out take their DEFAULT.
+    Insert {
+        values: BTreeMap<String, Option<String>>,
+    },
+    Delete {
+        key: BTreeMap<String, Option<String>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ApplySummary {
+    pub updated: u64,
+    pub inserted: u64,
+    pub deleted: u64,
 }
 
 /// Identifies a table or view to read rows from.
@@ -285,6 +311,33 @@ pub async fn schema_diagram(
         }
     })
     .await
+}
+
+/// Applies row edits in one transaction; see `postgres::edit` for the guarantees.
+/// Only connecting has a time limit: a large batch can take as long as it needs.
+pub async fn apply_changes(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    changes: &[RowChange],
+) -> Result<ApplySummary> {
+    match connection.engine {
+        Engine::Postgres => postgres::apply_changes(connection, password, table, changes).await,
+        other => Err(AppError::Unsupported(other.label())),
+    }
+}
+
+/// The statements `apply_changes` would run, with values written in.
+pub async fn preview_changes(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    changes: &[RowChange],
+) -> Result<Vec<String>> {
+    match connection.engine {
+        Engine::Postgres => postgres::preview_changes(connection, password, table, changes).await,
+        other => Err(AppError::Unsupported(other.label())),
+    }
 }
 
 pub async fn table_structure(

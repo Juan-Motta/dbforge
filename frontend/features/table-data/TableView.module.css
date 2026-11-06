@@ -49,3 +49,97 @@
   -webkit-user-select: text;
   user-select: text;
 }
+
+.divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border2);
+}
+
+.pending {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--warn) 7%, var(--panel));
+  font-size: 12px;
+  flex: none;
+}
+
+.pending[data-state='applied'] {
+  background: color-mix(in srgb, var(--ok) 7%, var(--panel));
+}
+
+.pending[data-state='failed'] {
+  background: color-mix(in srgb, var(--err) 7%, var(--panel));
+}
+
+.detail {
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+.applied {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ok);
+}
+
+.failed {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--err);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.shortcut {
+  opacity: 0.7;
+  font-weight: 500;
+}
+
+.previewDialog {
+  width: min(760px, calc(100% - 32px));
+}
+
+.previewNote {
+  margin: 12px 20px 8px;
+  color: var(--text2);
+  font-size: 12.5px;
+}
+
+.previewCode {
+  height: min(360px, 50vh);
+  margin: 0 20px 20px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.confirm {
+  max-width: 440px;
+  padding: 16px 20px 20px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirm p {
+  margin: 0 0 16px;
+}
+
+.confirm code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

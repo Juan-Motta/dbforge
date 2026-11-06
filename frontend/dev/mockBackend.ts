@@ -148,6 +148,23 @@ export function installMockBackend() {
             { schema: 'public', name: 'sales_order', kind: 'table' },
           ],
         })
+      case 'apply_changes': {
+        const changes = payload.changes as { kind: string; key?: Record<string, string> }[]
+        if (changes.some((c) => c.key?.id === '13'))
+          throw 'The row with id = 13 was changed or deleted since it was loaded. Nothing was applied; reload and try again.'
+        const count = (kind: string) => changes.filter((c) => c.kind === kind).length
+        return delay({ updated: count('update'), inserted: count('insert'), deleted: count('delete') })
+      }
+      case 'preview_changes':
+        return delay(
+          (payload.changes as { kind: string }[]).map((c) =>
+            c.kind === 'delete'
+              ? `DELETE FROM "public"."orders" WHERE "id" = CAST('3'::text AS integer)`
+              : c.kind === 'insert'
+                ? `INSERT INTO "public"."orders" ("name") VALUES (CAST('New'::text AS character varying(80)))`
+                : `UPDATE "public"."orders" SET "name" = CAST('Renamed'::text AS character varying(80)) WHERE "id" = CAST('1'::text AS integer)`,
+          ),
+        )
       case 'schema_diagram':
         return delay(mockDiagram)
       case 'table_structure':

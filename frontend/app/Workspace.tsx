@@ -16,12 +16,13 @@ interface WorkspaceProps {
   onClose: (id: string) => void
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
+  isProduction: (connectionId: string) => boolean
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram' } as const
 
 /** The main island: open query consoles, tables and diagrams, one visible at a time. */
-export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: WorkspaceProps) {
+export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, isProduction }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
 
   if (tabs.length === 0) {
@@ -69,6 +70,7 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: Wor
             <TablePage
               connectionId={tab.connectionId}
               table={tab.table}
+              production={isProduction(tab.connectionId)}
               onExport={() =>
                 setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table })
               }

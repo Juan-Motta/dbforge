@@ -14,11 +14,13 @@ type View = 'data' | Section
 interface TablePageProps {
   connectionId: string
   table: TableRef
+  /** Editing a production connection's data asks for confirmation. */
+  production: boolean
   onExport: () => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
-export function TablePage({ connectionId, table, onExport }: TablePageProps) {
+export function TablePage({ connectionId, table, production, onExport }: TablePageProps) {
   const [view, setView] = useState<View>('data')
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
@@ -51,7 +53,7 @@ export function TablePage({ connectionId, table, onExport }: TablePageProps) {
 
       {/* Data stays mounted so its page and scroll survive a look at the structure. */}
       <div className={styles.content} hidden={view !== 'data'}>
-        <TableView connectionId={connectionId} table={table} />
+        <TableView connectionId={connectionId} table={table} production={production} />
       </div>
       {view !== 'data' && (
         <div className={styles.content} aria-busy={loading}>

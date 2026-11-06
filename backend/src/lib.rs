@@ -1,5 +1,6 @@
 mod connections;
 mod drivers;
+mod edit;
 mod error;
 mod explorer;
 mod export;
@@ -31,6 +32,8 @@ pub fn run() {
             explorer::list_objects,
             explorer::list_relations,
             explorer::fetch_rows,
+            edit::apply_changes,
+            edit::preview_changes,
             explorer::table_structure,
             explorer::schema_diagram,
             query::run_query,

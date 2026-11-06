@@ -141,6 +141,7 @@ export function App() {
               onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
               onClose={(id) => setTabs((state) => closeTab(state, id))}
               onNewQuery={newQuery}
+              isProduction={(id) => connections.find((c) => c.id === id)?.environment === 'production'}
             />
           )}
         </main>

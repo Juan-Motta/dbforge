@@ -6,9 +6,11 @@ use sqlx::postgres::{PgConnectOptions, PgConnection, PgRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo, ValueRef};
 
 mod diagram;
+mod edit;
 mod structure;
 
 pub use diagram::schema_diagram;
+pub use edit::{apply_changes, preview_changes};
 pub use structure::table_structure;
 
 use super::{
@@ -173,7 +175,7 @@ pub async fn stream_table(
 
 async fn table_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<Column>> {
     let columns: Vec<Column> = sqlx::query_as::<_, (String, String, bool)>(
-        "SELECT a.attname, format_type(a.atttypid, a.atttypmod), COALESCE(a.attnum = ANY(i.indkey), false)
+        "SELECT a.attname, format_type(a.atttypid, a.atttypmod), COALESCE(a.attnum = ANY((i.indkey::int2[])[0:i.indnkeyatts - 1]), false)
          FROM pg_attribute a
          JOIN pg_class c ON c.oid = a.attrelid
          JOIN pg_namespace n ON n.oid = c.relnamespace

@@ -1,42 +1,169 @@
-import { IconButton } from '../../components/Button'
+import { useState, type KeyboardEvent } from 'react'
+import { Badge } from '../../components/Badge'
+import { Button, IconButton } from '../../components/Button'
+import { SqlCode } from '../../components/code/SqlCode'
 import { Icon } from '../../components/Icon'
+import { Modal } from '../../components/Modal'
 import type { TableRef } from '../../domain/table'
-import { DataGrid } from '../../components/data-grid/DataGrid'
+import { errorMessage } from '../../lib/errors'
+import { tableDataApi, type ApplySummary } from './api'
+import { EditableGrid } from './EditableGrid'
+import {
+  addRow,
+  counts,
+  editCell,
+  editNewCell,
+  hasEdits,
+  keyOf,
+  NO_EDITS,
+  removeNewRow,
+  rowKey,
+  toChanges,
+  toggleDelete,
+  type Edits,
+} from './edits'
 import { useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
 
 interface TableViewProps {
   connectionId: string
   table: TableRef
+  /** Applying changes on a production connection asks for confirmation first. */
+  production: boolean
 }
 
-/** Read-only view of a table's rows, one page at a time. */
-export function TableView({ connectionId, table }: TableViewProps) {
+type Status =
+  | { state: 'idle' }
+  | { state: 'applying' }
+  | { state: 'applied'; summary: ApplySummary }
+  | { state: 'failed'; error: string }
+
+/** A table's rows, one page at a time, editable when the table has a primary key. */
+export function TableView({ connectionId, table, production }: TableViewProps) {
   const { page, error, loading, offset, hasPrevious, hasNext, previous, next, reload } = useRowsPage(
     connectionId,
     table,
   )
-  const rowCount = page?.rows.length ?? 0
+  const [edits, setEdits] = useState<Edits>(NO_EDITS)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [status, setStatus] = useState<Status>({ state: 'idle' })
+  const [preview, setPreview] = useState<string[] | null>(null)
+  const [confirming, setConfirming] = useState(false)
+
+  const columns = page?.columns ?? []
+  const rows = page?.rows ?? []
+  const editable = columns.some((c) => c.primaryKey)
+  const pending = hasEdits(edits)
+  const applying = status.state === 'applying'
+  const { updated, inserted, deleted } = counts(edits)
+  const total = updated + inserted + deleted
+
+  const change = (next: (current: Edits) => Edits) => {
+    setEdits(next)
+    if (status.state !== 'idle') setStatus({ state: 'idle' })
+  }
+
+  const select = (id: string, additive: boolean) =>
+    setSelected((current) => {
+      if (!additive) return current.size === 1 && current.has(id) ? new Set() : new Set([id])
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  /** Marks the selected rows for deletion (or unmarks them); new rows are simply removed. */
+  const deleteSelected = () => {
+    change((current) =>
+      [...selected].reduce((acc, id) => {
+        if (id.startsWith('new:')) return removeNewRow(acc, Number(id.slice(4)))
+        const row = rows.find((r) => rowKey(keyOf(r, columns)) === id)
+        return row ? toggleDelete(acc, keyOf(row, columns)) : acc
+      }, current),
+    )
+    setSelected(new Set())
+  }
+
+  const apply = async () => {
+    setConfirming(false)
+    setStatus({ state: 'applying' })
+    try {
+      const summary = await tableDataApi.applyChanges(connectionId, table, toChanges(edits))
+      setEdits(NO_EDITS)
+      setSelected(new Set())
+      setStatus({ state: 'applied', summary })
+      reload()
+    } catch (failure) {
+      setStatus({ state: 'failed', error: errorMessage(failure) })
+    }
+  }
+
+  const requestApply = () => {
+    if (!pending || applying) return
+    if (production) setConfirming(true)
+    else void apply()
+  }
+
+  const showPreview = async () => {
+    try {
+      setPreview(await tableDataApi.previewChanges(connectionId, table, toChanges(edits)))
+    } catch (failure) {
+      setStatus({ state: 'failed', error: errorMessage(failure) })
+    }
+  }
+
+  const discard = () => {
+    setEdits(NO_EDITS)
+    setSelected(new Set())
+    setStatus({ state: 'idle' })
+  }
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 's') {
+      event.preventDefault()
+      requestApply()
+    }
+  }
+
+  const rowCount = rows.length
+  // Moving to another page would hide pending rows; apply or discard first.
+  const lockPaging = loading || pending
+  const noKey = 'This table has no primary key, so its rows cannot be identified safely to edit them'
 
   return (
-    <section className={styles.view} aria-label={`${table.schema}.${table.name}`}>
+    <section className={styles.view} aria-label={`${table.schema}.${table.name}`} onKeyDown={onKeyDown}>
       <div className={styles.toolbar}>
         <Icon name="table" />
         <span className={styles.title}>
           <span className="muted">{table.schema}.</span>
           {table.name}
         </span>
+        <span className={styles.divider} />
+        <IconButton
+          label={editable ? 'Add row' : noKey}
+          disabled={!editable || applying}
+          onClick={() => change(addRow)}
+        >
+          <Icon name="plus" />
+        </IconButton>
+        <IconButton
+          label={editable ? 'Delete selected rows' : noKey}
+          disabled={!editable || selected.size === 0 || applying}
+          onClick={deleteSelected}
+        >
+          <Icon name="trash" />
+        </IconButton>
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
           {loading ? 'Loading…' : rowCount === 0 ? 'No rows' : `Rows ${offset + 1}–${offset + rowCount}`}
         </span>
-        <IconButton label="Previous page" disabled={!hasPrevious || loading} onClick={previous}>
+        <IconButton label="Previous page" disabled={!hasPrevious || lockPaging} onClick={previous}>
           <Icon name="chevronLeft" />
         </IconButton>
-        <IconButton label="Next page" disabled={!hasNext || loading} onClick={next}>
+        <IconButton label="Next page" disabled={!hasNext || lockPaging} onClick={next}>
           <Icon name="chevronRight" />
         </IconButton>
-        <IconButton label="Reload" disabled={loading} onClick={reload}>
+        <IconButton label="Reload" disabled={lockPaging} onClick={reload}>
           <Icon name="refresh" />
         </IconButton>
       </div>
@@ -45,9 +172,105 @@ export function TableView({ connectionId, table }: TableViewProps) {
         {error ? (
           <p className={styles.error}>{error}</p>
         ) : (
-          page && <DataGrid columns={page.columns} rows={page.rows} firstRowNumber={offset + 1} />
+          page && (
+            <EditableGrid
+              columns={columns}
+              rows={rows}
+              firstRowNumber={offset + 1}
+              edits={edits}
+              editable={editable && !applying}
+              selected={selected}
+              onSelect={select}
+              onEditCell={(r, c, value) =>
+                change((current) =>
+                  editCell(current, keyOf(rows[r], columns), columns[c].name, value, rows[r][c]),
+                )
+              }
+              onEditNewCell={(id, c, value) =>
+                change((current) => editNewCell(current, id, columns[c].name, value))
+              }
+            />
+          )
         )}
       </div>
+
+      {(pending || status.state !== 'idle') && (
+        <div className={styles.pending} data-state={status.state}>
+          {pending && (
+            <>
+              <Badge tone="warn">
+                {total} pending {total === 1 ? 'change' : 'changes'}
+              </Badge>
+              <span className={styles.detail}>
+                {updated} updated · {inserted} inserted · {deleted} deleted
+              </span>
+              <Button variant="ghost" disabled={applying} onClick={showPreview}>
+                Preview SQL
+              </Button>
+            </>
+          )}
+          {status.state === 'applied' && (
+            <span className={styles.applied}>
+              <Icon name="check" /> Applied: {status.summary.updated} updated · {status.summary.inserted}{' '}
+              inserted · {status.summary.deleted} deleted
+            </span>
+          )}
+          {status.state === 'failed' && (
+            <span className={styles.failed} title={status.error}>
+              {status.error}
+            </span>
+          )}
+          <span className={styles.spacer} />
+          {pending && (
+            <>
+              <Button disabled={applying} onClick={discard}>
+                Discard
+              </Button>
+              <Button variant="primary" disabled={applying} onClick={requestApply}>
+                {applying ? 'Applying…' : 'Apply'}
+                <span className={styles.shortcut}>⌘S</span>
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {preview && (
+        <Modal
+          title="Pending changes as SQL"
+          onClose={() => setPreview(null)}
+          className={styles.previewDialog}
+        >
+          <p className={styles.previewNote}>
+            Runs in one transaction. If any row changed since it was loaded, none of it applies.
+          </p>
+          <div className={styles.previewCode}>
+            <SqlCode value={preview.map((statement) => `${statement};`).join('\n')} />
+          </div>
+        </Modal>
+      )}
+
+      {confirming && (
+        <Modal title="Apply changes to production?" onClose={() => setConfirming(false)}>
+          <div className={styles.confirm}>
+            <p>
+              This connection is marked <strong>Production</strong>. You are about to change{' '}
+              <code>
+                {table.schema}.{table.name}
+              </code>
+              : {updated} updated, {inserted} inserted, {deleted} deleted.
+            </p>
+            <div className={styles.confirmActions}>
+              <Button data-autofocus onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={() => void apply()}>
+                Apply to production
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </section>
   )
 }
