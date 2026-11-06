@@ -153,13 +153,3 @@ export function zoomAt(view: View, factor: number, anchor: Point): View {
   const ratio = scale / view.scale
   return { scale, x: anchor.x - (anchor.x - view.x) * ratio, y: anchor.y - (anchor.y - view.y) * ratio }
 }
-
-/** A table and every table it references or is referenced by. */
-export function neighborhood(name: string, relationships: Relationship[]): Set<string> {
-  const names = new Set([name])
-  for (const r of relationships) {
-    if (r.table === name) names.add(r.referencedTable)
-    if (r.referencedTable === name) names.add(r.table)
-  }
-  return names
-}

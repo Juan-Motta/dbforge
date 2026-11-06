@@ -10,7 +10,6 @@ import {
   fitView,
   layout,
   localRelationships,
-  neighborhood,
   relationshipPath,
   shownColumns,
   zoomAt,
@@ -60,7 +59,13 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
   const [filter, setFilter] = useState('')
   const [moved, setMoved] = useState<Map<string, Point>>(new Map())
   const [view, setView] = useState<View>({ x: 40, y: 40, scale: 1 })
-  const [focused, setFocused] = useState<string | null>(null)
+  /** Pinned with a click; stays highlighted when the pointer moves away. */
+  const [pinned, setPinned] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
+  // Pointer capture makes the card "lose" the hover mid-drag, so the dragged one is tracked too.
+  const [dragging, setDragging] = useState<string | null>(null)
+  // Hovering shows a table's relations at a glance; a pin keeps them while exploring.
+  const active = dragging ?? hovered ?? pinned
   const canvas = useRef<HTMLDivElement | null>(null)
   const drag = useRef<Drag | null>(null)
 
@@ -131,17 +136,19 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
   }, [])
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    const header = (event.target as HTMLElement).closest<HTMLElement>('[data-card]')
+    // Anywhere on a card moves that card; anywhere else pans the canvas.
+    const card = (event.target as HTMLElement).closest<HTMLElement>('[data-card]')
     const start = { x: event.clientX, y: event.clientY }
-    drag.current = header
+    drag.current = card
       ? {
           kind: 'card',
-          name: header.dataset.card!,
+          name: card.dataset.card!,
           start,
-          origin: positionOf(header.dataset.card!),
+          origin: positionOf(card.dataset.card!),
           moved: false,
         }
       : { kind: 'pan', start, origin: view }
+    setDragging(card?.dataset.card ?? null)
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
@@ -159,50 +166,19 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     }
   }
 
-  // The canvas captures the pointer while dragging, so the browser's dblclick lands
-  // on the canvas rather than the card; double clicks are detected here instead.
-  const lastClick = useRef<{ name: string; time: number } | null>(null)
-
-  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+  const onPointerUp = () => {
     const current = drag.current
     drag.current = null
-    if (current?.kind !== 'card' || current.moved) return
-    const previous = lastClick.current
-    if (previous?.name === current.name && event.timeStamp - previous.time < 400) {
-      lastClick.current = null
-      showNeighborhood(current.name)
-      return
+    setDragging(null)
+    // A click without a drag pins the card's highlight, or unpins it.
+    if (current?.kind === 'card' && !current.moved) {
+      setPinned((name) => (name === current.name ? null : current.name))
     }
-    lastClick.current = { name: current.name, time: event.timeStamp }
-    // A single click focuses the card, or clears the focus on the same card.
-    setFocused((name) => (name === current.name ? null : current.name))
   }
 
   const zoomBy = (factor: number) => {
     const box = canvas.current?.getBoundingClientRect()
     if (box) setView((current) => zoomAt(current, factor, { x: box.width / 2, y: box.height / 2 }))
-  }
-
-  /** Shows only a table and its direct relations, laid out afresh and fitted to the view. */
-  const showNeighborhood = (name: string) => {
-    const names = neighborhood(name, relationships)
-    const nextCards = buildCards(diagram, names, mode, foreignKeys)
-    const positions = layout(
-      nextCards.map((c) => ({ name: c.table.name, height: c.height })),
-      relationships,
-    )
-    const box = canvas.current?.getBoundingClientRect()
-    setVisible(names)
-    setMoved(new Map())
-    setFocused(name)
-    if (box) {
-      setView(
-        fitView(
-          nextCards.map((c) => ({ position: positions.get(c.table.name)!, height: c.height })),
-          box,
-        ),
-      )
-    }
   }
 
   const toggle = (name: string) =>
@@ -215,11 +191,11 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
 
   const listed = diagram.tables.filter((t) => t.name.toLowerCase().includes(filter.toLowerCase()))
   const isRelated = (name: string) =>
-    focused === name ||
+    active === name ||
     lines.some(
       (r) =>
-        (r.table === focused && r.referencedTable === name) ||
-        (r.referencedTable === focused && r.table === name),
+        (r.table === active && r.referencedTable === name) ||
+        (r.referencedTable === active && r.table === name),
     )
 
   return (
@@ -282,7 +258,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
             {lines.map((r) => {
               const from = byName.get(r.table)!
               const to = byName.get(r.referencedTable)!
-              const highlighted = focused !== null && (r.table === focused || r.referencedTable === focused)
+              const highlighted = active !== null && (r.table === active || r.referencedTable === active)
               return (
                 <path
                   key={r.name}
@@ -293,7 +269,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
                     to.columns.findIndex((c) => c.name === r.referencedColumns[0]),
                   )}
                   data-highlighted={highlighted || undefined}
-                  data-dimmed={(focused !== null && !highlighted) || undefined}
+                  data-dimmed={(active !== null && !highlighted) || undefined}
                 >
                   <title>
                     {r.name}: {r.table}({r.columns.join(', ')}) → {r.referencedTable}(
@@ -311,14 +287,14 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
                 key={table.name}
                 className={styles.card}
                 style={{ left: x, top: y, width: CARD_WIDTH }}
-                data-focused={focused === table.name || undefined}
-                data-dimmed={(focused !== null && !isRelated(table.name)) || undefined}
+                data-card={table.name}
+                data-focused={active === table.name || undefined}
+                data-pinned={pinned === table.name || undefined}
+                data-dimmed={(active !== null && !isRelated(table.name)) || undefined}
+                onPointerEnter={() => setHovered(table.name)}
+                onPointerLeave={() => setHovered((name) => (name === table.name ? null : name))}
               >
-                <div
-                  className={styles.cardHeader}
-                  data-card={table.name}
-                  title="Double-click to show only this table and its relations"
-                >
+                <div className={styles.cardHeader}>
                   <Icon name="table" size={14} />
                   <span className={styles.cardName}>{table.name}</span>
                   {table.rowEstimate !== null && (

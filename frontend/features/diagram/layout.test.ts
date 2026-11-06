@@ -7,7 +7,6 @@ import {
   fitView,
   layout,
   localRelationships,
-  neighborhood,
   relationshipPath,
   shownColumns,
   zoomAt,
@@ -142,16 +141,5 @@ describe('zoomAt', () => {
   it('stays between 10% and 200%', () => {
     expect(zoomAt({ x: 0, y: 0, scale: 1 }, 10, { x: 0, y: 0 }).scale).toBe(2)
     expect(zoomAt({ x: 0, y: 0, scale: 1 }, 0.01, { x: 0, y: 0 }).scale).toBe(0.1)
-  })
-})
-
-describe('neighborhood', () => {
-  it('keeps the table and its direct relations only', () => {
-    const relationships = [
-      rel('orders', 'customers'),
-      rel('order_items', 'orders'),
-      rel('payments', 'invoices'),
-    ]
-    expect(neighborhood('orders', relationships)).toEqual(new Set(['orders', 'customers', 'order_items']))
   })
 })

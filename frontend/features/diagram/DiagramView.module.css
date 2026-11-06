@@ -153,6 +153,7 @@
 
 .card {
   position: absolute;
+  cursor: move;
   overflow: hidden;
   border: 1px solid var(--border2);
   border-radius: 8px;
@@ -167,8 +168,17 @@
     0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
+.card[data-pinned] .cardHeader {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
 .card[data-dimmed] {
   opacity: 0.35;
+}
+
+.card,
+.lines path {
+  transition: opacity 120ms ease;
 }
 
 .cardHeader {
@@ -181,7 +191,6 @@
   background: var(--panel);
   font-size: 12.5px;
   font-weight: 600;
-  cursor: move;
 }
 
 .cardName {
