@@ -1,4 +1,5 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { isNumericType, shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
 import type { Column } from './api'
@@ -22,27 +23,58 @@ interface EditableGridProps {
   onSelect: (id: string, additive: boolean) => void
   onEditCell: (row: number, column: number, value: Value) => void
   onEditNewCell: (id: number, column: number, value: Value) => void
+  /** Puts a column of a new row back to its DEFAULT. */
+  onUnsetNewCell: (id: number, column: number) => void
 }
+
+type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
   const { columns, rows, firstRowNumber, edits, editable, selected, onSelect } = props
   const [editing, setEditing] = useState<{ at: Editing; column: number } | null>(null)
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    at: Editing
+    column: number
+    state: CellState
+  } | null>(null)
   const numeric = columns.map((c) => isNumericType(c.dataType))
+
+  const setValue = (at: Editing, column: number, value: Value) => {
+    if ('row' in at) props.onEditCell(at.row, column, value)
+    else props.onEditNewCell(at.newRow, column, value)
+  }
 
   const commit = (value: Value) => {
     if (!editing) return
-    if ('row' in editing.at) props.onEditCell(editing.at.row, editing.column, value)
-    else props.onEditNewCell(editing.at.newRow, editing.column, value)
+    setValue(editing.at, editing.column, value)
     setEditing(null)
   }
 
-  const cell = (
-    at: Editing,
-    column: number,
-    value: Value,
-    state: { edited?: boolean; unset?: boolean; locked?: boolean },
-  ) => {
+  const menuItems = (at: Editing, column: number, state: CellState): MenuItem[] => [
+    { label: 'Edit', onSelect: () => setEditing({ at, column }) },
+    { label: 'Set NULL', onSelect: () => setValue(at, column, null) },
+    ...('newRow' in at
+      ? [
+          {
+            label: 'Use DEFAULT',
+            disabled: state.unset,
+            onSelect: () => props.onUnsetNewCell(at.newRow, column),
+          },
+        ]
+      : [
+          {
+            label: 'Revert',
+            disabled: !state.edited,
+            // Setting the loaded value back drops the change.
+            onSelect: () => props.onEditCell(at.row, column, rows[at.row][column]),
+          },
+        ]),
+  ]
+
+  const cell = (at: Editing, column: number, value: Value, state: CellState) => {
     const isEditing =
       editing?.column === column &&
       ('row' in at
@@ -67,6 +99,15 @@ export function EditableGrid(props: EditableGridProps) {
         className={classes.filter(Boolean).join(' ') || undefined}
         title={value ?? undefined}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
+        onContextMenu={
+          editable && !state.locked
+            ? (event: MouseEvent) => {
+                event.preventDefault()
+                setMenu({ x: event.clientX, y: event.clientY, at, column, state })
+              }
+            : undefined
+        }
+        data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
       >
         {state.unset ? 'DEFAULT' : (value ?? 'NULL')}
       </td>
@@ -74,73 +115,90 @@ export function EditableGrid(props: EditableGridProps) {
   }
 
   return (
-    <table className={styles.grid}>
-      <thead>
-        <tr>
-          <th className={styles.rowNumber}>#</th>
-          {columns.map((column) => (
-            <th key={column.name} title={column.dataType}>
-              <span className={styles.header}>
-                {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
-                {column.name}
-                <span className={styles.type}>{shortTypeName(column.dataType)}</span>
-              </span>
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {edits.inserts.map((row) => {
-          const id = `new:${row.id}`
-          return (
-            <tr key={id} className={styles.inserted} aria-selected={selected.has(id)}>
-              <td
-                className={styles.rowNumber}
-                onClick={(event) => onSelect(id, event.metaKey || event.ctrlKey)}
+    <>
+      <table className={styles.grid}>
+        <thead>
+          <tr>
+            <th className={styles.rowNumber}>#</th>
+            {columns.map((column) => (
+              <th key={column.name} title={column.dataType}>
+                <span className={styles.header}>
+                  {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
+                  {column.name}
+                  <span className={styles.type}>{shortTypeName(column.dataType)}</span>
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {edits.inserts.map((row) => {
+            const id = `new:${row.id}`
+            return (
+              <tr key={id} className={styles.inserted} aria-selected={selected.has(id)}>
+                <td
+                  className={styles.rowNumber}
+                  onClick={(event) => onSelect(id, event.metaKey || event.ctrlKey)}
+                >
+                  +
+                </td>
+                {columns.map((column, c) =>
+                  cell({ newRow: row.id }, c, row.values[column.name] ?? null, {
+                    edited: column.name in row.values,
+                    unset: !(column.name in row.values),
+                  }),
+                )}
+              </tr>
+            )
+          })}
+          {rows.map((row, r) => {
+            const id = rowKey(keyOf(row, columns))
+            const deleted = edits.deletes.has(id)
+            const changed = edits.updates.get(id)?.values ?? {}
+            return (
+              <tr
+                key={id + r}
+                className={deleted ? styles.deleted : undefined}
+                aria-selected={selected.has(id)}
               >
-                +
-              </td>
-              {columns.map((column, c) =>
-                cell({ newRow: row.id }, c, row.values[column.name] ?? null, {
-                  edited: column.name in row.values,
-                  unset: !(column.name in row.values),
-                }),
-              )}
-            </tr>
-          )
-        })}
-        {rows.map((row, r) => {
-          const id = rowKey(keyOf(row, columns))
-          const deleted = edits.deletes.has(id)
-          const changed = edits.updates.get(id)?.values ?? {}
-          return (
-            <tr
-              key={id + r}
-              className={deleted ? styles.deleted : undefined}
-              aria-selected={selected.has(id)}
-            >
-              <td
-                className={styles.rowNumber}
-                onClick={editable ? (event) => onSelect(id, event.metaKey || event.ctrlKey) : undefined}
-              >
-                {deleted ? '−' : firstRowNumber + r}
-              </td>
-              {columns.map((column, c) =>
-                deleted
-                  ? cell({ row: r }, c, row[c], { locked: true })
-                  : cell({ row: r }, c, column.name in changed ? changed[column.name] : row[c], {
-                      edited: column.name in changed,
-                    }),
-              )}
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+                <td
+                  className={styles.rowNumber}
+                  onClick={editable ? (event) => onSelect(id, event.metaKey || event.ctrlKey) : undefined}
+                >
+                  {deleted ? '−' : firstRowNumber + r}
+                </td>
+                {columns.map((column, c) =>
+                  deleted
+                    ? cell({ row: r }, c, row[c], { locked: true })
+                    : cell({ row: r }, c, column.name in changed ? changed[column.name] : row[c], {
+                        edited: column.name in changed,
+                      }),
+                )}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems(menu.at, menu.column, menu.state)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </>
   )
 }
 
-/** Enter or leaving the field keeps the text; Escape cancels; the NULL button stores NULL. */
+function sameCell(menu: { at: Editing; column: number }, at: Editing, column: number): boolean {
+  if (menu.column !== column) return false
+  return 'row' in at
+    ? 'row' in menu.at && menu.at.row === at.row
+    : 'newRow' in menu.at && menu.at.newRow === at.newRow
+}
+
+/** Enter or leaving the field keeps the text; Escape cancels. NULL is set from the cell's menu. */
 function CellEditor({
   initial,
   onCommit,
@@ -175,17 +233,6 @@ function CellEditor({
         onKeyDown={onKeyDown}
         onBlur={finish}
       />
-      <button
-        type="button"
-        title="Set to NULL"
-        // Before the input's blur, which would otherwise store the text first.
-        onMouseDown={(event) => {
-          event.preventDefault()
-          onCommit(null)
-        }}
-      >
-        NULL
-      </button>
     </span>
   )
 }

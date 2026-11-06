@@ -11,6 +11,7 @@ import {
   rowKey,
   toChanges,
   toggleDelete,
+  unsetNewCell,
 } from './edits'
 
 const columns = [
@@ -63,6 +64,11 @@ describe('new rows', () => {
     edits = editNewCell(edits, 1, 'name', 'Cy')
     expect(edits.inserts[1].values).toEqual({ name: 'Cy' })
     expect(removeNewRow(edits, 2).inserts.map((r) => r.id)).toEqual([1])
+  })
+
+  it('can put a column of a new row back to its DEFAULT', () => {
+    const edits = unsetNewCell(editNewCell(addRow(NO_EDITS), 1, 'name', 'Cy'), 1, 'name')
+    expect(toChanges(edits)).toEqual([{ kind: 'insert', values: {} }])
   })
 })
 

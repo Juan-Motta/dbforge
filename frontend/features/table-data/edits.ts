@@ -95,3 +95,16 @@ export function toChanges(edits: Edits): RowChange[] {
     ...[...edits.inserts].reverse().map(({ values }): RowChange => ({ kind: 'insert', values })),
   ]
 }
+
+/** Drops a column from a new row, so it takes its DEFAULT again. */
+export function unsetNewCell(edits: Edits, id: number, column: string): Edits {
+  return {
+    ...edits,
+    inserts: edits.inserts.map((row) => {
+      if (row.id !== id) return row
+      const values = { ...row.values }
+      delete values[column]
+      return { ...row, values }
+    }),
+  }
+}

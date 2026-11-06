@@ -20,6 +20,7 @@ import {
   rowKey,
   toChanges,
   toggleDelete,
+  unsetNewCell,
   type Edits,
 } from './edits'
 import { useRowsPage } from './useRowsPage'
@@ -186,6 +187,7 @@ export function TableView({ connectionId, table, production }: TableViewProps) {
                   editCell(current, keyOf(rows[r], columns), columns[c].name, value, rows[r][c]),
                 )
               }
+              onUnsetNewCell={(id, c) => change((current) => unsetNewCell(current, id, columns[c].name))}
               onEditNewCell={(id, c, value) =>
                 change((current) => editNewCell(current, id, columns[c].name, value))
               }
