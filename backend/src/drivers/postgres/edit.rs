@@ -70,9 +70,10 @@ pub async fn preview_changes(
 /// internal name has no length, so the column's own limit applies on assignment
 /// and a value that doesn't fit is rejected.
 async fn editable_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<Column>> {
-    let rows: Vec<(String, String, bool)> = sqlx::query_as(
+    let rows: Vec<(String, String, bool, bool)> = sqlx::query_as(
         "SELECT a.attname::text, format('%I.%I', tn.nspname, t.typname),
-                COALESCE(a.attnum = ANY((i.indkey::int2[])[0:i.indnkeyatts - 1]), false)
+                COALESCE(a.attnum = ANY((i.indkey::int2[])[0:i.indnkeyatts - 1]), false),
+                (a.attgenerated <> '' OR a.attidentity = 'a')
          FROM pg_attribute a
          JOIN pg_type t ON t.oid = a.atttypid
          JOIN pg_namespace tn ON tn.oid = t.typnamespace
@@ -84,7 +85,10 @@ async fn editable_columns(conn: &mut PgConnection, table: &TableRef) -> Result<V
     .bind(&table.name)
     .fetch_all(conn)
     .await?;
-    Ok(rows.into_iter().map(|(name, data_type, primary_key)| Column { name, data_type, primary_key }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(name, data_type, primary_key, generated)| Column { name, data_type, primary_key, generated })
+        .collect())
 }
 
 #[cfg(test)]

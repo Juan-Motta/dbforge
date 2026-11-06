@@ -96,6 +96,10 @@ pub struct Column {
     pub data_type: String,
     #[serde(default)]
     pub primary_key: bool,
+    /// Computed by the database (a generated column, or an identity that is
+    /// GENERATED ALWAYS), so it can't be given a value.
+    #[serde(default)]
+    pub generated: bool,
 }
 
 /// Receives a result one row at a time, so it never has to fit in memory.

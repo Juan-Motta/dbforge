@@ -108,7 +108,7 @@ export function installMockBackend() {
             { name: 'id', dataType: 'integer', primaryKey: true },
             { name: 'name', dataType: 'character varying(80)', primaryKey: false },
             { name: 'revenue', dataType: 'numeric(10,2)', primaryKey: false },
-            { name: 'created_at', dataType: 'timestamp with time zone', primaryKey: false },
+            { name: 'created_at', dataType: 'timestamp with time zone', primaryKey: false, generated: true },
           ],
           rows,
           hasMore: offset + count < total,

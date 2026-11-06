@@ -7,6 +7,8 @@ export interface Column {
   /** As the server writes it, e.g. `character varying(80)`. */
   dataType: string
   primaryKey: boolean
+  /** Computed by the database (generated column, or identity GENERATED ALWAYS); not editable. */
+  generated?: boolean
 }
 
 export interface RowsPage {

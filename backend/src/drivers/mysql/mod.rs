@@ -167,8 +167,8 @@ pub async fn stream_table(
 }
 
 async fn table_columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<Column>> {
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT CAST(column_name AS CHAR), CAST(column_type AS CHAR), CAST(column_key AS CHAR)
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT CAST(column_name AS CHAR), CAST(column_type AS CHAR), CAST(column_key AS CHAR), CAST(extra AS CHAR)
          FROM information_schema.columns
          WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
     )
@@ -179,7 +179,22 @@ async fn table_columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<V
     if rows.is_empty() {
         return Err(AppError::Invalid(format!("Table {}.{} not found", table.schema, table.name)));
     }
-    Ok(rows.into_iter().map(|(name, data_type, key)| Column { name, data_type, primary_key: key == "PRI" }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(name, data_type, key, extra)| Column {
+            name,
+            data_type,
+            primary_key: key == "PRI",
+            generated: is_generated(&extra),
+        })
+        .collect())
+}
+
+/// `VIRTUAL GENERATED` or `STORED GENERATED` in `extra`; `DEFAULT_GENERATED` only
+/// marks a default written as an expression, which can still be overridden.
+fn is_generated(extra: &str) -> bool {
+    let extra = extra.to_uppercase();
+    extra.contains("VIRTUAL GENERATED") || extra.contains("STORED GENERATED")
 }
 
 /// Every value cast to text so any column type can be shown or exported as-is.
@@ -270,6 +285,7 @@ fn columns_of(row: &MySqlRow) -> Vec<Column> {
             name: c.name().to_string(),
             data_type: c.type_info().name().to_lowercase(),
             primary_key: false,
+            generated: false,
         })
         .collect()
 }
@@ -407,6 +423,35 @@ mod tests {
             let last = fetch_rows(&local(), PASSWORD, &items, 2, 5).await.unwrap();
             assert_eq!(last.rows[0][3].as_deref(), Some("2026-11-05 10:00:00"));
             assert!(!last.has_more);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn flags_columns_the_database_computes() {
+        for server in servers() {
+            let _conn = run(
+                &server,
+                "DROP DATABASE IF EXISTS dbforge_generated;
+                 CREATE DATABASE dbforge_generated;
+                 CREATE TABLE dbforge_generated.items (
+                     id int AUTO_INCREMENT PRIMARY KEY,
+                     qty int DEFAULT 1,
+                     at datetime DEFAULT CURRENT_TIMESTAMP,
+                     doubled int AS (qty * 2) STORED,
+                     halved int AS (qty / 2) VIRTUAL
+                 );",
+            )
+            .await;
+            let page = fetch_rows(&server, PASSWORD, &table("dbforge_generated", "items"), 0, 1).await.unwrap();
+            let flags: Vec<_> = page.columns.iter().map(|c| (c.name.as_str(), c.generated)).collect();
+            // AUTO_INCREMENT and expression defaults (MySQL's DEFAULT_GENERATED) can still be set.
+            assert_eq!(
+                flags,
+                [("id", false), ("qty", false), ("at", false), ("doubled", true), ("halved", true)],
+                "{}",
+                server.engine.label()
+            );
         }
     }
 

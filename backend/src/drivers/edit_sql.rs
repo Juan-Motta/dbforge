@@ -49,6 +49,18 @@ pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &
             table.schema, table.name
         )));
     }
+    // Defense in depth: the grid never offers these, but a value for a computed
+    // column is an error, or worse, silently ignored on a lenient server.
+    let computed: BTreeSet<&str> = columns.iter().filter(|c| c.generated).map(|c| c.name.as_str()).collect();
+    for change in changes {
+        let values = match change {
+            RowChange::Update { values, .. } | RowChange::Insert { values } => values,
+            RowChange::Delete { .. } => continue,
+        };
+        if let Some(name) = values.keys().find(|name| computed.contains(name.as_str())) {
+            return Err(AppError::Invalid(format!("{name} is computed by the database and can't be set.")));
+        }
+    }
     let builder = Builder { dialect, types };
     let relation = format!("{}.{}", builder.quote(&table.schema), builder.quote(&table.name));
 
@@ -240,6 +252,26 @@ mod tests {
         let sql = (1..=10).map(|i| format!("${i}")).collect::<Vec<_>>().join(",");
         let params: Vec<Option<&str>> = vec![Some("1"); 9].into_iter().chain([Some("it's")]).collect();
         assert_eq!(inline(&DOLLAR, &statement(&sql, &params)), "'1','1','1','1','1','1','1','1','1','it''s'");
+    }
+
+    #[test]
+    fn refuses_values_for_computed_columns() {
+        let column = |name: &str, primary_key, generated| Column {
+            name: name.into(),
+            data_type: "int".into(),
+            primary_key,
+            generated,
+        };
+        let columns = [column("id", true, false), column("doubled", false, true)];
+        let table = TableRef { database: "db".into(), schema: "s".into(), name: "t".into() };
+        let values: BTreeMap<String, Option<String>> = [("doubled".to_string(), Some("2".to_string()))].into();
+
+        let error = build(&QUESTION, &columns, &table, &[RowChange::Insert { values }]).unwrap_err();
+        assert!(error.to_string().contains("doubled is computed"), "{error}");
+
+        // Its key may still identify a row, and a delete never sets values.
+        let key: BTreeMap<String, Option<String>> = [("id".to_string(), Some("1".to_string()))].into();
+        assert!(build(&QUESTION, &columns, &table, &[RowChange::Delete { key }]).is_ok());
     }
 
     #[test]

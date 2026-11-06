@@ -29,6 +29,8 @@ interface EditableGridProps {
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
+const COMPUTED = 'Computed by the database, so it cannot be edited'
+
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
   const { columns, rows, firstRowNumber, edits, editable, selected, onSelect } = props
@@ -121,10 +123,14 @@ export function EditableGrid(props: EditableGridProps) {
           <tr>
             <th className={styles.rowNumber}>#</th>
             {columns.map((column) => (
-              <th key={column.name} title={column.dataType}>
+              <th
+                key={column.name}
+                title={column.generated ? `${column.dataType} · ${COMPUTED}` : column.dataType}
+              >
                 <span className={styles.header}>
                   {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
                   {column.name}
+                  {column.generated && <span className={styles.computed}>auto</span>}
                   <span className={styles.type}>{shortTypeName(column.dataType)}</span>
                 </span>
               </th>
@@ -146,6 +152,7 @@ export function EditableGrid(props: EditableGridProps) {
                   cell({ newRow: row.id }, c, row.values[column.name] ?? null, {
                     edited: column.name in row.values,
                     unset: !(column.name in row.values),
+                    locked: column.generated,
                   }),
                 )}
               </tr>
@@ -172,6 +179,7 @@ export function EditableGrid(props: EditableGridProps) {
                     ? cell({ row: r }, c, row[c], { locked: true })
                     : cell({ row: r }, c, column.name in changed ? changed[column.name] : row[c], {
                         edited: column.name in changed,
+                        locked: column.generated,
                       }),
                 )}
               </tr>

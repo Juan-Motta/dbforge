@@ -240,7 +240,12 @@ mod tests {
 
     fn columns() -> Vec<Column> {
         [("id", "integer"), ("Name", "text"), ("active", "boolean"), ("meta", "jsonb")]
-            .map(|(name, data_type)| Column { name: name.into(), data_type: data_type.into(), primary_key: false })
+            .map(|(name, data_type)| Column {
+                name: name.into(),
+                data_type: data_type.into(),
+                primary_key: false,
+                generated: false,
+            })
             .to_vec()
     }
 
@@ -303,7 +308,8 @@ mod tests {
     #[test]
     fn markdown_escapes_pipes_and_line_breaks() {
         let mut out = Vec::new();
-        let columns = vec![Column { name: "note".into(), data_type: "text".into(), primary_key: false }];
+        let columns =
+            vec![Column { name: "note".into(), data_type: "text".into(), primary_key: false, generated: false }];
         write_rows(&mut out, Format::Markdown, "t", &columns, &[vec![Some("a|b\nc".into())], vec![None]]).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "| note |\n| --- |\n| a\\|b c |\n| NULL |\n");
     }

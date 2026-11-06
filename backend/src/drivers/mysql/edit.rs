@@ -9,7 +9,7 @@
 use sqlx::mysql::MySqlConnection;
 use sqlx::{AssertSqlSafe, Connection as _};
 
-use super::{connect, with_timeout};
+use super::{connect, is_generated, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect};
 use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
@@ -92,11 +92,12 @@ async fn editable_columns(conn: &mut MySqlConnection, table: &TableRef) -> Resul
         }
     }
 
-    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+    let rows: Vec<(String, String, i64, String)> = sqlx::query_as(
         "SELECT CAST(c.column_name AS CHAR), CAST(c.column_type AS CHAR),
                 CAST(EXISTS (SELECT 1 FROM information_schema.statistics s
                              WHERE s.table_schema = c.table_schema AND s.table_name = c.table_name
-                               AND s.index_name = 'PRIMARY' AND s.column_name = c.column_name) AS SIGNED)
+                               AND s.index_name = 'PRIMARY' AND s.column_name = c.column_name) AS SIGNED),
+                CAST(c.extra AS CHAR)
          FROM information_schema.columns c
          WHERE c.table_schema = ? AND c.table_name = ? ORDER BY c.ordinal_position",
     )
@@ -106,7 +107,12 @@ async fn editable_columns(conn: &mut MySqlConnection, table: &TableRef) -> Resul
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(name, data_type, primary)| Column { name, data_type, primary_key: primary != 0 })
+        .map(|(name, data_type, primary, extra)| Column {
+            name,
+            data_type,
+            primary_key: primary != 0,
+            generated: is_generated(&extra),
+        })
         .collect())
 }
 
