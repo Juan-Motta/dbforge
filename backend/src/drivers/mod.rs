@@ -60,13 +60,20 @@ pub struct TableRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Column {
     pub name: String,
     /// The type as the server writes it, e.g. `character varying(80)`.
     pub data_type: String,
+    #[serde(default)]
     pub primary_key: bool,
+}
+
+/// Receives a result one row at a time, so it never has to fit in memory.
+pub trait RowSink {
+    fn columns(&mut self, columns: &[Column]) -> Result<()>;
+    fn row(&mut self, values: &[Option<String>]) -> Result<()>;
 }
 
 /// One page of rows. Values are the server's text representation; `None` is NULL.
@@ -196,6 +203,20 @@ pub async fn list_relations(
         }
     })
     .await
+}
+
+/// Sends every row of a table or view to `sink`, ordered by primary key when there is one.
+/// Only connecting has a time limit: a big table can take as long as it needs.
+pub async fn stream_table(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    sink: &mut impl RowSink,
+) -> Result<()> {
+    match connection.engine {
+        Engine::Postgres => postgres::stream_table(connection, password, table, sink).await,
+        other => Err(AppError::Unsupported(other.label())),
+    }
 }
 
 pub async fn fetch_rows(

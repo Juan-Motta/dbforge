@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
+import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
 import { QueryConsole } from '../features/query/QueryConsole'
 import { TablePage } from './TablePage'
 import type { Tab } from './tabs'
@@ -17,6 +19,8 @@ interface WorkspaceProps {
 
 /** The main island: open query consoles and tables, one visible at a time. */
 export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: WorkspaceProps) {
+  const [exporting, setExporting] = useState<ExportSource | null>(null)
+
   if (tabs.length === 0) {
     return (
       <p className={styles.empty}>
@@ -47,12 +51,28 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: Wor
               connectionId={tab.connectionId}
               database={tab.database}
               initialSql={tab.initialSql}
+              onExportResult={(result) =>
+                setExporting({
+                  kind: 'rows',
+                  name: 'query_result',
+                  columns: result.columns,
+                  rows: result.rows,
+                })
+              }
             />
           ) : (
-            <TablePage connectionId={tab.connectionId} table={tab.table} />
+            <TablePage
+              connectionId={tab.connectionId}
+              table={tab.table}
+              onExport={() =>
+                setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table })
+              }
+            />
           )}
         </div>
       ))}
+
+      {exporting && <ExportDialog source={exporting} onClose={() => setExporting(null)} />}
     </div>
   )
 }

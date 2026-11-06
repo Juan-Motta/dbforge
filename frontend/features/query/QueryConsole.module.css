@@ -106,3 +106,7 @@
   -webkit-user-select: text;
   user-select: text;
 }
+
+.export {
+  margin-left: auto;
+}

@@ -120,6 +120,14 @@ export function installMockBackend() {
           ],
         })
       }
+      case 'plugin:dialog|save':
+        return delay(`/Users/demo/Downloads/${(payload.options as { defaultPath: string }).defaultPath}`)
+      case 'export_table':
+        return delay(48213)
+      case 'export_rows':
+        return delay((payload.rows as unknown[]).length)
+      case 'format_rows':
+        return delay('id,name\n1042,Northwind Traders\n')
       case 'list_history': {
         const search = String(payload.search).toLowerCase()
         return delay(

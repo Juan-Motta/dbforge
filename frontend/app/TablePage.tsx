@@ -14,10 +14,11 @@ type View = 'data' | Section
 interface TablePageProps {
   connectionId: string
   table: TableRef
+  onExport: () => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
-export function TablePage({ connectionId, table }: TablePageProps) {
+export function TablePage({ connectionId, table, onExport }: TablePageProps) {
   const [view, setView] = useState<View>('data')
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
@@ -38,6 +39,9 @@ export function TablePage({ connectionId, table }: TablePageProps) {
           ))}
         </div>
         <span className={styles.summary}>{structure && summary(structure)}</span>
+        <IconButton label="Export rows" onClick={onExport}>
+          <Icon name="download" />
+        </IconButton>
         {view !== 'data' && (
           <IconButton label="Reload structure" disabled={loading} onClick={reload}>
             <Icon name="refresh" />

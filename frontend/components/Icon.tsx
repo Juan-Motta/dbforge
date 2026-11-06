@@ -87,6 +87,7 @@ const PATHS = {
   chevronDown: <path d="M4 6l4 4 4-4" />,
   play: <path d="M5 3.5v9l7-4.5z" fill="currentColor" />,
   stop: <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />,
+  download: <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />,
   chevronLeft: <path d="M10 4 6 8l4 4" />,
   chevronRight: <path d="M6 4l4 4-4 4" />,
 } as const

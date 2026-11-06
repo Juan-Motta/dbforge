@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
+import type { StatementResult } from './api'
 import { ResultsPanel } from './ResultsPanel'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
 import { useQueryRunner } from './useQueryRunner'
@@ -14,10 +15,17 @@ interface QueryConsoleProps {
   database?: string
   /** Text the editor starts with, e.g. a query reopened from the history. */
   initialSql?: string
+  onExportResult: (result: StatementResult) => void
 }
 
 /** A SQL editor with the results of its last run below. */
-export function QueryConsole({ sessionId, connectionId, database, initialSql }: QueryConsoleProps) {
+export function QueryConsole({
+  sessionId,
+  connectionId,
+  database,
+  initialSql,
+  onExportResult,
+}: QueryConsoleProps) {
   const editor = useRef<SqlEditorHandle>(null)
   const { running, cancelling, cancelError, lastRun, run, cancel } = useQueryRunner(
     sessionId,
@@ -56,7 +64,7 @@ export function QueryConsole({ sessionId, connectionId, database, initialSql }: 
           <p className={styles.error}>{lastRun.error}</p>
         ) : lastRun ? (
           // Remount per run so the selected result tab resets.
-          <ResultsPanel key={lastRun.id} outcome={lastRun.outcome} />
+          <ResultsPanel key={lastRun.id} outcome={lastRun.outcome} onExport={onExportResult} />
         ) : (
           <p className={styles.placeholder}>
             {running

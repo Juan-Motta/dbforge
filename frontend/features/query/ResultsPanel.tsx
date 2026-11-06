@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
+import { Icon } from '../../components/Icon'
 import { DataGrid } from '../../components/data-grid/DataGrid'
 import type { QueryOutcome, StatementResult } from './api'
 import styles from './QueryConsole.module.css'
@@ -10,8 +12,13 @@ function summary(result: StatementResult): string {
   return result.truncated ? `${count} rows · showing first ${result.rows.length}` : `${count} rows`
 }
 
+interface ResultsPanelProps {
+  outcome: QueryOutcome
+  onExport: (result: StatementResult) => void
+}
+
 /** Results of one run: a tab per statement, showing the last one first. */
-export function ResultsPanel({ outcome }: { outcome: QueryOutcome }) {
+export function ResultsPanel({ outcome, onExport }: ResultsPanelProps) {
   const { results, elapsedMs } = outcome
   const [selected, setSelected] = useState(results.length - 1)
   const result = results[selected]
@@ -38,6 +45,12 @@ export function ResultsPanel({ outcome }: { outcome: QueryOutcome }) {
         )}
         <Badge tone="ok">{summary(result)}</Badge>
         <span className="muted">{elapsedMs} ms</span>
+        {result.columns.length > 0 && (
+          <Button variant="ghost" className={styles.export} onClick={() => onExport(result)}>
+            <Icon name="download" />
+            Export
+          </Button>
+        )}
       </div>
       <div className={styles.grid}>
         {result.columns.length > 0 ? (

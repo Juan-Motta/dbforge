@@ -9,7 +9,10 @@ mod structure;
 
 pub use structure::table_structure;
 
-use super::{Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowsPage, StatementResult, TableRef};
+use super::{
+    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
+    with_timeout,
+};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -129,7 +132,44 @@ pub async fn fetch_rows(
     limit: u32,
 ) -> Result<RowsPage> {
     let mut conn = connect(connection, password, Some(&table.database)).await?;
+    let columns = table_columns(&mut conn, table).await?;
 
+    // Fetch one extra row to know whether another page exists.
+    let sql = format!("{} LIMIT $1 OFFSET $2", select_as_text(&columns, table));
+    let mut rows: Vec<Vec<Option<String>>> = sqlx::query_scalar(AssertSqlSafe(sql))
+        .bind(i64::from(limit) + 1)
+        .bind(offset as i64)
+        .fetch_all(&mut conn)
+        .await?;
+    conn.close().await?;
+
+    let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    Ok(RowsPage { columns, rows, has_more })
+}
+
+/// Sends every row to `sink` as it arrives, so memory stays flat for any table size.
+pub async fn stream_table(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    sink: &mut impl RowSink,
+) -> Result<()> {
+    let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
+    let columns = with_timeout(table_columns(&mut conn, table)).await?;
+    sink.columns(&columns)?;
+
+    let sql = select_as_text(&columns, table);
+    let mut rows = sqlx::query_scalar::<_, Vec<Option<String>>>(AssertSqlSafe(sql)).fetch(&mut conn);
+    while let Some(values) = rows.try_next().await? {
+        sink.row(&values)?;
+    }
+    drop(rows);
+    conn.close().await?;
+    Ok(())
+}
+
+async fn table_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<Column>> {
     let columns: Vec<Column> = sqlx::query_as::<_, (String, String, bool)>(
         "SELECT a.attname, format_type(a.atttypid, a.atttypmod), COALESCE(a.attnum = ANY(i.indkey), false)
          FROM pg_attribute a
@@ -141,7 +181,7 @@ pub async fn fetch_rows(
     )
     .bind(&table.schema)
     .bind(&table.name)
-    .fetch_all(&mut conn)
+    .fetch_all(conn)
     .await?
     .into_iter()
     .map(|(name, data_type, primary_key)| Column { name, data_type, primary_key })
@@ -150,29 +190,20 @@ pub async fn fetch_rows(
     if columns.is_empty() {
         return Err(AppError::Invalid(format!("Table {}.{} not found", table.schema, table.name)));
     }
+    Ok(columns)
+}
 
-    // Every value is cast to text so any column type can be shown as-is.
-    let values = columns.iter().map(|c| format!("{}::text", quote_ident(&c.name)));
+/// Every value is cast to text so any column type can be shown or exported as-is.
+fn select_as_text(columns: &[Column], table: &TableRef) -> String {
+    let values: Vec<String> = columns.iter().map(|c| format!("{}::text", quote_ident(&c.name))).collect();
     let order_by: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(&c.name)).collect();
-    let sql = format!(
-        "SELECT ARRAY[{}] FROM {}.{}{} LIMIT $1 OFFSET $2",
-        values.collect::<Vec<_>>().join(", "),
+    format!(
+        "SELECT ARRAY[{}] FROM {}.{}{}",
+        values.join(", "),
         quote_ident(&table.schema),
         quote_ident(&table.name),
         if order_by.is_empty() { String::new() } else { format!(" ORDER BY {}", order_by.join(", ")) },
-    );
-
-    // Fetch one extra row to know whether another page exists.
-    let mut rows: Vec<Vec<Option<String>>> = sqlx::query_scalar(AssertSqlSafe(sql))
-        .bind(i64::from(limit) + 1)
-        .bind(offset as i64)
-        .fetch_all(&mut conn)
-        .await?;
-    conn.close().await?;
-
-    let has_more = rows.len() > limit as usize;
-    rows.truncate(limit as usize);
-    Ok(RowsPage { columns, rows, has_more })
+    )
 }
 
 /// A connection kept open between runs, so transactions, `SET` and temporary
@@ -284,7 +315,8 @@ mod tests {
             name: "test".into(),
             engine: Engine::Postgres,
             environment: None,
-            host: "localhost".into(),
+            // Not `localhost`: Docker on macOS answers slowly on IPv6, which is tried first.
+            host: "127.0.0.1".into(),
             port: 55432,
             database: "shop".into(),
             username: "postgres".into(),
@@ -465,6 +497,46 @@ mod tests {
         assert!(list.relations.iter().all(|r| !r.schema.starts_with("pg_")));
 
         sqlx::query("DROP SCHEMA dbforge_search CASCADE").execute(&mut conn).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn streams_every_row_of_a_table() {
+        #[derive(Default)]
+        struct Collect(Vec<String>, Vec<Vec<Option<String>>>);
+        impl RowSink for Collect {
+            fn columns(&mut self, columns: &[Column]) -> Result<()> {
+                self.0 = columns.iter().map(|c| c.name.clone()).collect();
+                Ok(())
+            }
+            fn row(&mut self, values: &[Option<String>]) -> Result<()> {
+                self.1.push(values.to_vec());
+                Ok(())
+            }
+        }
+
+        let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
+        sqlx::raw_sql(
+            "DROP SCHEMA IF EXISTS dbforge_export CASCADE;
+             CREATE SCHEMA dbforge_export;
+             CREATE TABLE dbforge_export.items (id int PRIMARY KEY, label text);
+             INSERT INTO dbforge_export.items SELECT g, CASE WHEN g % 2 = 0 THEN 'item ' || g END
+             FROM generate_series(1500, 1, -1) g;",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        let table = TableRef { database: "shop".into(), schema: "dbforge_export".into(), name: "items".into() };
+        let mut sink = Collect::default();
+        stream_table(&local(), PASSWORD, &table, &mut sink).await.unwrap();
+
+        assert_eq!(sink.0, ["id", "label"]);
+        assert_eq!(sink.1.len(), 1500, "more than any page size");
+        assert_eq!(sink.1[0], [Some("1".into()), None], "ordered by primary key");
+        assert_eq!(sink.1[1], [Some("2".into()), Some("item 2".into())]);
+
+        sqlx::query("DROP SCHEMA dbforge_export CASCADE").execute(&mut conn).await.unwrap();
     }
 
     #[tokio::test]

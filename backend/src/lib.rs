@@ -2,6 +2,7 @@ mod connections;
 mod drivers;
 mod error;
 mod explorer;
+mod export;
 mod history;
 mod query;
 
@@ -13,6 +14,7 @@ use connections::store::ConnectionStore;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("connections.json");
             app.manage(ConnectionStore::load(path)?);
@@ -34,6 +36,9 @@ pub fn run() {
             query::cancel_query,
             query::close_session,
             history::list_history,
+            export::format_rows,
+            export::export_rows,
+            export::export_table,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");
