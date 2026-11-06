@@ -29,6 +29,18 @@
   color: var(--err);
 }
 
+.analyze {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+  cursor: pointer;
+}
+
+.analyze input {
+  accent-color: var(--accent);
+}
+
 .shortcut {
   opacity: 0.7;
   font-weight: 500;

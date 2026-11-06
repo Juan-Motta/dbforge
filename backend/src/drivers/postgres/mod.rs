@@ -261,6 +261,34 @@ impl Session {
     }
 }
 
+/// The server's plan for one statement, as `EXPLAIN (FORMAT JSON)` returns it.
+///
+/// With `analyze` the statement really runs, so it runs on its own connection
+/// inside a transaction that is always rolled back: an `UPDATE` explained this way
+/// changes nothing, and the console's session and open transaction are untouched.
+/// The extended protocol accepts a single statement only, so a script like
+/// `SELECT 1; COMMIT; DELETE …` is rejected instead of escaping the rollback.
+pub async fn explain(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+    sql: &str,
+    analyze: bool,
+) -> Result<serde_json::Value> {
+    let mut conn = with_timeout(connect(connection, password, database)).await?;
+    let options = if analyze { "FORMAT JSON, ANALYZE, BUFFERS" } else { "FORMAT JSON" };
+    let statement = format!("EXPLAIN ({options}) {}", sql.trim().trim_end_matches(';'));
+
+    let mut transaction = conn.begin().await?;
+    let row = sqlx::query(AssertSqlSafe(statement)).fetch_one(&mut *transaction).await;
+    transaction.rollback().await?;
+    conn.close().await?;
+
+    let row = row?;
+    let text = row.try_get_raw(0)?.as_str().map_err(|e| AppError::Invalid(e.to_string()))?.to_string();
+    Ok(serde_json::from_str(&text)?)
+}
+
 /// Asks the server to cancel what process `pid` is running. The request goes
 /// over a separate connection because the session's own one is busy.
 pub async fn cancel(connection: &Connection, password: Option<&str>, database: Option<&str>, pid: i32) -> Result<()> {
@@ -537,6 +565,40 @@ mod tests {
         assert_eq!(sink.1[1], [Some("2".into()), Some("item 2".into())]);
 
         sqlx::query("DROP SCHEMA dbforge_export CASCADE").execute(&mut conn).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn explain_returns_the_plan_and_analyze_changes_nothing() {
+        let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
+        sqlx::raw_sql(
+            "DROP SCHEMA IF EXISTS dbforge_explain CASCADE;
+             CREATE SCHEMA dbforge_explain;
+             CREATE TABLE dbforge_explain.items AS SELECT g AS id FROM generate_series(1, 10) g;",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        let plan = explain(&local(), PASSWORD, None, "SELECT * FROM dbforge_explain.items;", false).await.unwrap();
+        assert_eq!(plan[0]["Plan"]["Node Type"], "Seq Scan");
+        assert!(plan[0].get("Execution Time").is_none(), "no ANALYZE, no execution");
+
+        let analyzed = explain(&local(), PASSWORD, None, "DELETE FROM dbforge_explain.items", true).await.unwrap();
+        assert_eq!(analyzed[0]["Plan"]["Plans"][0]["Actual Rows"], 10);
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM dbforge_explain.items").fetch_one(&mut conn).await.unwrap();
+        assert_eq!(count, 10, "the analyzed DELETE was rolled back");
+
+        let error = explain(&local(), PASSWORD, None, "SELECT 1; COMMIT; DROP SCHEMA dbforge_explain CASCADE", true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("multiple commands"), "{error}");
+        let still_there: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM dbforge_explain.items").fetch_one(&mut conn).await.unwrap();
+        assert_eq!(still_there, 10);
+
+        sqlx::query("DROP SCHEMA dbforge_explain CASCADE").execute(&mut conn).await.unwrap();
     }
 
     #[tokio::test]

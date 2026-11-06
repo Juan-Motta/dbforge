@@ -150,6 +150,8 @@ export function installMockBackend() {
         })
       case 'table_structure':
         return delay(mockStructure)
+      case 'explain_query':
+        return delay(payload.analyze ? mockPlan : mockPlanEstimate)
       case 'cancel_query':
       case 'close_session':
         sleeping.get(String(payload.sessionId))?.()
@@ -293,3 +295,96 @@ const mockHistory = [
   rows: entry.rows,
   error: entry.error ?? null,
 }))
+
+const mockPlan = [
+  {
+    Plan: {
+      'Node Type': 'Sort',
+      'Total Cost': 3120,
+      'Plan Rows': 480,
+      'Actual Total Time': 38.2,
+      'Actual Rows': 14,
+      'Actual Loops': 1,
+      'Sort Key': ['(count(o.id)) DESC'],
+      'Sort Method': 'quicksort',
+      Plans: [
+        {
+          'Node Type': 'Aggregate',
+          Strategy: 'Hashed',
+          'Total Cost': 3080,
+          'Plan Rows': 480,
+          'Actual Total Time': 37.6,
+          'Actual Rows': 14,
+          'Actual Loops': 1,
+          'Group Key': ['c.id'],
+          Plans: [
+            {
+              'Node Type': 'Hash Join',
+              'Join Type': 'Inner',
+              'Total Cost': 2600,
+              'Plan Rows': 51020,
+              'Actual Total Time': 34.5,
+              'Actual Rows': 48306,
+              'Actual Loops': 1,
+              'Hash Cond': '(o.customer_id = c.id)',
+              Plans: [
+                {
+                  'Node Type': 'Seq Scan',
+                  'Relation Name': 'orders',
+                  Alias: 'o',
+                  'Total Cost': 1800,
+                  'Plan Rows': 1280,
+                  'Actual Total Time': 24.1,
+                  'Actual Rows': 48306,
+                  'Actual Loops': 1,
+                  Filter: "(created_at >= (now() - '30 days'::interval))",
+                  'Rows Removed by Filter': 564102,
+                },
+                {
+                  'Node Type': 'Hash',
+                  'Total Cost': 700,
+                  'Plan Rows': 48213,
+                  'Actual Total Time': 4.4,
+                  'Actual Rows': 48213,
+                  'Actual Loops': 1,
+                  Plans: [
+                    {
+                      'Node Type': 'Seq Scan',
+                      'Relation Name': 'customers',
+                      Alias: 'c',
+                      'Total Cost': 650,
+                      'Plan Rows': 48213,
+                      'Actual Total Time': 3.2,
+                      'Actual Rows': 48213,
+                      'Actual Loops': 1,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    'Planning Time': 0.9,
+    'Execution Time': 38.4,
+  },
+]
+const mockPlanEstimate = [
+  {
+    Plan: {
+      'Node Type': 'Limit',
+      'Total Cost': 120,
+      'Plan Rows': 100,
+      Plans: [
+        {
+          'Node Type': 'Seq Scan',
+          'Relation Name': 'orders',
+          Alias: 'orders',
+          'Total Cost': 110,
+          'Plan Rows': 100,
+        },
+      ],
+    },
+  },
+]

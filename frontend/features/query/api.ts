@@ -24,6 +24,12 @@ export const queryApi = {
   /** Runs a script; `database` defaults to the connection's own. */
   run: (sessionId: string, connectionId: string, database: string | undefined, sql: string) =>
     invoke<QueryOutcome>('run_query', { sessionId, connectionId, database, sql }),
+  /**
+   * The plan of one statement as EXPLAIN's JSON. With `analyze` it really runs,
+   * on its own connection and inside a transaction that is always rolled back.
+   */
+  explain: (connectionId: string, database: string | undefined, sql: string, analyze: boolean) =>
+    invoke<unknown>('explain_query', { connectionId, database, sql, analyze }),
   /** Stops the running query; its run then fails with a cancel error. */
   cancel: (sessionId: string) => invoke<void>('cancel_query', { sessionId }),
   /** Closes the connection; uncommitted work is rolled back. */

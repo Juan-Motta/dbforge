@@ -33,6 +33,7 @@ pub fn run() {
             explorer::fetch_rows,
             explorer::table_structure,
             query::run_query,
+            query::explain_query,
             query::cancel_query,
             query::close_session,
             history::list_history,

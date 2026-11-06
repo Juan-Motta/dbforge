@@ -138,6 +138,20 @@ async fn run_in_session(
     outcome
 }
 
+/// The plan of the console's statement. See `drivers::explain` for why ANALYZE is safe.
+#[tauri::command]
+pub async fn explain_query(
+    store: State<'_, ConnectionStore>,
+    connection_id: String,
+    database: Option<String>,
+    sql: String,
+    analyze: bool,
+) -> Result<serde_json::Value> {
+    let connection = store.get(&connection_id)?;
+    let password = secrets::get_password(&connection.id)?;
+    drivers::explain(&connection, password.as_deref(), database.as_deref(), &sql, analyze).await
+}
+
 /// Stops the query running in the console, if any.
 #[tauri::command]
 pub async fn cancel_query(sessions: State<'_, QuerySessions>, session_id: String) -> Result<()> {

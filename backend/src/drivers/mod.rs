@@ -296,6 +296,20 @@ impl Session {
     }
 }
 
+/// The plan of one statement. With `analyze` it runs, but its changes are rolled back.
+pub async fn explain(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+    sql: &str,
+    analyze: bool,
+) -> Result<serde_json::Value> {
+    match connection.engine {
+        Engine::Postgres => postgres::explain(connection, password, database, sql, analyze).await,
+        other => Err(AppError::Unsupported(other.label())),
+    }
+}
+
 /// Stops the query a session is running. Harmless when it is idle.
 pub async fn cancel(
     connection: &Connection,

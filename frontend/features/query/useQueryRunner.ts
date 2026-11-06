@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { errorMessage } from '../../lib/errors'
 import { queryApi, type QueryOutcome } from './api'
+import { parsePlan, type Plan } from './plan'
 
-/** The latest finished run; `id` changes on every run. */
-export type LastRun = { id: number } & ({ outcome: QueryOutcome } | { error: string })
+/** The latest finished run or explain; `id` changes every time. */
+export type LastRun = { id: number } & ({ outcome: QueryOutcome } | { plan: Plan } | { error: string })
 
 /** Runs queries in the console's session and closes the session on unmount. */
 export function useQueryRunner(sessionId: string, connectionId: string, database: string | undefined) {
   const [running, setRunning] = useState(false)
+  const [explaining, setExplaining] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [lastRun, setLastRun] = useState<LastRun | null>(null)
@@ -16,7 +18,7 @@ export function useQueryRunner(sessionId: string, connectionId: string, database
   useEffect(() => () => void queryApi.closeSession(sessionId).catch(() => {}), [sessionId])
 
   const run = async (sql: string) => {
-    if (!sql.trim() || running) return
+    if (!sql.trim() || running || explaining) return
     setRunning(true)
     setCancelError(null)
     const id = (lastRun?.id ?? 0) + 1
@@ -27,6 +29,20 @@ export function useQueryRunner(sessionId: string, connectionId: string, database
     } finally {
       setRunning(false)
       setCancelling(false)
+    }
+  }
+
+  /** Shows the statement's plan; it runs only with `analyze`, and is rolled back. */
+  const explain = async (sql: string, analyze: boolean) => {
+    if (!sql.trim() || running || explaining) return
+    setExplaining(true)
+    const id = (lastRun?.id ?? 0) + 1
+    try {
+      setLastRun({ id, plan: parsePlan(await queryApi.explain(connectionId, database, sql, analyze)) })
+    } catch (error) {
+      setLastRun({ id, error: errorMessage(error) })
+    } finally {
+      setExplaining(false)
     }
   }
 
@@ -41,5 +57,5 @@ export function useQueryRunner(sessionId: string, connectionId: string, database
     }
   }
 
-  return { running, cancelling, cancelError, lastRun, run, cancel }
+  return { running, explaining, cancelling, cancelError, lastRun, run, explain, cancel }
 }
