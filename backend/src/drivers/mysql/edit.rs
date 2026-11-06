@@ -16,11 +16,12 @@ use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
 const MYSQL: Dialect = Dialect {
-    quote: '`',
-    numbered: false,
+    quote: ['`', '`'],
+    numbered: None,
     value: |marker, _| marker.to_string(),
     default_row: "() VALUES ()",
     backslash_escapes: true,
+    string_prefix: "",
 };
 
 pub async fn apply_changes(

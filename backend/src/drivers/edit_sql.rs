@@ -12,16 +12,18 @@ use super::{ApplySummary, Column, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
 pub struct Dialect {
-    /// Quotes identifiers: `"` for PostgreSQL, `` ` `` for MySQL.
-    pub quote: char,
-    /// `$1`, `$2`… when true; `?` when false.
-    pub numbered: bool,
+    /// Opens and closes a quoted identifier: `"` for PostgreSQL, `[` `]` for SQL Server.
+    pub quote: [char; 2],
+    /// The prefix of numbered parameters (`$` makes `$1`, `$2`…); `None` uses `?`.
+    pub numbered: Option<&'static str>,
     /// Turns a parameter marker into a value of a column's type.
     pub value: fn(marker: &str, data_type: &str) -> String,
     /// What follows `INSERT INTO t` for a row that only takes defaults.
     pub default_row: &'static str,
     /// Whether a backslash escapes in string literals (MySQL's default).
     pub backslash_escapes: bool,
+    /// Written before a string literal, like SQL Server's `N` for Unicode text.
+    pub string_prefix: &'static str,
 }
 
 /// One statement with its parameters, in marker order.
@@ -116,8 +118,8 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     fn quote(&self, name: &str) -> String {
-        let q = self.dialect.quote;
-        format!("{q}{}{q}", name.replace(q, &format!("{q}{q}")))
+        let [open, close] = self.dialect.quote;
+        format!("{open}{}{close}", name.replace(close, &format!("{close}{close}")))
     }
 
     /// `"name" = <value>, …`
@@ -152,7 +154,10 @@ impl Builder<'_> {
     fn value(&self, name: &str, value: &Option<String>, params: &mut Vec<Option<String>>) -> Result<String> {
         let data_type = self.types.get(name).ok_or_else(|| AppError::Invalid(format!("Unknown column: {name}")))?;
         params.push(value.clone());
-        let marker = if self.dialect.numbered { format!("${}", params.len()) } else { "?".to_string() };
+        let marker = match self.dialect.numbered {
+            Some(prefix) => format!("{prefix}{}", params.len()),
+            None => "?".to_string(),
+        };
         Ok((self.dialect.value)(&marker, data_type))
     }
 }
@@ -171,36 +176,51 @@ pub fn inline(dialect: &Dialect, statement: &Statement) -> String {
         None => "NULL".to_string(),
         Some(text) => {
             let text = if dialect.backslash_escapes { text.replace('\\', "\\\\") } else { text.clone() };
-            format!("'{}'", text.replace('\'', "''"))
+            format!("{}'{}'", dialect.string_prefix, text.replace('\'', "''"))
         }
     };
+    let [open, close] = dialect.quote;
 
     let mut out = String::with_capacity(statement.sql.len());
-    let mut chars = statement.sql.chars().peekable();
+    let mut rest = statement.sql.as_str();
     let mut in_name = false;
     let mut next = 0;
-    while let Some(c) = chars.next() {
-        if c == dialect.quote {
-            in_name = !in_name;
+    while let Some(c) = rest.chars().next() {
+        let width = c.len_utf8();
+        if in_name || c == open {
+            // A doubled closing quote is part of the name.
+            if in_name && c == close && rest[width..].starts_with(close) {
+                out.push_str(&rest[..2 * width]);
+                rest = &rest[2 * width..];
+                continue;
+            }
+            in_name = if in_name { c != close } else { true };
+            out.push(c);
+            rest = &rest[width..];
+            continue;
         }
-        let index = match c {
-            _ if in_name => None,
-            '$' if dialect.numbered && chars.peek().is_some_and(char::is_ascii_digit) => {
-                let mut number = String::new();
-                while let Some(digit) = chars.next_if(char::is_ascii_digit) {
-                    number.push(digit);
-                }
-                number.parse::<usize>().ok().map(|n| n.wrapping_sub(1))
-            }
-            '?' if !dialect.numbered => {
+        // The marker's length and the index of its parameter.
+        let marker = match dialect.numbered {
+            Some(prefix) => rest.strip_prefix(prefix).and_then(|after| {
+                let digits = after.len() - after.trim_start_matches(|d: char| d.is_ascii_digit()).len();
+                let number: usize = after[..digits].parse().ok()?;
+                Some((prefix.len() + digits, number.checked_sub(1)?))
+            }),
+            None if c == '?' => {
                 next += 1;
-                Some(next - 1)
+                Some((1, next - 1))
             }
-            _ => None,
+            None => None,
         };
-        match index.and_then(|i| statement.params.get(i)) {
-            Some(value) => out.push_str(&literal(value)),
-            None => out.push(c),
+        match marker.and_then(|(length, index)| Some((length, statement.params.get(index)?))) {
+            Some((length, value)) => {
+                out.push_str(&literal(value));
+                rest = &rest[length..];
+            }
+            None => {
+                out.push(c);
+                rest = &rest[width..];
+            }
         }
     }
     out
@@ -220,18 +240,28 @@ mod tests {
     use super::*;
 
     const DOLLAR: Dialect = Dialect {
-        quote: '"',
-        numbered: true,
+        quote: ['"', '"'],
+        numbered: Some("$"),
         value: |marker, _| marker.to_string(),
         default_row: "DEFAULT VALUES",
         backslash_escapes: false,
+        string_prefix: "",
     };
     const QUESTION: Dialect = Dialect {
-        quote: '`',
-        numbered: false,
+        quote: ['`', '`'],
+        numbered: None,
         value: |marker, _| marker.to_string(),
         default_row: "() VALUES ()",
         backslash_escapes: true,
+        string_prefix: "",
+    };
+    const BRACKETS: Dialect = Dialect {
+        quote: ['[', ']'],
+        numbered: Some("@P"),
+        value: |marker, _| marker.to_string(),
+        default_row: "DEFAULT VALUES",
+        backslash_escapes: false,
+        string_prefix: "N",
     };
 
     fn statement(sql: &str, params: &[Option<&str>]) -> Statement {
@@ -245,6 +275,22 @@ mod tests {
 
         let positional = statement("UPDATE `t?` SET `a` = ?, `b` = ?", &[Some("?"), None]);
         assert_eq!(inline(&QUESTION, &positional), "UPDATE `t?` SET `a` = '?', `b` = NULL");
+    }
+
+    #[test]
+    fn inlining_reads_bracketed_names_and_prefixed_markers() {
+        let sql = "UPDATE [t]]@P1] SET [a] = @P1, [b] = @P2 WHERE [id] = @P3";
+        let bracketed = statement(sql, &[Some("café"), Some("@P1"), None]);
+        assert_eq!(inline(&BRACKETS, &bracketed), "UPDATE [t]]@P1] SET [a] = N'café', [b] = N'@P1' WHERE [id] = NULL");
+    }
+
+    #[test]
+    fn quoting_doubles_the_closing_character() {
+        let column = Column { name: "a]b".into(), data_type: "int".into(), primary_key: true, generated: false };
+        let table = TableRef { database: "db".into(), schema: "dbo".into(), name: "t".into() };
+        let key: BTreeMap<String, Option<String>> = [("a]b".to_string(), Some("1".to_string()))].into();
+        let [delete] = build(&BRACKETS, &[column], &table, &[RowChange::Delete { key }]).unwrap().try_into().unwrap();
+        assert_eq!(delete.sql, "DELETE FROM [dbo].[t] WHERE [a]]b] = @P1");
     }
 
     #[test]

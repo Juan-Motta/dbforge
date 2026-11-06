@@ -19,6 +19,16 @@ pub enum AppError {
     Keychain(#[from] keyring::Error),
     #[error("{}", database_message(.0))]
     Database(#[from] sqlx::Error),
+    #[error("{}", sqlserver_message(.0))]
+    SqlServer(#[from] tiberius::error::Error),
+}
+
+/// The server's own message, without tiberius's token and server details.
+fn sqlserver_message(error: &tiberius::error::Error) -> String {
+    match error {
+        tiberius::error::Error::Server(server) => server.message().to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// The server's message with its detail and hint, as psql shows them. sqlx's own

@@ -66,7 +66,8 @@ impl QuerySession {
 
     async fn cancel(&self) -> Result<()> {
         let password = secrets::get_password(&self.connection.id)?;
-        drivers::cancel(&self.connection, password.as_deref(), self.database.as_deref(), self.cancel_target).await
+        drivers::cancel(&self.connection, password.as_deref(), self.database.as_deref(), self.cancel_target.clone())
+            .await
     }
 }
 

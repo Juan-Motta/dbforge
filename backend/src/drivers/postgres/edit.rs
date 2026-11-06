@@ -14,11 +14,12 @@ use crate::error::Result;
 
 /// Values are sent as text and cast to the column's type by the server.
 const POSTGRES: Dialect = Dialect {
-    quote: '"',
-    numbered: true,
+    quote: ['"', '"'],
+    numbered: Some("$"),
     value: |marker, data_type| format!("CAST({marker}::text AS {data_type})"),
     default_row: "DEFAULT VALUES",
     backslash_escapes: false,
+    string_prefix: "",
 };
 
 pub async fn apply_changes(

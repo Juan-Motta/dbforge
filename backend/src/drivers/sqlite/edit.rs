@@ -12,11 +12,12 @@ use crate::drivers::{ApplySummary, RowChange, TableRef};
 use crate::error::Result;
 
 const SQLITE: Dialect = Dialect {
-    quote: '"',
-    numbered: false,
+    quote: ['"', '"'],
+    numbered: None,
     value: |marker, _| marker.to_string(),
     default_row: "DEFAULT VALUES",
     backslash_escapes: false,
+    string_prefix: "",
 };
 
 pub async fn apply_changes(connection: &Connection, table: &TableRef, changes: &[RowChange]) -> Result<ApplySummary> {
