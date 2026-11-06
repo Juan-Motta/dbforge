@@ -1,28 +1,25 @@
-//! Row edits from the table grid: updates, inserts and deletes, keyed by primary key.
-//!
-//! Values travel as parameters, never spliced into the SQL, and are cast to each
-//! column's real type as the catalog reports it. Everything runs in one
-//! transaction, and every UPDATE or DELETE must hit exactly one row: if a row was
-//! changed or deleted since it was loaded, nothing is applied.
-
-use std::collections::{BTreeMap, BTreeSet};
+//! Row edits from the table grid for PostgreSQL. The statements come from the
+//! shared `edit_sql` builder; this file adds how PostgreSQL converts a text
+//! parameter to a column's type, and runs everything in one transaction where
+//! every UPDATE or DELETE must hit exactly one row.
 
 use sqlx::postgres::PgConnection;
 use sqlx::{AssertSqlSafe, Connection as _};
 
-use super::{connect, quote_ident, with_timeout};
+use super::{connect, with_timeout};
 use crate::connections::model::Connection;
+use crate::drivers::edit_sql::{self, Dialect};
 use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
-use crate::error::{AppError, Result};
+use crate::error::Result;
 
-/// One statement with its parameters, `$1`, `$2`… in order.
-#[derive(Debug, PartialEq)]
-struct Statement {
-    sql: String,
-    params: Vec<Option<String>>,
-    /// Set for UPDATE and DELETE: the key that must match exactly one row.
-    key: Option<String>,
-}
+/// Values are sent as text and cast to the column's type by the server.
+const POSTGRES: Dialect = Dialect {
+    quote: '"',
+    numbered: true,
+    value: |marker, data_type| format!("CAST({marker}::text AS {data_type})"),
+    default_row: "DEFAULT VALUES",
+    backslash_escapes: false,
+};
 
 pub async fn apply_changes(
     connection: &Connection,
@@ -31,7 +28,8 @@ pub async fn apply_changes(
     changes: &[RowChange],
 ) -> Result<ApplySummary> {
     let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
-    let statements = build(&with_timeout(editable_columns(&mut conn, table)).await?, table, changes)?;
+    let columns = with_timeout(editable_columns(&mut conn, table)).await?;
+    let statements = edit_sql::build(&POSTGRES, &columns, table, changes)?;
 
     let mut transaction = conn.begin().await?;
     for statement in &statements {
@@ -44,14 +42,12 @@ pub async fn apply_changes(
             && affected != 1
         {
             // Dropping the transaction rolls everything back.
-            return Err(AppError::Invalid(format!(
-                "The row with {key} was changed or deleted since it was loaded. Nothing was applied; reload and try again."
-            )));
+            return Err(edit_sql::changed_elsewhere(key));
         }
     }
     transaction.commit().await?;
     conn.close().await?;
-    Ok(summarize(changes))
+    Ok(edit_sql::summarize(changes))
 }
 
 /// The statements `apply_changes` would run, with values written in, for review.
@@ -64,7 +60,8 @@ pub async fn preview_changes(
     let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
     let columns = with_timeout(editable_columns(&mut conn, table)).await?;
     conn.close().await?;
-    Ok(build(&columns, table, changes)?.iter().map(inline).collect())
+    let statements = edit_sql::build(&POSTGRES, &columns, table, changes)?;
+    Ok(statements.iter().map(|statement| edit_sql::inline(&POSTGRES, statement)).collect())
 }
 
 /// Columns with their type's internal, schema-qualified name: `"pg_catalog"."varchar"`,
@@ -90,151 +87,13 @@ async fn editable_columns(conn: &mut PgConnection, table: &TableRef) -> Result<V
     Ok(rows.into_iter().map(|(name, data_type, primary_key)| Column { name, data_type, primary_key }).collect())
 }
 
-fn build(columns: &[Column], table: &TableRef, changes: &[RowChange]) -> Result<Vec<Statement>> {
-    let types: BTreeMap<&str, &str> = columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str())).collect();
-    let primary_key: BTreeSet<&str> = columns.iter().filter(|c| c.primary_key).map(|c| c.name.as_str()).collect();
-    if primary_key.is_empty() {
-        return Err(AppError::Invalid(format!(
-            "{}.{} has no primary key, so its rows can't be identified safely for editing.",
-            table.schema, table.name
-        )));
-    }
-    let relation = format!("{}.{}", quote_ident(&table.schema), quote_ident(&table.name));
-
-    changes
-        .iter()
-        .map(|change| {
-            let mut params = Vec::new();
-            match change {
-                RowChange::Update { key, values } => {
-                    if values.is_empty() {
-                        return Err(AppError::Invalid("An update must change at least one column.".into()));
-                    }
-                    let set = assignments(values, &types, &mut params, ", ")?;
-                    let filter = key_filter(key, &primary_key, &types, &mut params)?;
-                    Ok(Statement {
-                        sql: format!("UPDATE {relation} SET {set} WHERE {filter}"),
-                        params,
-                        key: Some(describe_key(key)),
-                    })
-                }
-                RowChange::Delete { key } => {
-                    let filter = key_filter(key, &primary_key, &types, &mut params)?;
-                    Ok(Statement {
-                        sql: format!("DELETE FROM {relation} WHERE {filter}"),
-                        params,
-                        key: Some(describe_key(key)),
-                    })
-                }
-                RowChange::Insert { values } if values.is_empty() => {
-                    Ok(Statement { sql: format!("INSERT INTO {relation} DEFAULT VALUES"), params, key: None })
-                }
-                RowChange::Insert { values } => {
-                    let names: Vec<String> = values.keys().map(|name| quote_ident(name)).collect();
-                    let casts = values
-                        .iter()
-                        .map(|(name, value)| cast(name, value, &types, &mut params))
-                        .collect::<Result<Vec<_>>>()?;
-                    Ok(Statement {
-                        sql: format!("INSERT INTO {relation} ({}) VALUES ({})", names.join(", "), casts.join(", ")),
-                        params,
-                        key: None,
-                    })
-                }
-            }
-        })
-        .collect()
-}
-
-/// `"name" = CAST($1::text AS text), …`
-fn assignments(
-    values: &BTreeMap<String, Option<String>>,
-    types: &BTreeMap<&str, &str>,
-    params: &mut Vec<Option<String>>,
-    separator: &str,
-) -> Result<String> {
-    let parts = values
-        .iter()
-        .map(|(name, value)| Ok(format!("{} = {}", quote_ident(name), cast(name, value, types, params)?)))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(parts.join(separator))
-}
-
-/// The WHERE clause that pins one row: every primary key column, and only those.
-fn key_filter(
-    key: &BTreeMap<String, Option<String>>,
-    primary_key: &BTreeSet<&str>,
-    types: &BTreeMap<&str, &str>,
-    params: &mut Vec<Option<String>>,
-) -> Result<String> {
-    let given: BTreeSet<&str> = key.keys().map(String::as_str).collect();
-    if &given != primary_key || key.values().any(Option::is_none) {
-        return Err(AppError::Invalid("A row must be identified by its full primary key.".into()));
-    }
-    assignments(key, types, params, " AND ")
-}
-
-/// Sends the value as text and lets the server convert it to the column's type.
-fn cast(
-    name: &str,
-    value: &Option<String>,
-    types: &BTreeMap<&str, &str>,
-    params: &mut Vec<Option<String>>,
-) -> Result<String> {
-    let data_type = types.get(name).ok_or_else(|| AppError::Invalid(format!("Unknown column: {name}")))?;
-    params.push(value.clone());
-    Ok(format!("CAST(${}::text AS {data_type})", params.len()))
-}
-
-fn describe_key(key: &BTreeMap<String, Option<String>>) -> String {
-    let parts: Vec<String> =
-        key.iter().map(|(name, value)| format!("{name} = {}", value.as_deref().unwrap_or("NULL"))).collect();
-    parts.join(", ")
-}
-
-/// Writes the parameters into the SQL as literals. Only for showing the user.
-/// One pass left to right, so text already written in (a value holding `$1`) is
-/// never read again, and quoted names like `"t$1"` are copied as they are.
-fn inline(statement: &Statement) -> String {
-    let mut out = String::with_capacity(statement.sql.len());
-    let mut chars = statement.sql.chars().peekable();
-    let mut in_name = false;
-    while let Some(c) = chars.next() {
-        if c == '"' {
-            in_name = !in_name;
-        }
-        if c != '$' || in_name || !chars.peek().is_some_and(char::is_ascii_digit) {
-            out.push(c);
-            continue;
-        }
-        let mut number = String::new();
-        while let Some(digit) = chars.next_if(char::is_ascii_digit) {
-            number.push(digit);
-        }
-        let param = number.parse::<usize>().ok().and_then(|n| statement.params.get(n.wrapping_sub(1)));
-        match param {
-            Some(Some(value)) => out.push_str(&format!("'{}'", value.replace('\'', "''"))),
-            Some(None) => out.push_str("NULL"),
-            None => out.push_str(&format!("${number}")),
-        }
-    }
-    out
-}
-
-fn summarize(changes: &[RowChange]) -> ApplySummary {
-    let count = |f: fn(&RowChange) -> bool| changes.iter().filter(|c| f(c)).count() as u64;
-    ApplySummary {
-        updated: count(|c| matches!(c, RowChange::Update { .. })),
-        inserted: count(|c| matches!(c, RowChange::Insert { .. })),
-        deleted: count(|c| matches!(c, RowChange::Delete { .. })),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use sqlx::postgres::PgConnection;
 
     use super::super::tests::{PASSWORD, local};
+    use std::collections::BTreeMap;
+
     use super::*;
 
     fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
@@ -270,26 +129,6 @@ mod tests {
         );
         INSERT INTO dbforge_edit.items VALUES (1, 'one', 1, 'new'), (2, 'two', 2, NULL), (3, 'three', 3, NULL);
         CREATE TABLE dbforge_edit.loose (name text);";
-
-    #[test]
-    fn inlining_leaves_dollar_signs_in_values_and_names_alone() {
-        let statement = Statement {
-            sql: r#"UPDATE "t$1" SET "a" = $1, "b" = $2"#.into(),
-            params: vec![Some("x".into()), Some("$1".into())],
-            key: None,
-        };
-        assert_eq!(inline(&statement), r#"UPDATE "t$1" SET "a" = 'x', "b" = '$1'"#);
-    }
-
-    #[test]
-    fn inlining_handles_ten_or_more_parameters() {
-        let statement = Statement {
-            sql: (1..=10).map(|i| format!("${i}")).collect::<Vec<_>>().join(","),
-            params: (1..=9).map(|i| Some(i.to_string())).chain([Some("it's".to_string())]).collect(),
-            key: None,
-        };
-        assert_eq!(inline(&statement), "'1','2','3','4','5','6','7','8','9','it''s'");
-    }
 
     #[tokio::test]
     #[ignore = "needs a local PostgreSQL on port 55432"]
