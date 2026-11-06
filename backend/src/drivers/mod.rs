@@ -240,7 +240,7 @@ pub async fn server_version(connection: &Connection, password: Option<&str>) -> 
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::server_version(connection, password).await,
-            Engine::Mysql => mysql::server_version(connection, password).await,
+            Engine::Mysql | Engine::Mariadb => mysql::server_version(connection, password).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -251,7 +251,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_objects(connection, password, path).await,
-            Engine::Mysql => mysql::list_objects(connection, password, path).await,
+            Engine::Mysql | Engine::Mariadb => mysql::list_objects(connection, password, path).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -266,7 +266,7 @@ pub async fn list_relations(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_relations(connection, password, database).await,
-            Engine::Mysql => mysql::list_relations(connection, password, database).await,
+            Engine::Mysql | Engine::Mariadb => mysql::list_relations(connection, password, database).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -283,7 +283,7 @@ pub async fn stream_table(
 ) -> Result<()> {
     match connection.engine {
         Engine::Postgres => postgres::stream_table(connection, password, table, sink).await,
-        Engine::Mysql => mysql::stream_table(connection, password, table, sink).await,
+        Engine::Mysql | Engine::Mariadb => mysql::stream_table(connection, password, table, sink).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -298,7 +298,7 @@ pub async fn fetch_rows(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::fetch_rows(connection, password, table, offset, limit).await,
-            Engine::Mysql => mysql::fetch_rows(connection, password, table, offset, limit).await,
+            Engine::Mysql | Engine::Mariadb => mysql::fetch_rows(connection, password, table, offset, limit).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -314,7 +314,7 @@ pub async fn schema_diagram(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::schema_diagram(connection, password, database, schema).await,
-            Engine::Mysql => mysql::schema_diagram(connection, password, database, schema).await,
+            Engine::Mysql | Engine::Mariadb => mysql::schema_diagram(connection, password, database, schema).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -331,7 +331,7 @@ pub async fn apply_changes(
 ) -> Result<ApplySummary> {
     match connection.engine {
         Engine::Postgres => postgres::apply_changes(connection, password, table, changes).await,
-        Engine::Mysql => mysql::apply_changes(connection, password, table, changes).await,
+        Engine::Mysql | Engine::Mariadb => mysql::apply_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -345,7 +345,7 @@ pub async fn preview_changes(
 ) -> Result<Vec<String>> {
     match connection.engine {
         Engine::Postgres => postgres::preview_changes(connection, password, table, changes).await,
-        Engine::Mysql => mysql::preview_changes(connection, password, table, changes).await,
+        Engine::Mysql | Engine::Mariadb => mysql::preview_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -358,7 +358,7 @@ pub async fn table_structure(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::table_structure(connection, password, table).await,
-            Engine::Mysql => mysql::table_structure(connection, password, table).await,
+            Engine::Mysql | Engine::Mariadb => mysql::table_structure(connection, password, table).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -383,7 +383,9 @@ pub async fn open_session(connection: &Connection, password: Option<&str>, datab
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => Ok(Session::Postgres(postgres::open_session(connection, password, database).await?)),
-            Engine::Mysql => Ok(Session::Mysql(mysql::open_session(connection, password, database).await?)),
+            Engine::Mysql | Engine::Mariadb => {
+                Ok(Session::Mysql(mysql::open_session(connection, password, database).await?))
+            }
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -428,7 +430,7 @@ pub async fn explain(
 ) -> Result<serde_json::Value> {
     match connection.engine {
         Engine::Postgres => postgres::explain(connection, password, database, sql, analyze).await,
-        Engine::Mysql => mysql::explain(connection, password, database, sql, analyze).await,
+        Engine::Mysql | Engine::Mariadb => mysql::explain(connection, password, database, sql, analyze).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }

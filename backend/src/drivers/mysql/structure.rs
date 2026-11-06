@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use sqlx::mysql::MySqlConnection;
 use sqlx::{AssertSqlSafe, Connection as _, Row};
 
-use super::{connect, quote_ident};
+use super::{connect, is_mariadb, quote_ident};
 use crate::connections::model::Connection;
 use crate::drivers::{ColumnInfo, ForeignKey, IndexInfo, ObjectKind, TableRef, TableStructure, TriggerInfo};
 use crate::error::{AppError, Result};
@@ -38,8 +38,8 @@ pub async fn table_structure(
         data_bytes: data_bytes.unwrap_or(0),
         index_bytes: index_bytes.unwrap_or(0),
         comment: comment.filter(|c| !c.is_empty()),
-        columns: columns(&mut conn, table).await?,
-        indexes: indexes(&mut conn, table).await?,
+        columns: columns(&mut conn, table, is_mariadb(connection)).await?,
+        indexes: indexes(&mut conn, table, is_mariadb(connection)).await?,
         foreign_keys: foreign_keys(&mut conn, table).await?,
         triggers: triggers(&mut conn, table).await?,
         ddl: String::new(),
@@ -49,7 +49,7 @@ pub async fn table_structure(
     Ok(TableStructure { ddl: with_triggers(ddl, &structure.triggers), ..structure })
 }
 
-async fn columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<ColumnInfo>> {
+async fn columns(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) -> Result<Vec<ColumnInfo>> {
     type Row = (String, String, String, Option<String>, String, Option<String>, String);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT CAST(column_name AS CHAR), CAST(column_type AS CHAR), CAST(is_nullable AS CHAR),
@@ -69,7 +69,8 @@ async fn columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<Col
             name,
             data_type,
             nullable: nullable == "YES",
-            default: column_default(default, &extra, generated),
+            // MariaDB writes an explicit `DEFAULT NULL` as the text NULL.
+            default: column_default(default.filter(|d| !(mariadb && d == "NULL")), &extra, generated),
             comment: Some(comment).filter(|c| !c.is_empty()),
         })
         .collect())
@@ -89,16 +90,18 @@ fn column_default(default: Option<String>, extra: &str, generated: Option<String
     default
 }
 
-async fn indexes(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<IndexInfo>> {
+async fn indexes(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) -> Result<Vec<IndexInfo>> {
     // One row per indexed column (or expression), in order within each index.
     type IndexRow = (String, i64, String, Option<String>, Option<String>);
-    let rows: Vec<IndexRow> = sqlx::query_as(
+    // MySQL's functional indexes list their expression; MariaDB has no such column.
+    let expression = if mariadb { "NULL" } else { "CAST(expression AS CHAR)" };
+    let rows: Vec<IndexRow> = sqlx::query_as(AssertSqlSafe(format!(
         "SELECT CAST(index_name AS CHAR), CAST(non_unique AS SIGNED), CAST(index_type AS CHAR),
-                CAST(column_name AS CHAR), CAST(expression AS CHAR)
+                CAST(column_name AS CHAR), {expression}
          FROM information_schema.statistics
          WHERE table_schema = ? AND table_name = ?
-         ORDER BY index_name = 'PRIMARY' DESC, index_name, seq_in_index",
-    )
+         ORDER BY index_name = 'PRIMARY' DESC, index_name, seq_in_index"
+    )))
     .bind(&table.schema)
     .bind(&table.name)
     .fetch_all(&mut *conn)
@@ -220,7 +223,7 @@ fn with_triggers(ddl: String, triggers: &[TriggerInfo]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{PASSWORD, local, run, table};
+    use super::super::tests::{PASSWORD, local, mariadb, run, table};
     use super::*;
 
     #[test]
@@ -236,7 +239,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn reads_columns_indexes_keys_triggers_and_ddl() {
-        let _conn = run(
+        let _conn = run(&local(),
             "DROP DATABASE IF EXISTS dbforge_mstruct;
              CREATE DATABASE dbforge_mstruct;
              CREATE TABLE dbforge_mstruct.customers (id int PRIMARY KEY);
@@ -287,5 +290,39 @@ mod tests {
         let view = table_structure(&local(), PASSWORD, &table("dbforge_mstruct", "recent")).await.unwrap();
         assert_eq!(view.kind, ObjectKind::View);
         assert!(view.ddl.contains("VIEW `recent`"), "{}", view.ddl);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MariaDB on port 53307"]
+    async fn mariadb_reads_indexes_and_literal_defaults() {
+        let _conn = run(
+            &mariadb(),
+            "DROP DATABASE IF EXISTS dbforge_mstruct;
+             CREATE DATABASE dbforge_mstruct;
+             CREATE TABLE dbforge_mstruct.places (
+                 id int PRIMARY KEY,
+                 code char(2) DEFAULT 'US',
+                 note varchar(10) DEFAULT NULL,
+                 doubled int AS (id * 2) STORED,
+                 KEY ix_code (code)
+             );",
+        )
+        .await;
+
+        let places = table_structure(&mariadb(), PASSWORD, &table("dbforge_mstruct", "places")).await.unwrap();
+
+        let defaults: Vec<_> = places.columns.iter().map(|c| (c.name.as_str(), c.default.as_deref())).collect();
+        assert_eq!(
+            defaults,
+            [
+                ("id", None),
+                ("code", Some("'US'")),
+                ("note", None),
+                ("doubled", Some("GENERATED ALWAYS AS (`id` * 2) STORED"))
+            ]
+        );
+        let indexes: Vec<_> = places.indexes.iter().map(|i| (i.name.as_str(), i.columns.join(","))).collect();
+        assert_eq!(indexes, [("PRIMARY", "id".to_string()), ("ix_code", "code".to_string())]);
+        assert!(places.ddl.starts_with("CREATE TABLE `places`"), "{}", places.ddl);
     }
 }

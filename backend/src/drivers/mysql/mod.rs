@@ -1,4 +1,6 @@
-//! MySQL 8. A MySQL database is what PostgreSQL calls a schema, so the explorer
+//! MySQL 8 and MariaDB, which speak the same protocol and share information_schema;
+//! where they differ, `is_mariadb` picks the way. A MySQL database is what
+//! PostgreSQL calls a schema, so the explorer
 //! lists databases and then their tables, and a table's `TableRef` carries the
 //! database name in both `database` and `schema`.
 
@@ -23,7 +25,7 @@ use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
     with_timeout,
 };
-use crate::connections::model::Connection;
+use crate::connections::model::{Connection, Engine};
 use crate::error::{AppError, Result};
 
 /// Schemas the server keeps for itself; never shown.
@@ -42,11 +44,17 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
     Ok(MySqlConnection::connect_with(&options).await?)
 }
 
+/// MariaDB reports a version like `11.4.13-MariaDB-ubu2404`; only the number is kept.
 pub async fn server_version(connection: &Connection, password: Option<&str>) -> Result<String> {
     let mut conn = connect(connection, password, None).await?;
     let version: String = sqlx::query_scalar("SELECT CAST(VERSION() AS CHAR)").fetch_one(&mut conn).await?;
     conn.close().await?;
-    Ok(format!("MySQL {version}"))
+    let number = version.split('-').next().unwrap_or(&version);
+    Ok(format!("{} {number}", connection.engine.label()))
+}
+
+fn is_mariadb(connection: &Connection) -> bool {
+    connection.engine == Engine::Mariadb
 }
 
 /// `[]` → databases, `[database]` → its tables and views.
@@ -307,8 +315,25 @@ mod tests {
         }
     }
 
-    pub(super) async fn run(sql: &str) -> MySqlConnection {
-        let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
+    /// MariaDB on 127.0.0.1:53307 (`docker run -d --name dbforge-test-mariadb
+    /// -e MARIADB_ROOT_PASSWORD=dbforge -e MARIADB_DATABASE=shop -p 53307:3306 mariadb:11.4`).
+    pub(super) fn mariadb() -> Connection {
+        Connection {
+            id: "test-mariadb".into(),
+            name: "test-mariadb".into(),
+            engine: Engine::Mariadb,
+            port: 53307,
+            ..local()
+        }
+    }
+
+    /// The tests that hold for both engines run against each of these.
+    pub(super) fn servers() -> [Connection; 2] {
+        [local(), mariadb()]
+    }
+
+    pub(super) async fn run(server: &Connection, sql: &str) -> MySqlConnection {
+        let mut conn = connect(server, PASSWORD, None).await.unwrap();
         sqlx::raw_sql(AssertSqlSafe(sql)).execute(&mut conn).await.unwrap();
         conn
     }
@@ -326,79 +351,95 @@ mod tests {
     #[ignore = "needs a local MySQL on port 53306"]
     async fn reports_the_server_version() {
         assert!(server_version(&local(), PASSWORD).await.unwrap().starts_with("MySQL 8."));
+        assert!(server_version(&mariadb(), PASSWORD).await.unwrap().starts_with("MariaDB 11."));
     }
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn lists_databases_then_tables_and_views() {
-        let _conn = run("DROP DATABASE IF EXISTS dbforge_list;
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let _conn = run(
+                &server,
+                "DROP DATABASE IF EXISTS dbforge_list;
              CREATE DATABASE dbforge_list;
              CREATE TABLE dbforge_list.orders (id int PRIMARY KEY);
-             CREATE VIEW dbforge_list.recent AS SELECT id FROM dbforge_list.orders;")
-        .await;
+             CREATE VIEW dbforge_list.recent AS SELECT id FROM dbforge_list.orders;",
+            )
+            .await;
 
-        let databases = list_objects(&local(), PASSWORD, &[]).await.unwrap();
-        let names: Vec<_> = databases.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"dbforge_list") && !names.contains(&"mysql"), "{names:?}");
+            let databases = list_objects(&local(), PASSWORD, &[]).await.unwrap();
+            let names: Vec<_> = databases.iter().map(|d| d.name.as_str()).collect();
+            assert!(names.contains(&"dbforge_list") && !names.contains(&"mysql"), "{names:?}");
 
-        let objects = list_objects(&local(), PASSWORD, &["dbforge_list".into()]).await.unwrap();
-        let kinds: Vec<_> = objects.iter().map(|o| (o.name.as_str(), o.kind)).collect();
-        assert_eq!(kinds, [("orders", ObjectKind::Table), ("recent", ObjectKind::View)]);
+            let objects = list_objects(&local(), PASSWORD, &["dbforge_list".into()]).await.unwrap();
+            let kinds: Vec<_> = objects.iter().map(|o| (o.name.as_str(), o.kind)).collect();
+            assert_eq!(kinds, [("orders", ObjectKind::Table), ("recent", ObjectKind::View)]);
 
-        let relations = list_relations(&local(), PASSWORD, Some("dbforge_list")).await.unwrap();
-        assert_eq!(relations.database, "dbforge_list");
-        assert_eq!(relations.relations[0].schema, "dbforge_list");
+            let relations = list_relations(&local(), PASSWORD, Some("dbforge_list")).await.unwrap();
+            assert_eq!(relations.database, "dbforge_list");
+            assert_eq!(relations.relations[0].schema, "dbforge_list");
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn pages_rows_as_text_in_primary_key_order() {
-        let _conn = run(
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let _conn = run(&server,
             "DROP DATABASE IF EXISTS dbforge_rows;
              CREATE DATABASE dbforge_rows;
              CREATE TABLE dbforge_rows.items (id int PRIMARY KEY, label varchar(20), price decimal(6,2), at datetime);
              INSERT INTO dbforge_rows.items VALUES (3, 'c', 1.50, '2026-11-05 10:00:00'), (1, 'a', NULL, NULL), (2, 'b', 2, NULL);",
         )
         .await;
-        let items = table("dbforge_rows", "items");
+            let items = table("dbforge_rows", "items");
 
-        let page = fetch_rows(&local(), PASSWORD, &items, 1, 1).await.unwrap();
-        assert_eq!(page.rows, [vec![Some("2".into()), Some("b".into()), Some("2.00".into()), None]]);
-        assert!(page.has_more);
-        assert!(page.columns[0].primary_key);
-        assert_eq!(page.columns[2].data_type, "decimal(6,2)");
+            let page = fetch_rows(&local(), PASSWORD, &items, 1, 1).await.unwrap();
+            assert_eq!(page.rows, [vec![Some("2".into()), Some("b".into()), Some("2.00".into()), None]]);
+            assert!(page.has_more);
+            assert!(page.columns[0].primary_key);
+            assert_eq!(page.columns[2].data_type, "decimal(6,2)");
 
-        let last = fetch_rows(&local(), PASSWORD, &items, 2, 5).await.unwrap();
-        assert_eq!(last.rows[0][3].as_deref(), Some("2026-11-05 10:00:00"));
-        assert!(!last.has_more);
+            let last = fetch_rows(&local(), PASSWORD, &items, 2, 5).await.unwrap();
+            assert_eq!(last.rows[0][3].as_deref(), Some("2026-11-05 10:00:00"));
+            assert!(!last.has_more);
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn sessions_run_scripts_keep_state_and_can_be_cancelled() {
-        let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
-        let outcome = session
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
+            let outcome = session
             .run("CREATE TEMPORARY TABLE t (a int, b text); INSERT INTO t VALUES (1, 'x'), (2, NULL); SELECT * FROM t ORDER BY a", 10)
             .await
             .unwrap();
-        let [_, insert, select] = outcome.results.as_slice() else { panic!("{:?}", outcome.results) };
-        assert_eq!(insert.rows_affected, 2);
-        assert_eq!(select.rows, [vec![Some("1".into()), Some("x".into())], vec![Some("2".into()), None]]);
-        assert_eq!(select.rows_affected, 2);
+            let [_, insert, select] = outcome.results.as_slice() else { panic!("{:?}", outcome.results) };
+            assert_eq!(insert.rows_affected, 2);
+            assert_eq!(select.rows, [vec![Some("1".into()), Some("x".into())], vec![Some("2".into()), None]]);
+            assert_eq!(select.rows_affected, 2);
 
-        // The temporary table survives into the next run: same session.
-        let again = session.run("SELECT count(*) FROM t", 10).await.unwrap();
-        assert_eq!(again.results[0].rows, [vec![Some("2".into())]]);
+            // The temporary table survives into the next run: same session.
+            let again = session.run("SELECT count(*) FROM t", 10).await.unwrap();
+            assert_eq!(again.results[0].rows, [vec![Some("2".into())]]);
 
-        let id = session.id();
-        let cancel_soon = async {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            cancel(&local(), PASSWORD, id).await
-        };
-        let (outcome, cancelled) = tokio::join!(session.run("SELECT SLEEP(30)", 10), cancel_soon);
-        cancelled.unwrap();
-        // MySQL ends an interrupted SLEEP early and returns 1 instead of failing.
-        assert!(outcome.map_or(true, |o| o.results[0].rows == [vec![Some("1".into())]]));
-        assert!(session.is_alive().await, "the session stays usable after a cancel");
+            let id = session.id();
+            let cancel_soon = async {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                cancel(&local(), PASSWORD, id).await
+            };
+            let (outcome, cancelled) = tokio::join!(session.run("SELECT SLEEP(30)", 10), cancel_soon);
+            cancelled.unwrap();
+            // MySQL ends an interrupted SLEEP early and returns 1 instead of failing.
+            assert!(outcome.map_or(true, |o| o.results[0].rows == [vec![Some("1".into())]]));
+            assert!(session.is_alive().await, "the session stays usable after a cancel");
+        }
     }
 }

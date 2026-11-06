@@ -77,34 +77,41 @@ pub async fn schema_diagram(
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{PASSWORD, local, run};
+    use super::super::tests::{PASSWORD, run, servers};
     use super::*;
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn reads_tables_and_relationships() {
-        let _conn = run("DROP DATABASE IF EXISTS dbforge_mdiagram;
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let _conn = run(
+                &server,
+                "DROP DATABASE IF EXISTS dbforge_mdiagram;
              CREATE DATABASE dbforge_mdiagram;
              CREATE TABLE dbforge_mdiagram.customers (id int PRIMARY KEY, referrer_id int,
                  FOREIGN KEY (referrer_id) REFERENCES dbforge_mdiagram.customers (id));
              CREATE TABLE dbforge_mdiagram.orders (id int PRIMARY KEY, customer_id int NOT NULL,
                  CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES dbforge_mdiagram.customers (id));
-             CREATE VIEW dbforge_mdiagram.recent AS SELECT id FROM dbforge_mdiagram.orders;")
-        .await;
+             CREATE VIEW dbforge_mdiagram.recent AS SELECT id FROM dbforge_mdiagram.orders;",
+            )
+            .await;
 
-        let diagram = schema_diagram(&local(), PASSWORD, "dbforge_mdiagram", "dbforge_mdiagram").await.unwrap();
+            let diagram = schema_diagram(&local(), PASSWORD, "dbforge_mdiagram", "dbforge_mdiagram").await.unwrap();
 
-        let tables: Vec<_> = diagram.tables.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(tables, ["customers", "orders"], "views are left out");
-        assert!(diagram.tables[1].columns[0].primary_key);
+            let tables: Vec<_> = diagram.tables.iter().map(|t| t.name.as_str()).collect();
+            assert_eq!(tables, ["customers", "orders"], "views are left out");
+            assert!(diagram.tables[1].columns[0].primary_key);
 
-        let relationships: Vec<_> = diagram
-            .relationships
-            .iter()
-            .map(|r| (r.table.as_str(), r.columns.join(","), r.referenced_table.as_str()))
-            .collect();
-        assert!(relationships.contains(&("orders", "customer_id".into(), "customers")), "{relationships:?}");
-        assert!(relationships.contains(&("customers", "referrer_id".into(), "customers")), "{relationships:?}");
-        assert!(diagram.relationships.iter().all(|r| r.referenced_schema == "dbforge_mdiagram"));
+            let relationships: Vec<_> = diagram
+                .relationships
+                .iter()
+                .map(|r| (r.table.as_str(), r.columns.join(","), r.referenced_table.as_str()))
+                .collect();
+            assert!(relationships.contains(&("orders", "customer_id".into(), "customers")), "{relationships:?}");
+            assert!(relationships.contains(&("customers", "referrer_id".into(), "customers")), "{relationships:?}");
+            assert!(diagram.relationships.iter().all(|r| r.referenced_schema == "dbforge_mdiagram"));
+        }
     }
 }

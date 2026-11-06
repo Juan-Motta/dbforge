@@ -114,7 +114,7 @@ async fn editable_columns(conn: &mut MySqlConnection, table: &TableRef) -> Resul
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::super::tests::{PASSWORD, local, run, table};
+    use super::super::tests::{PASSWORD, run, servers, table};
     use super::*;
 
     fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
@@ -149,75 +149,95 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn applies_updates_inserts_and_deletes_together() {
-        let mut conn = run(&setup("dbforge_medit1")).await;
-        let changes = vec![
-            RowChange::Delete { key: map(&[("id", Some("3"))]) },
-            // Setting a value to what it already was must still count as one row.
-            RowChange::Update {
-                key: map(&[("id", Some("1"))]),
-                values: map(&[("name", Some("one")), ("status", None)]),
-            },
-            RowChange::Update { key: map(&[("id", Some("2"))]), values: map(&[("status", Some("done"))]) },
-            RowChange::Insert { values: map(&[("id", Some("4")), ("name", Some("it's"))]) },
-        ];
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let mut conn = run(&server, &setup("dbforge_medit1")).await;
+            let changes = vec![
+                RowChange::Delete { key: map(&[("id", Some("3"))]) },
+                // Setting a value to what it already was must still count as one row.
+                RowChange::Update {
+                    key: map(&[("id", Some("1"))]),
+                    values: map(&[("name", Some("one")), ("status", None)]),
+                },
+                RowChange::Update { key: map(&[("id", Some("2"))]), values: map(&[("status", Some("done"))]) },
+                RowChange::Insert { values: map(&[("id", Some("4")), ("name", Some("it's"))]) },
+            ];
 
-        let summary = apply_changes(&local(), PASSWORD, &table("dbforge_medit1", "items"), &changes).await.unwrap();
+            let summary = apply_changes(&local(), PASSWORD, &table("dbforge_medit1", "items"), &changes).await.unwrap();
 
-        assert_eq!(summary, ApplySummary { updated: 2, inserted: 1, deleted: 1 });
-        assert_eq!(
-            rows(&mut conn, "dbforge_medit1").await,
-            [(1, "one".into(), 1, None), (2, "two".into(), 2, Some("done".into())), (4, "it's".into(), 5, None)]
-        );
+            assert_eq!(summary, ApplySummary { updated: 2, inserted: 1, deleted: 1 });
+            assert_eq!(
+                rows(&mut conn, "dbforge_medit1").await,
+                [(1, "one".into(), 1, None), (2, "two".into(), 2, Some("done".into())), (4, "it's".into(), 5, None)]
+            );
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn a_row_changed_elsewhere_rolls_everything_back() {
-        let mut conn = run(&setup("dbforge_medit2")).await;
-        let changes = vec![
-            RowChange::Delete { key: map(&[("id", Some("1"))]) },
-            RowChange::Update { key: map(&[("id", Some("99"))]), values: map(&[("name", Some("gone"))]) },
-        ];
-        let error = apply_changes(&local(), PASSWORD, &table("dbforge_medit2", "items"), &changes).await.unwrap_err();
-        assert!(error.to_string().contains("id = 99 was changed or deleted"), "{error}");
-        assert_eq!(rows(&mut conn, "dbforge_medit2").await.len(), 3, "the delete was rolled back");
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let mut conn = run(&server, &setup("dbforge_medit2")).await;
+            let changes = vec![
+                RowChange::Delete { key: map(&[("id", Some("1"))]) },
+                RowChange::Update { key: map(&[("id", Some("99"))]), values: map(&[("name", Some("gone"))]) },
+            ];
+            let error =
+                apply_changes(&local(), PASSWORD, &table("dbforge_medit2", "items"), &changes).await.unwrap_err();
+            assert!(error.to_string().contains("id = 99 was changed or deleted"), "{error}");
+            assert_eq!(rows(&mut conn, "dbforge_medit2").await.len(), 3, "the delete was rolled back");
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn rejects_values_too_long_and_unsafe_tables() {
-        let mut conn = run(&setup("dbforge_medit3")).await;
-        // Strict mode even when the server's own mode isn't.
-        sqlx::query("SET GLOBAL sql_mode = ''").execute(&mut conn).await.unwrap();
-        let too_long =
-            [RowChange::Update { key: map(&[("id", Some("1"))]), values: map(&[("name", Some("abcdefghij"))]) }];
-        let result = apply_changes(&local(), PASSWORD, &table("dbforge_medit3", "items"), &too_long).await;
-        sqlx::query("SET GLOBAL sql_mode = DEFAULT").execute(&mut conn).await.unwrap();
-        assert!(result.unwrap_err().to_string().contains("Data too long"));
-        assert_eq!(rows(&mut conn, "dbforge_medit3").await[0].1, "one");
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let mut conn = run(&server, &setup("dbforge_medit3")).await;
+            // Strict mode even when the server's own mode isn't.
+            sqlx::query("SET GLOBAL sql_mode = ''").execute(&mut conn).await.unwrap();
+            let too_long =
+                [RowChange::Update { key: map(&[("id", Some("1"))]), values: map(&[("name", Some("abcdefghij"))]) }];
+            let result = apply_changes(&local(), PASSWORD, &table("dbforge_medit3", "items"), &too_long).await;
+            sqlx::query("SET GLOBAL sql_mode = DEFAULT").execute(&mut conn).await.unwrap();
+            assert!(result.unwrap_err().to_string().contains("Data too long"));
+            assert_eq!(rows(&mut conn, "dbforge_medit3").await[0].1, "one");
 
-        let insert = [RowChange::Insert { values: map(&[]) }];
-        let error = apply_changes(&local(), PASSWORD, &table("dbforge_medit3", "loose"), &insert).await.unwrap_err();
-        assert!(error.to_string().contains("has no primary key"), "{error}");
-        let error = apply_changes(&local(), PASSWORD, &table("dbforge_medit3", "legacy"), &insert).await.unwrap_err();
-        assert!(error.to_string().contains("MyISAM engine"), "{error}");
+            let insert = [RowChange::Insert { values: map(&[]) }];
+            let error =
+                apply_changes(&local(), PASSWORD, &table("dbforge_medit3", "loose"), &insert).await.unwrap_err();
+            assert!(error.to_string().contains("has no primary key"), "{error}");
+            let error =
+                apply_changes(&local(), PASSWORD, &table("dbforge_medit3", "legacy"), &insert).await.unwrap_err();
+            assert!(error.to_string().contains("MyISAM engine"), "{error}");
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn previews_the_exact_statements() {
-        let _conn = run(&setup("dbforge_medit4")).await;
-        let changes = vec![
-            RowChange::Update { key: map(&[("id", Some("1"))]), values: map(&[("name", Some("o'n\\e"))]) },
-            RowChange::Insert { values: map(&[]) },
-        ];
-        let preview = preview_changes(&local(), PASSWORD, &table("dbforge_medit4", "items"), &changes).await.unwrap();
-        assert_eq!(
-            preview,
-            [
-                r"UPDATE `dbforge_medit4`.`items` SET `name` = 'o''n\\e' WHERE `id` = '1'",
-                "INSERT INTO `dbforge_medit4`.`items` () VALUES ()",
-            ]
-        );
+        for server in servers() {
+            // Each test reads `local()`; here it means the server under test.
+            let local = || server.clone();
+            let _conn = run(&server, &setup("dbforge_medit4")).await;
+            let changes = vec![
+                RowChange::Update { key: map(&[("id", Some("1"))]), values: map(&[("name", Some("o'n\\e"))]) },
+                RowChange::Insert { values: map(&[]) },
+            ];
+            let preview =
+                preview_changes(&local(), PASSWORD, &table("dbforge_medit4", "items"), &changes).await.unwrap();
+            assert_eq!(
+                preview,
+                [
+                    r"UPDATE `dbforge_medit4`.`items` SET `name` = 'o''n\\e' WHERE `id` = '1'",
+                    "INSERT INTO `dbforge_medit4`.`items` () VALUES ()",
+                ]
+            );
+        }
     }
 }

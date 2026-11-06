@@ -6,7 +6,7 @@
 use serde_json::{Map, Value, json};
 use sqlx::{AssertSqlSafe, Connection as _, Row};
 
-use super::{connect, with_timeout};
+use super::{connect, is_mariadb, with_timeout};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -30,7 +30,21 @@ pub async fn explain(
                 .into(),
         ));
     }
+    // MariaDB has neither FORMAT=TREE nor EXPLAIN ANALYZE; its classic plan still works.
+    let mariadb = is_mariadb(connection);
+    if analyze && mariadb {
+        return Err(AppError::Invalid(
+            "Analyze isn't available for MariaDB yet. Turn it off to see the estimated plan.".into(),
+        ));
+    }
     let mut conn = with_timeout(connect(connection, password, database)).await?;
+    if mariadb {
+        let mut transaction = conn.begin().await?;
+        let rows = sqlx::query(AssertSqlSafe(format!("EXPLAIN {statement}"))).fetch_all(&mut *transaction).await;
+        transaction.rollback().await?;
+        conn.close().await?;
+        return Ok(table_to_plan(&rows?));
+    }
     let mode = if analyze { "ANALYZE" } else { "FORMAT=TREE" };
     let mut transaction = conn.begin().await?;
     let tree = sqlx::query(AssertSqlSafe(format!("EXPLAIN {mode} {statement}"))).fetch_one(&mut *transaction).await;
@@ -79,8 +93,14 @@ fn table_to_plan(rows: &[sqlx::mysql::MySqlRow]) -> Value {
             json!({
                 "Node Type": node_type,
                 "Detail": parts.join(" · "),
-                // A number column: the prepared statement's binary protocol doesn't send it as text.
-                "Plan Rows": row.try_get_unchecked::<Option<u64>, _>("rows").ok().flatten().unwrap_or(0),
+                // MySQL sends `rows` as an integer (binary in a prepared statement) and
+                // MariaDB as text, so it is read typed first and parsed otherwise.
+                "Plan Rows": row
+                    .try_get::<Option<u64>, _>("rows")
+                    .ok()
+                    .flatten()
+                    .or_else(|| text(row, "rows").and_then(|r| r.trim().parse().ok()))
+                    .unwrap_or(0),
                 "Statement": text(row, "select_type"),
             })
         })
@@ -220,7 +240,7 @@ fn number(text: &str) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{PASSWORD, local, run};
+    use super::super::tests::{PASSWORD, local, mariadb, run};
     use super::*;
 
     // Real output of MySQL 8.4's EXPLAIN ANALYZE.
@@ -285,10 +305,13 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a local MySQL on port 53306"]
     async fn explains_reads_and_refuses_to_analyze_writes() {
-        let mut conn = run("DROP DATABASE IF EXISTS dbforge_mexplain;
+        let mut conn = run(
+            &local(),
+            "DROP DATABASE IF EXISTS dbforge_mexplain;
              CREATE DATABASE dbforge_mexplain;
              CREATE TABLE dbforge_mexplain.items (id int PRIMARY KEY, qty int);
-             INSERT INTO dbforge_mexplain.items VALUES (1, 1), (2, 2);")
+             INSERT INTO dbforge_mexplain.items VALUES (1, 1), (2, 2);",
+        )
         .await;
 
         let analyzed =
@@ -316,5 +339,27 @@ mod tests {
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM dbforge_mexplain.items").fetch_one(&mut conn).await.unwrap();
         assert_eq!(count, 2, "nothing was deleted or dropped");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MariaDB on port 53307"]
+    async fn mariadb_shows_the_classic_plan_and_no_analyze() {
+        let _conn = run(
+            &mariadb(),
+            "DROP DATABASE IF EXISTS dbforge_mexplain;
+             CREATE DATABASE dbforge_mexplain;
+             CREATE TABLE dbforge_mexplain.items (id int PRIMARY KEY, qty int);
+             INSERT INTO dbforge_mexplain.items VALUES (1, 1), (2, 2);",
+        )
+        .await;
+
+        let plan = explain(&mariadb(), PASSWORD, Some("dbforge_mexplain"), "SELECT * FROM items WHERE qty > 1", false)
+            .await
+            .unwrap();
+        assert_eq!(plan[0]["Plan"]["Node Type"], "Table scan", "{plan}");
+        assert_eq!(plan[0]["Plan"]["Plan Rows"], 2, "{plan}");
+
+        let error = explain(&mariadb(), PASSWORD, Some("dbforge_mexplain"), "SELECT 1", true).await.unwrap_err();
+        assert!(error.to_string().contains("isn't available for MariaDB"), "{error}");
     }
 }
