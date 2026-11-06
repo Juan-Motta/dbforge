@@ -10,7 +10,7 @@ import { useTheme } from '../features/settings/useTheme'
 import { ActivityRail, type Activity } from '../features/shell/ActivityRail'
 import { StatusBar } from '../features/shell/StatusBar'
 import { TitleBar } from '../features/shell/TitleBar'
-import { closeConnectionTabs, closeTab, newQueryTab, NO_TABS, openTableTab } from './tabs'
+import { closeConnectionTabs, closeTab, newQueryTab, NO_TABS, openDiagramTab, openTableTab } from './tabs'
 import { Workspace } from './Workspace'
 import styles from './App.module.css'
 
@@ -40,6 +40,23 @@ export function App() {
     ? () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
     : undefined
 
+  // The diagram of the selected schema, or `public` when only a connection or database is selected.
+  const diagramDatabase = activePath[0] ?? activeConnection?.database
+  const openDiagram =
+    activeConnection && diagramDatabase
+      ? () =>
+          setTabs((state) =>
+            openDiagramTab(state, activeConnection.id, diagramDatabase, activePath[1] ?? 'public'),
+          )
+      : undefined
+
+  // The rail's diagram and search buttons act instead of switching the side panel.
+  const onActivity = (next: Activity) => {
+    if (next === 'diagram') openDiagram?.()
+    else if (next === 'search') setPaletteOpen(true)
+    else setActivity(next)
+  }
+
   // ⌘K / Ctrl+K toggles the palette from anywhere, the SQL editor included.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -55,6 +72,16 @@ export function App() {
   const commands: Command[] = [
     ...(newQuery
       ? [{ id: 'new-query', label: 'New query', detail: activeConnection?.name, run: newQuery }]
+      : []),
+    ...(openDiagram
+      ? [
+          {
+            id: 'diagram',
+            label: 'Show ER diagram',
+            detail: `${diagramDatabase}.${activePath[1] ?? 'public'}`,
+            run: openDiagram,
+          },
+        ]
       : []),
     { id: 'new-connection', label: 'New connection', run: () => setDialog({}) },
     { id: 'theme-dark', label: 'Theme: Dark', run: () => theme.choose('dark') },
@@ -79,7 +106,7 @@ export function App() {
       />
 
       <div className={styles.body}>
-        <ActivityRail active={activity} onChange={setActivity} />
+        <ActivityRail active={activity} onChange={onActivity} />
         {activity === 'explorer' && (
           <Explorer
             connections={connections}

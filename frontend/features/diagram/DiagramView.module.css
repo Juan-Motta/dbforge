@@ -1,0 +1,292 @@
+.diagram {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.message {
+  margin: auto;
+  color: var(--text3);
+}
+
+.error {
+  color: var(--err);
+}
+
+.sidebar {
+  width: 240px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.sidebarHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 11.5px;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text2);
+  font-weight: 600;
+}
+
+.filter {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: 12px;
+  outline: none;
+}
+
+.filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.bulk {
+  display: flex;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.bulk button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tables {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tableOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.tableOption:hover {
+  background: var(--hover);
+}
+
+.tableOption input {
+  accent-color: var(--accent);
+}
+
+.tableOption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background-color: var(--bg);
+  background-image: radial-gradient(color-mix(in srgb, var(--text3) 30%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.canvas:active {
+  cursor: grabbing;
+}
+
+.world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+}
+
+.lines path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--text3) 75%, transparent);
+  stroke-width: 1.5;
+}
+
+.lines path[data-highlighted] {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.lines path[data-dimmed] {
+  opacity: 0.25;
+}
+
+.card {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--elev);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.card[data-focused] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.card[data-dimmed] {
+  opacity: 0.35;
+}
+
+.cardHeader {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: move;
+}
+
+.cardName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rows {
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.column {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font: 11.5px var(--font-mono);
+}
+
+.column:last-child {
+  margin-bottom: 6px;
+}
+
+.key {
+  width: 18px;
+  flex: none;
+  font: 600 9.5px var(--font-sans);
+}
+
+.key[data-kind='pk'] {
+  color: var(--warn);
+}
+
+.key[data-kind='fk'] {
+  color: var(--info);
+}
+
+.columnName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnType {
+  margin-left: auto;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+.toolbar,
+.zoom {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--elev);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  cursor: default;
+}
+
+.toolbar {
+  top: 12px;
+  left: 12px;
+}
+
+.zoom {
+  right: 12px;
+  bottom: 12px;
+}
+
+.percent {
+  min-width: 40px;
+  text-align: center;
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.segmented button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--hover);
+  color: var(--text);
+}

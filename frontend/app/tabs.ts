@@ -1,7 +1,9 @@
 import type { TableRef } from '../domain/table'
 
 export type Tab = { id: string; title: string; connectionId: string } & (
-  { kind: 'query'; database?: string; initialSql?: string } | { kind: 'table'; table: TableRef }
+  | { kind: 'query'; database?: string; initialSql?: string }
+  | { kind: 'table'; table: TableRef }
+  | { kind: 'diagram'; database: string; schema: string }
 )
 
 export interface TabsState {
@@ -36,6 +38,17 @@ export function newQueryTab(
 export function openTableTab(state: TabsState, connectionId: string, table: TableRef): TabsState {
   const id = `table:${connectionId}:${table.database}.${table.schema}.${table.name}`
   return openTab(state, { id, kind: 'table', title: table.name, connectionId, table })
+}
+
+/** Opens a schema's ER diagram, or switches to it when it is already open. */
+export function openDiagramTab(
+  state: TabsState,
+  connectionId: string,
+  database: string,
+  schema: string,
+): TabsState {
+  const id = `diagram:${connectionId}:${database}.${schema}`
+  return openTab(state, { id, kind: 'diagram', title: `${schema} diagram`, connectionId, database, schema })
 }
 
 function openTab(state: TabsState, tab: Tab): TabsState {

@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
-use crate::drivers::{self, DbObject, RelationList, RowsPage, TableRef, TableStructure};
+use crate::drivers::{self, DbObject, RelationList, RowsPage, SchemaDiagram, TableRef, TableStructure};
 use crate::error::Result;
 
 /// Lists the objects under `path` in a saved connection (see `drivers::list_objects`).
@@ -57,4 +57,17 @@ pub async fn table_structure(
     let connection = store.get(&connection_id)?;
     let password = secrets::get_password(&connection.id)?;
     drivers::table_structure(&connection, password.as_deref(), &table).await
+}
+
+/// Every table of a schema with its columns, and the foreign keys between them.
+#[tauri::command]
+pub async fn schema_diagram(
+    store: State<'_, ConnectionStore>,
+    connection_id: String,
+    database: String,
+    schema: String,
+) -> Result<SchemaDiagram> {
+    let connection = store.get(&connection_id)?;
+    let password = secrets::get_password(&connection.id)?;
+    drivers::schema_diagram(&connection, password.as_deref(), &database, &schema).await
 }

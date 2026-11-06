@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
+import { DiagramView } from '../features/diagram/DiagramView'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
 import { QueryConsole } from '../features/query/QueryConsole'
 import { TablePage } from './TablePage'
@@ -17,7 +18,9 @@ interface WorkspaceProps {
   onNewQuery?: () => void
 }
 
-/** The main island: open query consoles and tables, one visible at a time. */
+const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram' } as const
+
+/** The main island: open query consoles, tables and diagrams, one visible at a time. */
 export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
 
@@ -32,7 +35,7 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: Wor
   return (
     <div className={styles.workspace}>
       <TabStrip
-        tabs={tabs.map((tab) => ({ ...tab, icon: tab.kind === 'query' ? 'code' : 'table' }))}
+        tabs={tabs.map((tab) => ({ ...tab, icon: TAB_ICONS[tab.kind] }))}
         activeId={activeId}
         onSelect={onSelect}
         onClose={onClose}
@@ -60,6 +63,8 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: Wor
                 })
               }
             />
+          ) : tab.kind === 'diagram' ? (
+            <DiagramView connectionId={tab.connectionId} database={tab.database} schema={tab.schema} />
           ) : (
             <TablePage
               connectionId={tab.connectionId}

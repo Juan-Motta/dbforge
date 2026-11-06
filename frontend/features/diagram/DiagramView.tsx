@@ -1,0 +1,349 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { Button, IconButton } from '../../components/Button'
+import { shortTypeName } from '../../components/data-grid/columns'
+import { Icon } from '../../components/Icon'
+import type { SchemaDiagram } from './api'
+import {
+  CARD_WIDTH,
+  cardHeight,
+  defaultSelection,
+  fitView,
+  layout,
+  localRelationships,
+  relationshipPath,
+  shownColumns,
+  zoomAt,
+  type ColumnMode,
+  type Point,
+  type View,
+} from './layout'
+import { useSchemaDiagram } from './useSchemaDiagram'
+import styles from './DiagramView.module.css'
+
+interface DiagramViewProps {
+  connectionId: string
+  database: string
+  schema: string
+}
+
+/** The ER diagram of one schema. */
+export function DiagramView({ connectionId, database, schema }: DiagramViewProps) {
+  const { diagram, error, reload } = useSchemaDiagram(connectionId, database, schema)
+  if (error) return <p className={styles.message + ' ' + styles.error}>{error}</p>
+  if (!diagram) return <p className={styles.message}>Loading {schema}…</p>
+  if (diagram.tables.length === 0) return <p className={styles.message}>{schema} has no tables.</p>
+  return <Diagram diagram={diagram} schema={schema} database={database} onReload={reload} />
+}
+
+/** What a pointer drag is moving: the whole canvas, or one card. */
+type Drag =
+  | { kind: 'pan'; start: Point; origin: View }
+  | { kind: 'card'; name: string; start: Point; origin: Point; moved: boolean }
+
+interface DiagramProps {
+  diagram: SchemaDiagram
+  schema: string
+  database: string
+  onReload: () => void
+}
+
+function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
+  const relationships = useMemo(() => localRelationships(diagram, schema), [diagram, schema])
+  // Every foreign key column gets a mark, even when its target is in another schema.
+  const foreignKeys = useMemo(
+    () => new Set(diagram.relationships.flatMap((r) => r.columns.map((c) => `${r.table}.${c}`))),
+    [diagram],
+  )
+  const [visible, setVisible] = useState(() => defaultSelection(diagram, relationships))
+  const [mode, setMode] = useState<ColumnMode>('all')
+  const [filter, setFilter] = useState('')
+  const [moved, setMoved] = useState<Map<string, Point>>(new Map())
+  const [view, setView] = useState<View>({ x: 40, y: 40, scale: 1 })
+  const [focused, setFocused] = useState<string | null>(null)
+  const canvas = useRef<HTMLDivElement | null>(null)
+  const drag = useRef<Drag | null>(null)
+
+  const cards = useMemo(
+    () =>
+      diagram.tables
+        .filter((t) => visible.has(t.name))
+        .map((table) => {
+          const columns = shownColumns(table, mode, foreignKeys)
+          return { table, columns, height: cardHeight(columns.length) }
+        }),
+    [diagram, visible, mode, foreignKeys],
+  )
+  const autoPositions = useMemo(
+    () =>
+      layout(
+        cards.map((c) => ({ name: c.table.name, height: c.height })),
+        relationships,
+      ),
+    [cards, relationships],
+  )
+  const positionOf = (name: string) => moved.get(name) ?? autoPositions.get(name)!
+  const byName = new Map(cards.map((c) => [c.table.name, c]))
+  const lines = relationships.filter((r) => byName.has(r.table) && byName.has(r.referencedTable))
+
+  const fit = () => {
+    const box = canvas.current?.getBoundingClientRect()
+    if (!box) return
+    setView(
+      fitView(
+        cards.map((c) => ({ position: positionOf(c.table.name), height: c.height })),
+        box,
+      ),
+    )
+  }
+
+  // Fit once when the canvas first appears, so a big schema starts fully in view.
+  const fitted = useRef(false)
+  const attachCanvas = useCallback(
+    (node: HTMLDivElement | null) => {
+      canvas.current = node
+      if (!node || fitted.current) return
+      fitted.current = true
+      const box = node.getBoundingClientRect()
+      setView(
+        fitView(
+          cards.map((c) => ({ position: autoPositions.get(c.table.name)!, height: c.height })),
+          box,
+        ),
+      )
+    },
+    // Only the first attachment matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  // Pinch or ⌘/Ctrl+wheel zooms around the cursor; plain scrolling pans. React's own
+  // wheel listener is passive, so it could not stop the whole page from zooming.
+  useEffect(() => {
+    const node = canvas.current
+    if (!node) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const box = node.getBoundingClientRect()
+      const anchor = { x: event.clientX - box.left, y: event.clientY - box.top }
+      if (event.ctrlKey || event.metaKey) {
+        setView((current) => zoomAt(current, Math.exp(-event.deltaY / 300), anchor))
+      } else {
+        setView((current) => ({ ...current, x: current.x - event.deltaX, y: current.y - event.deltaY }))
+      }
+    }
+    node.addEventListener('wheel', onWheel, { passive: false })
+    return () => node.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const header = (event.target as HTMLElement).closest<HTMLElement>('[data-card]')
+    const start = { x: event.clientX, y: event.clientY }
+    drag.current = header
+      ? {
+          kind: 'card',
+          name: header.dataset.card!,
+          start,
+          origin: positionOf(header.dataset.card!),
+          moved: false,
+        }
+      : { kind: 'pan', start, origin: view }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const current = drag.current
+    if (!current) return
+    const dx = event.clientX - current.start.x
+    const dy = event.clientY - current.start.y
+    if (current.kind === 'pan') {
+      setView({ ...current.origin, x: current.origin.x + dx, y: current.origin.y + dy })
+    } else if (current.moved || Math.hypot(dx, dy) > 3) {
+      current.moved = true
+      const position = { x: current.origin.x + dx / view.scale, y: current.origin.y + dy / view.scale }
+      setMoved((previous) => new Map(previous).set(current.name, position))
+    }
+  }
+
+  const onPointerUp = () => {
+    const current = drag.current
+    drag.current = null
+    // A click without a drag focuses the card, or clears the focus on a second click.
+    if (current?.kind === 'card' && !current.moved) {
+      setFocused((name) => (name === current.name ? null : current.name))
+    }
+  }
+
+  const zoomBy = (factor: number) => {
+    const box = canvas.current?.getBoundingClientRect()
+    if (box) setView((current) => zoomAt(current, factor, { x: box.width / 2, y: box.height / 2 }))
+  }
+
+  const toggle = (name: string) =>
+    setVisible((previous) => {
+      const next = new Set(previous)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+
+  const listed = diagram.tables.filter((t) => t.name.toLowerCase().includes(filter.toLowerCase()))
+  const isRelated = (name: string) =>
+    focused === name ||
+    lines.some(
+      (r) =>
+        (r.table === focused && r.referencedTable === name) ||
+        (r.referencedTable === focused && r.table === name),
+    )
+
+  return (
+    <div className={styles.diagram}>
+      <aside className={styles.sidebar} aria-label="Diagram tables">
+        <div className={styles.sidebarHeader}>
+          <span className={styles.title}>
+            {database}.{schema}
+          </span>
+          <span className="muted">
+            {visible.size} of {diagram.tables.length}
+          </span>
+        </div>
+        <input
+          type="search"
+          className={styles.filter}
+          aria-label="Filter tables"
+          placeholder="Filter tables…"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+        />
+        <div className={styles.bulk}>
+          <button
+            type="button"
+            onClick={() => setVisible(new Set([...visible, ...listed.map((t) => t.name)]))}
+          >
+            Show all
+          </button>
+          <button
+            type="button"
+            onClick={() => setVisible(new Set([...visible].filter((n) => !listed.some((t) => t.name === n))))}
+          >
+            Hide all
+          </button>
+        </div>
+        <div className={styles.tables}>
+          {listed.map((table) => (
+            <label key={table.name} className={styles.tableOption}>
+              <input type="checkbox" checked={visible.has(table.name)} onChange={() => toggle(table.name)} />
+              <Icon name="table" size={14} />
+              <span>{table.name}</span>
+            </label>
+          ))}
+        </div>
+      </aside>
+
+      <div
+        ref={attachCanvas}
+        className={styles.canvas}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <div
+          className={styles.world}
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+        >
+          <svg className={styles.lines} aria-hidden="true">
+            {lines.map((r) => {
+              const from = byName.get(r.table)!
+              const to = byName.get(r.referencedTable)!
+              const highlighted = focused !== null && (r.table === focused || r.referencedTable === focused)
+              return (
+                <path
+                  key={r.name}
+                  d={relationshipPath(
+                    positionOf(r.table),
+                    from.columns.findIndex((c) => c.name === r.columns[0]),
+                    positionOf(r.referencedTable),
+                    to.columns.findIndex((c) => c.name === r.referencedColumns[0]),
+                  )}
+                  data-highlighted={highlighted || undefined}
+                  data-dimmed={(focused !== null && !highlighted) || undefined}
+                >
+                  <title>
+                    {r.name}: {r.table}({r.columns.join(', ')}) → {r.referencedTable}(
+                    {r.referencedColumns.join(', ')})
+                  </title>
+                </path>
+              )
+            })}
+          </svg>
+
+          {cards.map(({ table, columns }) => {
+            const { x, y } = positionOf(table.name)
+            return (
+              <div
+                key={table.name}
+                className={styles.card}
+                style={{ left: x, top: y, width: CARD_WIDTH }}
+                data-focused={focused === table.name || undefined}
+                data-dimmed={(focused !== null && !isRelated(table.name)) || undefined}
+              >
+                <div className={styles.cardHeader} data-card={table.name}>
+                  <Icon name="table" size={14} />
+                  <span className={styles.cardName}>{table.name}</span>
+                  {table.rowEstimate !== null && (
+                    <span className={styles.rows}>{compact(table.rowEstimate)}</span>
+                  )}
+                </div>
+                {columns.map((column) => {
+                  const fk = foreignKeys.has(`${table.name}.${column.name}`)
+                  return (
+                    <div key={column.name} className={styles.column}>
+                      <span
+                        className={styles.key}
+                        data-kind={column.primaryKey ? 'pk' : fk ? 'fk' : undefined}
+                      >
+                        {column.primaryKey ? 'PK' : fk ? 'FK' : ''}
+                      </span>
+                      <span className={styles.columnName}>{column.name}</span>
+                      <span className={styles.columnType}>{shortTypeName(column.dataType)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className={styles.toolbar} onPointerDown={(event) => event.stopPropagation()}>
+          <div className={styles.segmented} role="group" aria-label="Columns shown">
+            <button type="button" aria-pressed={mode === 'all'} onClick={() => setMode('all')}>
+              Columns
+            </button>
+            <button type="button" aria-pressed={mode === 'keys'} onClick={() => setMode('keys')}>
+              Keys only
+            </button>
+          </div>
+          <Button onClick={() => setMoved(new Map())}>Auto layout</Button>
+          <IconButton label="Reload diagram" onClick={onReload}>
+            <Icon name="refresh" />
+          </IconButton>
+        </div>
+
+        <div className={styles.zoom} onPointerDown={(event) => event.stopPropagation()}>
+          <IconButton label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
+            <Icon name="minus" />
+          </IconButton>
+          <span className={styles.percent}>{Math.round(view.scale * 100)}%</span>
+          <IconButton label="Zoom in" onClick={() => zoomBy(1.2)}>
+            <Icon name="plus" />
+          </IconButton>
+          <Button onClick={fit}>Fit</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function compact(rows: number): string {
+  return Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(rows)
+}

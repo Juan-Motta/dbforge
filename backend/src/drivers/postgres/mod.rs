@@ -5,8 +5,10 @@ use futures_util::TryStreamExt;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo, ValueRef};
 
+mod diagram;
 mod structure;
 
+pub use diagram::schema_diagram;
 pub use structure::table_structure;
 
 use super::{

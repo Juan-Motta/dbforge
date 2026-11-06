@@ -171,6 +171,43 @@ pub struct TriggerInfo {
     pub definition: String,
 }
 
+/// The tables of one schema and the foreign keys between them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDiagram {
+    pub tables: Vec<DiagramTable>,
+    /// Foreign keys declared in the schema; some may point to tables elsewhere.
+    pub relationships: Vec<Relationship>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramTable {
+    pub name: String,
+    pub row_estimate: Option<i64>,
+    pub columns: Vec<DiagramColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramColumn {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub primary_key: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Relationship {
+    pub name: String,
+    pub table: String,
+    pub columns: Vec<String>,
+    pub referenced_schema: String,
+    pub referenced_table: String,
+    pub referenced_columns: Vec<String>,
+}
+
 pub async fn server_version(connection: &Connection, password: Option<&str>) -> Result<String> {
     with_timeout(async {
         match connection.engine {
@@ -229,6 +266,21 @@ pub async fn fetch_rows(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::fetch_rows(connection, password, table, offset, limit).await,
+            other => Err(AppError::Unsupported(other.label())),
+        }
+    })
+    .await
+}
+
+pub async fn schema_diagram(
+    connection: &Connection,
+    password: Option<&str>,
+    database: &str,
+    schema: &str,
+) -> Result<SchemaDiagram> {
+    with_timeout(async {
+        match connection.engine {
+            Engine::Postgres => postgres::schema_diagram(connection, password, database, schema).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })

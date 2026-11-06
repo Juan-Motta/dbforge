@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { closeConnectionTabs, closeTab, newQueryTab, NO_TABS, openTableTab } from './tabs'
+import { closeConnectionTabs, closeTab, newQueryTab, NO_TABS, openDiagramTab, openTableTab } from './tabs'
 
 const orders = { database: 'shop', schema: 'public', name: 'orders' }
 const users = { database: 'shop', schema: 'public', name: 'users' }
@@ -11,6 +11,14 @@ describe('tabs', () => {
     const state = newQueryTab(newQueryTab(NO_TABS, 'pg', 'shop'), 'pg')
     expect(titles(state)).toEqual(['Query 1', 'Query 2'])
     expect(state.activeId).toBe('query:2')
+  })
+
+  it('opens one diagram tab per schema', () => {
+    let state = openDiagramTab(NO_TABS, 'pg', 'shop', 'public')
+    state = openDiagramTab(state, 'pg', 'shop', 'billing')
+    state = openDiagramTab(state, 'pg', 'shop', 'public')
+    expect(titles(state)).toEqual(['public diagram', 'billing diagram'])
+    expect(state.activeId).toBe('diagram:pg:shop.public')
   })
 
   it('can prefill a query tab, e.g. from the history', () => {

@@ -148,6 +148,8 @@ export function installMockBackend() {
             { schema: 'public', name: 'sales_order', kind: 'table' },
           ],
         })
+      case 'schema_diagram':
+        return delay(mockDiagram)
       case 'table_structure':
         return delay(mockStructure)
       case 'explain_query':
@@ -388,3 +390,73 @@ const mockPlanEstimate = [
     },
   },
 ]
+
+const col = (name: string, dataType: string, primaryKey = false) => ({
+  name,
+  dataType,
+  nullable: !primaryKey,
+  primaryKey,
+})
+const fk = (table: string, column: string, referencedTable: string) => ({
+  name: `${table}_${column}_fkey`,
+  table,
+  columns: [column],
+  referencedSchema: 'public',
+  referencedTable,
+  referencedColumns: ['id'],
+})
+const mockDiagram = {
+  tables: [
+    {
+      name: 'customers',
+      rowEstimate: 48213,
+      columns: [
+        col('id', 'bigint', true),
+        col('email', 'text'),
+        col('name', 'text'),
+        col('referrer_id', 'bigint'),
+      ],
+    },
+    {
+      name: 'order_items',
+      rowEstimate: 1900000,
+      columns: [
+        col('id', 'bigint', true),
+        col('order_id', 'bigint'),
+        col('product_id', 'bigint'),
+        col('qty', 'integer'),
+      ],
+    },
+    {
+      name: 'orders',
+      rowEstimate: 612400,
+      columns: [
+        col('id', 'bigint', true),
+        col('customer_id', 'bigint'),
+        col('store_id', 'integer'),
+        col('total', 'numeric(10,2)'),
+        col('created_at', 'timestamp with time zone'),
+      ],
+    },
+    {
+      name: 'payments',
+      rowEstimate: 588000,
+      columns: [col('id', 'bigint', true), col('order_id', 'bigint'), col('amount', 'numeric(10,2)')],
+    },
+    {
+      name: 'products',
+      rowEstimate: 2400,
+      columns: [col('id', 'bigint', true), col('sku', 'text'), col('price', 'numeric(10,2)')],
+    },
+    { name: 'stores', rowEstimate: 12, columns: [col('id', 'integer', true), col('name', 'text')] },
+    { name: 'audit_log', rowEstimate: 90000, columns: [col('id', 'bigint', true), col('event', 'text')] },
+  ],
+  relationships: [
+    fk('customers', 'referrer_id', 'customers'),
+    fk('order_items', 'order_id', 'orders'),
+    fk('order_items', 'product_id', 'products'),
+    fk('orders', 'customer_id', 'customers'),
+    fk('orders', 'store_id', 'stores'),
+    fk('payments', 'order_id', 'orders'),
+  ],
+}

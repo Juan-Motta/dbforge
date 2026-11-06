@@ -65,6 +65,7 @@ const PATHS = {
     </>
   ),
   plus: <path d="M8 3v10M3 8h10" />,
+  minus: <path d="M3 8h10" />,
   refresh: <path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5" />,
   collapse: <path d="M4 7l4-3 4 3M4 12l4-3 4 3" />,
   bell: (

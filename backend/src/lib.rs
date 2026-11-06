@@ -32,6 +32,7 @@ pub fn run() {
             explorer::list_relations,
             explorer::fetch_rows,
             explorer::table_structure,
+            explorer::schema_diagram,
             query::run_query,
             query::explain_query,
             query::cancel_query,
