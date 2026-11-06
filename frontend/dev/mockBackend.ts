@@ -17,6 +17,16 @@ const connections: Connection[] = [
     username: 'app',
   },
   {
+    id: 'demo-sqlite',
+    name: 'local-sqlite',
+    engine: 'sqlite',
+    environment: 'development',
+    host: '',
+    port: 0,
+    database: '/Users/demo/app.db',
+    username: '',
+  },
+  {
     id: 'demo-mysql',
     name: 'staging-mysql',
     engine: 'mysql',
@@ -45,6 +55,11 @@ const objects: Record<string, DbObject[]> = {
     table('payments', 588_000),
     { name: 'active_customers', kind: 'view', rowEstimate: null },
   ],
+}
+
+/** A SQLite file lists its tables right under the connection. */
+const sqliteObjects: Record<string, DbObject[]> = {
+  '': [table('notes', 120), table('tags', 8), { name: 'recent_notes', kind: 'view', rowEstimate: null }],
 }
 
 /** MySQL has no schemas: a database lists its tables directly. */
@@ -86,7 +101,12 @@ export function installMockBackend() {
         return delay('PostgreSQL 17.0 (mock)')
       case 'list_objects': {
         const path = (payload.path as string[]).join('/')
-        const source = payload.connectionId === 'demo-mysql' ? mysqlObjects : objects
+        const source =
+          payload.connectionId === 'demo-mysql'
+            ? mysqlObjects
+            : payload.connectionId === 'demo-sqlite'
+              ? sqliteObjects
+              : objects
         return delay(source[path] ?? [])
       }
       case 'fetch_rows': {

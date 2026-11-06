@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { defaultSchema, type Connection } from '../domain/connection'
+import { defaultDatabase, defaultSchema, type Connection } from '../domain/connection'
 import { tableRefFromPath } from '../domain/table'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
@@ -42,7 +42,7 @@ export function App() {
     : undefined
 
   // The diagram of the selected schema, or the default one when only a connection or database is selected.
-  const diagramDatabase = activePath[0] ?? activeConnection?.database
+  const diagramDatabase = activePath[0] ?? (activeConnection && defaultDatabase(activeConnection))
   const diagramSchema =
     activeConnection && diagramDatabase
       ? (activePath[1] ?? defaultSchema(activeConnection.engine, diagramDatabase))

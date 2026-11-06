@@ -6,11 +6,12 @@ export interface TableRef {
 }
 
 /**
- * A table's explorer path as a `TableRef`: `[database, schema, name]`, or
+ * A table's explorer path as a `TableRef`: `[database, schema, name]`;
  * `[database, name]` for engines without schemas (MySQL), where the database
- * plays the schema's part.
+ * plays the schema's part; or `[name]` for a SQLite file, whose schema is `main`.
  */
 export function tableRefFromPath(path: string[]): TableRef {
+  if (path.length === 1) return { database: 'main', schema: 'main', name: path[0] }
   if (path.length === 2) return { database: path[0], schema: path[0], name: path[1] }
   const [database, schema, name] = path
   return { database, schema, name }

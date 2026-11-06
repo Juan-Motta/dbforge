@@ -1,4 +1,4 @@
-import { ENGINE_LABELS, type Connection } from '../../domain/connection'
+import { connectionAddress, ENGINE_LABELS, type Connection } from '../../domain/connection'
 import styles from './Shell.module.css'
 
 interface StatusBarProps {
@@ -11,8 +11,7 @@ export function StatusBar({ connection, path }: StatusBarProps) {
     <footer className={`island ${styles.statusBar}`}>
       {connection ? (
         <span className={styles.status}>
-          {ENGINE_LABELS[connection.engine]} · {connection.username || 'default user'}@{connection.host}:
-          {connection.port}
+          {ENGINE_LABELS[connection.engine]} · {connectionAddress(connection)}
         </span>
       ) : (
         <span>No connection selected</span>

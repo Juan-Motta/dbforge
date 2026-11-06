@@ -1,4 +1,10 @@
-import { DEFAULT_PORTS, type Connection, type Engine, type Environment } from '../../domain/connection'
+import {
+  DEFAULT_PORTS,
+  isFileEngine,
+  type Connection,
+  type Engine,
+  type Environment,
+} from '../../domain/connection'
 import type { ConnectionInput } from './api'
 
 /** Form values as typed by the user. */
@@ -41,12 +47,20 @@ export function isValidPort(port: string): boolean {
   return Number.isInteger(value) && value > 0 && value <= 65535
 }
 
-export function canSubmit(form: ConnectionForm): boolean {
-  return form.name.trim() !== '' && isValidPort(form.port)
+/** Enough to try connecting: a file for SQLite, a valid port for servers. */
+export function canTest(form: ConnectionForm): boolean {
+  return isFileEngine(form.engine) ? form.database.trim() !== '' : isValidPort(form.port)
 }
 
-/** An empty password means "no change", so it is left out. */
+export function canSubmit(form: ConnectionForm): boolean {
+  return form.name.trim() !== '' && canTest(form)
+}
+
+/** An empty password means "no change", so it is left out. A file needs no server details. */
 export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
   const { password, port, ...rest } = form
+  if (isFileEngine(form.engine)) {
+    return { ...rest, id, host: '', port: 0, username: '', password: undefined }
+  }
   return { ...rest, id, port: Number(port), password: password === '' ? undefined : password }
 }

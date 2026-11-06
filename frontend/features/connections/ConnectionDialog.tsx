@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { open } from '@tauri-apps/plugin-dialog'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
@@ -8,6 +9,7 @@ import { TextField } from '../../components/TextField'
 import {
   ENGINE_LABELS,
   ENVIRONMENT_LABELS,
+  isFileEngine,
   NOSQL_ENGINES,
   RELATIONAL_ENGINES,
   type Connection,
@@ -18,6 +20,7 @@ import { errorMessage } from '../../lib/errors'
 import { connectionsApi, type ConnectionInput } from './api'
 import {
   canSubmit,
+  canTest,
   emptyForm,
   formFromConnection,
   isValidPort,
@@ -55,6 +58,19 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
   const update = (changes: Partial<ConnectionForm>) => {
     setForm((current) => ({ ...current, ...changes }))
     setTest({ status: 'idle' })
+  }
+
+  /** Picks the SQLite file with the native dialog; cancelling keeps the current path. */
+  const browse = async () => {
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: 'SQLite database', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    })
+    if (typeof path === 'string') update({ database: path })
   }
 
   const runTest = async () => {
@@ -156,54 +172,72 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
             </div>
           </div>
 
-          <div className={styles.hostRow}>
-            <TextField
-              label="Host"
-              mono
-              value={form.host}
-              onChange={(e) => update({ host: e.target.value })}
-            />
-            <TextField
-              label="Port"
-              mono
-              inputMode="numeric"
-              aria-invalid={!isValidPort(form.port)}
-              value={form.port}
-              onChange={(e) => update({ port: e.target.value })}
-            />
-          </div>
+          {isFileEngine(form.engine) ? (
+            <>
+              <div className={styles.fileRow}>
+                <TextField
+                  label="Database file"
+                  mono
+                  placeholder="/path/to/database.db"
+                  value={form.database}
+                  onChange={(e) => update({ database: e.target.value })}
+                />
+                <Button onClick={browse}>Browse…</Button>
+              </div>
+              <p className={styles.hint}>The file must exist; DBForge never creates one by mistake.</p>
+            </>
+          ) : (
+            <>
+              <div className={styles.hostRow}>
+                <TextField
+                  label="Host"
+                  mono
+                  value={form.host}
+                  onChange={(e) => update({ host: e.target.value })}
+                />
+                <TextField
+                  label="Port"
+                  mono
+                  inputMode="numeric"
+                  aria-invalid={!isValidPort(form.port)}
+                  value={form.port}
+                  onChange={(e) => update({ port: e.target.value })}
+                />
+              </div>
 
-          <TextField
-            label="Database"
-            mono
-            value={form.database}
-            onChange={(e) => update({ database: e.target.value })}
-          />
+              <TextField
+                label="Database"
+                mono
+                value={form.database}
+                onChange={(e) => update({ database: e.target.value })}
+              />
 
-          <div className={styles.pair}>
-            <TextField
-              label="User"
-              mono
-              autoComplete="off"
-              value={form.username}
-              onChange={(e) => update({ username: e.target.value })}
-            />
-            <TextField
-              label="Password"
-              mono
-              type="password"
-              autoComplete="new-password"
-              placeholder={connection ? 'Unchanged' : ''}
-              value={form.password}
-              onChange={(e) => update({ password: e.target.value })}
-            />
-          </div>
-          <p className={styles.hint}>Passwords are stored in your OS keychain, never in a file.</p>
+              <div className={styles.pair}>
+                <TextField
+                  label="User"
+                  mono
+                  autoComplete="off"
+                  value={form.username}
+                  onChange={(e) => update({ username: e.target.value })}
+                />
+                <TextField
+                  label="Password"
+                  mono
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={connection ? 'Unchanged' : ''}
+                  value={form.password}
+                  onChange={(e) => update({ password: e.target.value })}
+                />
+              </div>
+              <p className={styles.hint}>Passwords are stored in your OS keychain, never in a file.</p>
+            </>
+          )}
         </form>
       </div>
 
       <footer className={styles.footer}>
-        <Button onClick={runTest} disabled={test.status === 'testing' || !isValidPort(form.port)}>
+        <Button onClick={runTest} disabled={test.status === 'testing' || !canTest(form)}>
           <Icon name="pulse" />
           {test.status === 'testing' ? 'Testing…' : 'Test connection'}
         </Button>

@@ -22,6 +22,12 @@ describe('canSubmit', () => {
     expect(canSubmit({ ...emptyForm(), name: 'local' })).toBe(true)
     expect(canSubmit({ ...emptyForm(), name: 'local', port: 'x' })).toBe(false)
   })
+
+  it('needs a file, not a port, for SQLite', () => {
+    const sqlite = { ...withEngine(emptyForm(), 'sqlite'), name: 'local' }
+    expect(canSubmit(sqlite)).toBe(false)
+    expect(canSubmit({ ...sqlite, database: '/data/app.db' })).toBe(true)
+  })
 })
 
 describe('toInput', () => {
@@ -30,6 +36,18 @@ describe('toInput', () => {
     expect(input).toMatchObject({ id: 'abc', port: 5432 })
     expect(input).not.toHaveProperty('password', '')
     expect(input.password).toBeUndefined()
+  })
+
+  it('sends no server details for a SQLite file', () => {
+    const form = {
+      ...emptyForm(),
+      engine: 'sqlite' as const,
+      name: 'local',
+      database: '/data/app.db',
+      password: 'x',
+    }
+    expect(toInput(form)).toMatchObject({ host: '', port: 0, username: '', database: '/data/app.db' })
+    expect(toInput(form).password).toBeUndefined()
   })
 
   it('keeps a typed password', () => {

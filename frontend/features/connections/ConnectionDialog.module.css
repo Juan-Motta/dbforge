@@ -121,6 +121,13 @@
   gap: 12px;
 }
 
+.fileRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
 .pair {
   display: grid;
   grid-template-columns: 1fr 1fr;

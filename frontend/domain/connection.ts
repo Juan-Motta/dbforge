@@ -46,14 +46,35 @@ export const ENVIRONMENT_LABELS: Record<Environment, string> = {
 /** Engines whose databases hold tables directly, with no schemas in between. */
 const SCHEMALESS: Engine[] = ['mysql', 'mariadb']
 
+/** A SQLite connection is a database file: no host, port or user. */
+export function isFileEngine(engine: Engine): boolean {
+  return engine === 'sqlite'
+}
+
+/** SQLite's name for the schema of the opened file. */
+const SQLITE_MAIN = 'main'
+
+/** The database to use when none is selected; a SQLite file has only `main`. */
+export function defaultDatabase(connection: Connection): string {
+  return isFileEngine(connection.engine) ? SQLITE_MAIN : connection.database
+}
+
 /** The schema to use when only a database is selected. */
 export function defaultSchema(engine: Engine, database: string): string {
+  if (isFileEngine(engine)) return SQLITE_MAIN
   return SCHEMALESS.includes(engine) ? database : 'public'
 }
 
-export type SqlDialect = 'postgres' | 'mysql'
+export type SqlDialect = 'postgres' | 'mysql' | 'sqlite'
 
 /** How SQL is highlighted and completed for an engine. */
 export function sqlDialectOf(engine: Engine | undefined): SqlDialect {
+  if (engine === 'sqlite') return 'sqlite'
   return engine && SCHEMALESS.includes(engine) ? 'mysql' : 'postgres'
+}
+
+/** Where a connection points: `user@host:port`, or the file for SQLite. */
+export function connectionAddress(connection: Connection): string {
+  if (isFileEngine(connection.engine)) return connection.database
+  return `${connection.username || 'default user'}@${connection.host}:${connection.port}`
 }
