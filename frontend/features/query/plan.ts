@@ -37,11 +37,12 @@ export function parsePlan(json: unknown): Plan {
   const analyzed = 'Actual Total Time' in root
 
   const nodes: PlanNode[] = []
-  const walk = (raw: RawNode, depth: number) => {
-    nodes.push(toNode(raw, depth, String(nodes.length), analyzed))
-    raw.Plans?.forEach((child) => walk(child, depth + 1))
+  const walk = (raw: RawNode, depth: number, processes: number) => {
+    nodes.push(toNode(raw, depth, String(nodes.length), analyzed, processes))
+    const childProcesses = parallelProcesses(raw) ?? processes
+    raw.Plans?.forEach((child) => walk(child, depth + 1, childProcesses))
   }
-  walk(root, 0)
+  walk(root, 0, 1)
 
   const weight = (n: PlanNode) => (analyzed ? (n.selfMs ?? 0) : n.selfCost)
   const total = nodes.reduce((sum, n) => sum + weight(n), 0)
@@ -56,11 +57,23 @@ export function parsePlan(json: unknown): Plan {
   }
 }
 
-function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean): PlanNode {
+/**
+ * Below a Gather, each process (the leader and every worker) runs the subtree at
+ * the same time, and their loops are added together. Returns how many there were.
+ */
+function parallelProcesses(raw: RawNode): number | null {
+  if (raw['Node Type'] !== 'Gather' && raw['Node Type'] !== 'Gather Merge') return null
+  return num(raw['Workers Launched'], num(raw['Workers Planned'])) + 1
+}
+
+function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean, processes: number): PlanNode {
   const children = raw.Plans ?? []
+  const childProcesses = parallelProcesses(raw) ?? processes
   const loops = num(raw['Actual Loops'], 1)
-  // "Actual Total Time" and "Actual Rows" are averages per loop.
-  const totalMs = (node: RawNode) => num(node['Actual Total Time']) * num(node['Actual Loops'], 1)
+  // "Actual Total Time" and "Actual Rows" are averages per loop. Loops of parallel
+  // processes overlap in time, so their total is split among the processes.
+  const totalMs = (node: RawNode, inParallel: number) =>
+    (num(node['Actual Total Time']) * num(node['Actual Loops'], 1)) / inParallel
   const estimatedRows = num(raw['Plan Rows'])
   const actualPerLoop = num(raw['Actual Rows'])
 
@@ -71,7 +84,12 @@ function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean): Pla
     detail: describe(raw),
     estimatedRows,
     actualRows: analyzed ? actualPerLoop * loops : null,
-    selfMs: analyzed ? Math.max(0, totalMs(raw) - children.reduce((sum, c) => sum + totalMs(c), 0)) : null,
+    selfMs: analyzed
+      ? Math.max(
+          0,
+          totalMs(raw, processes) - children.reduce((sum, c) => sum + totalMs(c, childProcesses), 0),
+        )
+      : null,
     selfCost: Math.max(
       0,
       num(raw['Total Cost']) - children.reduce((sum, c) => sum + num(c['Total Cost']), 0),

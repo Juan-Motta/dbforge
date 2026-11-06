@@ -92,6 +92,44 @@ describe('parsePlan', () => {
     expect(plan.nodes[2].fields).toContainEqual(['Sort Key', 'a, b'])
   })
 
+  it('does not add up the time of workers that ran in parallel', () => {
+    // From a real plan: a parallel Seq Scan in 3 processes (leader + 2 workers),
+    // 232.5 ms each, inside a 252 ms query. Summing the loops gave 697 ms.
+    const parallel = parsePlan([
+      {
+        Plan: {
+          'Node Type': 'Gather',
+          'Total Cost': 29000,
+          'Plan Rows': 1,
+          'Actual Total Time': 240,
+          'Actual Rows': 9,
+          'Actual Loops': 1,
+          'Workers Launched': 2,
+          Plans: [
+            {
+              'Node Type': 'Seq Scan',
+              'Parallel Aware': true,
+              'Total Cost': 28204,
+              'Plan Rows': 1,
+              'Actual Total Time': 232.5,
+              'Actual Rows': 3,
+              'Actual Loops': 3,
+              'Rows Removed by Filter': 323327,
+            },
+          ],
+        },
+        'Execution Time': 252.3,
+      },
+    ])
+    const [gather, scan] = parallel.nodes
+    expect(scan.selfMs).toBeCloseTo(232.5)
+    expect(gather.selfMs).toBeCloseTo(7.5)
+    expect(scan.actualRows).toBe(9)
+    expect(scan.warnings).toEqual([
+      'Reads 969,981 rows only to discard them; an index on the filter may help.',
+    ])
+  })
+
   it('falls back to cost shares without ANALYZE', () => {
     const estimate = parsePlan([
       {
