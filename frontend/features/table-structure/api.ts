@@ -18,6 +18,8 @@ export interface IndexInfo {
   primary: boolean
   /** Key columns or expressions, in order. */
   columns: string[]
+  /** The WHERE of a partial index, which covers only the rows that match it. */
+  condition: string | null
   bytes: number
 }
 

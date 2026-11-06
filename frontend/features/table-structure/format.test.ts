@@ -16,10 +16,15 @@ const structure = (overrides: Partial<TableStructure> = {}): TableStructure => (
   ...overrides,
 })
 
-const index = (name: string, columns: string[], flags: { primary?: boolean; unique?: boolean } = {}) => ({
+const index = (
+  name: string,
+  columns: string[],
+  flags: { primary?: boolean; unique?: boolean; condition?: string } = {},
+) => ({
   name,
   method: 'btree',
   columns,
+  condition: flags.condition ?? null,
   bytes: 0,
   primary: flags.primary ?? false,
   unique: flags.unique ?? flags.primary ?? false,
@@ -60,6 +65,11 @@ describe('columnKeys', () => {
   it('treats a multi-column unique index as a plain index', () => {
     const keys = columnKeys(structure({ indexes: [index('uq', ['a', 'b'], { unique: true })] }))
     expect(keys.get('a')).toEqual(['IDX'])
+  })
+
+  it('treats a partial unique index as a plain index', () => {
+    const partial = index('uq_open', ['kb_id'], { unique: true, condition: "status = 'in_progress'" })
+    expect(columnKeys(structure({ indexes: [partial] })).get('kb_id')).toEqual(['IDX'])
   })
 
   it('unquotes mixed-case names and ignores expressions', () => {

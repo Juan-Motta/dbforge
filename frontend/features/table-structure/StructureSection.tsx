@@ -76,6 +76,7 @@ function Indexes({ structure }: { structure: TableStructure }) {
           <th>Method</th>
           <th>Unique</th>
           <th>Columns</th>
+          <th>Condition</th>
           <th className={styles.numeric}>Size</th>
         </tr>
       </thead>
@@ -86,6 +87,7 @@ function Indexes({ structure }: { structure: TableStructure }) {
             <td className={styles.type}>{index.method}</td>
             <td className={styles.prose}>{index.primary ? 'Primary' : index.unique ? 'Yes' : 'No'}</td>
             <td>{index.columns.join(', ')}</td>
+            <td className={index.condition === null ? styles.empty : undefined}>{index.condition ?? '—'}</td>
             <td className={styles.numeric}>{formatBytes(index.bytes)}</td>
           </tr>
         ))}

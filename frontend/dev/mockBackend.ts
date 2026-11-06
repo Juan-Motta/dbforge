@@ -178,6 +178,7 @@ const mockStructure = {
       unique: true,
       primary: true,
       columns: ['id'],
+      condition: null,
       bytes: 1_200_000,
     },
     {
@@ -186,6 +187,7 @@ const mockStructure = {
       unique: true,
       primary: false,
       columns: ['email'],
+      condition: null,
       bytes: 1_100_000,
     },
     {
@@ -194,6 +196,7 @@ const mockStructure = {
       unique: false,
       primary: false,
       columns: ['referrer_id'],
+      condition: null,
       bytes: 200_000,
     },
   ],

@@ -112,11 +112,11 @@ struct CatalogIndex {
 }
 
 async fn indexes(conn: &mut PgConnection, relation: &str) -> Result<Vec<CatalogIndex>> {
-    type Row = (String, String, bool, bool, Vec<String>, i64, String, bool);
+    type Row = (String, String, bool, bool, Vec<String>, Option<String>, i64, String, bool);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT i.relname::text, am.amname::text, x.indisunique, x.indisprimary,
                 ARRAY(SELECT pg_get_indexdef(x.indexrelid, k, true) FROM generate_series(1, x.indnkeyatts) k),
-                pg_relation_size(x.indexrelid), pg_get_indexdef(x.indexrelid),
+                pg_get_expr(x.indpred, x.indrelid, true), pg_relation_size(x.indexrelid), pg_get_indexdef(x.indexrelid),
                 EXISTS (SELECT 1 FROM pg_constraint c
                         WHERE c.conindid = x.indexrelid AND c.conrelid = x.indrelid AND c.contype IN ('p', 'u', 'x'))
          FROM pg_index x
@@ -131,8 +131,8 @@ async fn indexes(conn: &mut PgConnection, relation: &str) -> Result<Vec<CatalogI
 
     Ok(rows
         .into_iter()
-        .map(|(name, method, unique, primary, columns, bytes, definition, backs_constraint)| CatalogIndex {
-            info: IndexInfo { name, method, unique, primary, columns, bytes },
+        .map(|(name, method, unique, primary, columns, condition, bytes, definition, backs_constraint)| CatalogIndex {
+            info: IndexInfo { name, method, unique, primary, columns, condition, bytes },
             definition,
             backs_constraint,
         })
@@ -294,6 +294,7 @@ mod tests {
             CONSTRAINT positive_total CHECK (total >= 0)
         );
         CREATE INDEX orders_note_idx ON dbforge_structure.orders (lower(\"Note\"));
+        CREATE UNIQUE INDEX orders_one_free_per_customer ON dbforge_structure.orders (customer_id) WHERE total = 0;
         COMMENT ON TABLE dbforge_structure.orders IS 'Customer''s orders';
         COMMENT ON COLUMN dbforge_structure.orders.\"Note\" IS 'Free text';
         CREATE FUNCTION dbforge_structure.touch() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
@@ -345,9 +346,19 @@ mod tests {
             ]
         );
 
-        let indexes: Vec<_> =
-            orders.indexes.iter().map(|i| (i.name.as_str(), i.primary, i.columns.join(", "))).collect();
-        assert_eq!(indexes, [("orders_pkey", true, "id".into()), ("orders_note_idx", false, "lower(\"Note\")".into())]);
+        let indexes: Vec<_> = orders
+            .indexes
+            .iter()
+            .map(|i| (i.name.as_str(), i.unique, i.columns.join(", "), i.condition.as_deref()))
+            .collect();
+        assert_eq!(
+            indexes,
+            [
+                ("orders_pkey", true, "id".into(), None),
+                ("orders_note_idx", false, "lower(\"Note\")".into(), None),
+                ("orders_one_free_per_customer", true, "customer_id".into(), Some("total = 0::numeric")),
+            ]
+        );
 
         let [fk] = orders.foreign_keys.as_slice() else { panic!("{:?}", orders.foreign_keys) };
         assert_eq!(fk.columns, ["customer_id"]);

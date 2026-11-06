@@ -122,6 +122,8 @@ pub struct IndexInfo {
     pub primary: bool,
     /// Key columns or expressions, in order.
     pub columns: Vec<String>,
+    /// The `WHERE` of a partial index, which covers only the rows that match it.
+    pub condition: Option<String>,
     pub bytes: i64,
 }
 

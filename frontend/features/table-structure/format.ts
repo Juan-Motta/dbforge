@@ -5,6 +5,7 @@ export type KeyKind = 'PK' | 'FK' | 'UNI' | 'IDX'
 /**
  * The keys each column takes part in, strongest first. Only plain column
  * indexes count; an index on an expression like `lower(email)` marks nothing.
+ * A partial unique index only makes some rows unique, so it counts as IDX.
  */
 export function columnKeys(structure: TableStructure): Map<string, KeyKind[]> {
   const keys = new Map<string, Set<KeyKind>>()
@@ -14,7 +15,8 @@ export function columnKeys(structure: TableStructure): Map<string, KeyKind[]> {
   }
 
   for (const index of structure.indexes) {
-    const kind = index.primary ? 'PK' : index.unique && index.columns.length === 1 ? 'UNI' : 'IDX'
+    const unique = index.unique && index.condition === null && index.columns.length === 1
+    const kind = index.primary ? 'PK' : unique ? 'UNI' : 'IDX'
     index.columns.forEach((column) => mark(unquote(column), kind))
   }
   for (const key of structure.foreignKeys) key.columns.forEach((column) => mark(column, 'FK'))
