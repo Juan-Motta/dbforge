@@ -153,3 +153,17 @@ export function zoomAt(view: View, factor: number, anchor: Point): View {
   const ratio = scale / view.scale
   return { scale, x: anchor.x - (anchor.x - view.x) * ratio, y: anchor.y - (anchor.y - view.y) * ratio }
 }
+
+/** Centers one card in the viewport at `scale`, e.g. to read it after a double click. */
+export function centerOn(
+  position: Point,
+  height: number,
+  viewport: { width: number; height: number },
+  scale = 1,
+): View {
+  return {
+    scale,
+    x: viewport.width / 2 - (position.x + CARD_WIDTH / 2) * scale,
+    y: viewport.height / 2 - (position.y + height / 2) * scale,
+  }
+}

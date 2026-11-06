@@ -6,6 +6,7 @@ import type { SchemaDiagram } from './api'
 import {
   CARD_WIDTH,
   cardHeight,
+  centerOn,
   defaultSelection,
   fitView,
   layout,
@@ -166,14 +167,28 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     }
   }
 
-  const onPointerUp = () => {
+  // The canvas captures the pointer while dragging, so the browser's dblclick lands
+  // on the canvas rather than the card; double clicks are detected here instead.
+  const lastClick = useRef<{ name: string; time: number } | null>(null)
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current
     drag.current = null
     setDragging(null)
-    // A click without a drag pins the card's highlight, or unpins it.
-    if (current?.kind === 'card' && !current.moved) {
-      setPinned((name) => (name === current.name ? null : current.name))
+    if (current?.kind !== 'card' || current.moved) return
+    const previous = lastClick.current
+    if (previous?.name === current.name && event.timeStamp - previous.time < 400) {
+      // Double click: bring the table close enough to read, and keep it highlighted.
+      lastClick.current = null
+      const box = canvas.current?.getBoundingClientRect()
+      const card = byName.get(current.name)
+      if (box && card) setView(centerOn(positionOf(current.name), card.height, box))
+      setPinned(current.name)
+      return
     }
+    lastClick.current = { name: current.name, time: event.timeStamp }
+    // A single click pins the card's highlight, or unpins it.
+    setPinned((name) => (name === current.name ? null : current.name))
   }
 
   const zoomBy = (factor: number) => {

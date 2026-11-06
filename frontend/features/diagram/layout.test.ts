@@ -3,6 +3,7 @@ import type { DiagramTable, Relationship, SchemaDiagram } from './api'
 import {
   CARD_WIDTH,
   cardHeight,
+  centerOn,
   defaultSelection,
   fitView,
   layout,
@@ -141,5 +142,12 @@ describe('zoomAt', () => {
   it('stays between 10% and 200%', () => {
     expect(zoomAt({ x: 0, y: 0, scale: 1 }, 10, { x: 0, y: 0 }).scale).toBe(2)
     expect(zoomAt({ x: 0, y: 0, scale: 1 }, 0.01, { x: 0, y: 0 }).scale).toBe(0.1)
+  })
+})
+
+describe('centerOn', () => {
+  it('puts the middle of the card in the middle of the viewport', () => {
+    const view = centerOn({ x: 400, y: 100 }, 200, { width: 1000, height: 800 })
+    expect(view).toEqual({ scale: 1, x: 500 - (400 + CARD_WIDTH / 2), y: 400 - 200 })
   })
 })
