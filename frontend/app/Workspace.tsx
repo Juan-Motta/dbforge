@@ -57,11 +57,6 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, conne
               database={tab.database}
               initialSql={tab.initialSql}
               dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
-              explainUnsupported={
-                sqlDialectOf(connectionOf(tab.connectionId)?.engine) === 'mysql'
-                  ? "Explain isn't supported for MySQL yet"
-                  : undefined
-              }
               onExportResult={(result) =>
                 setExporting({
                   kind: 'rows',

@@ -4,10 +4,12 @@
 
 mod diagram;
 mod edit;
+mod explain;
 mod structure;
 
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, preview_changes};
+pub use explain::explain;
 pub use structure::table_structure;
 
 use std::time::Instant;

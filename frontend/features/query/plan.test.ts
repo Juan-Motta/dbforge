@@ -149,6 +149,20 @@ describe('parsePlan', () => {
   })
 })
 
+describe('MySQL plans', () => {
+  it('shows the detail MySQL writes out', () => {
+    const plan = parsePlan([
+      { Plan: { 'Node Type': 'Filter', Detail: '(o.total > 100)', 'Plan Rows': 1.33 } },
+    ])
+    expect(plan.nodes[0]).toMatchObject({
+      nodeType: 'Filter',
+      detail: '(o.total > 100)',
+      estimatedRows: 1.33,
+    })
+    expect(plan.planningMs).toBeNull()
+  })
+})
+
 describe('formatMs', () => {
   it.each([
     [0.4, '0.40 ms'],

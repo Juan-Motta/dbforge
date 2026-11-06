@@ -428,7 +428,7 @@ pub async fn explain(
 ) -> Result<serde_json::Value> {
     match connection.engine {
         Engine::Postgres => postgres::explain(connection, password, database, sql, analyze).await,
-        Engine::Mysql => Err(AppError::Invalid("Explain isn't supported for MySQL yet.".into())),
+        Engine::Mysql => mysql::explain(connection, password, database, sql, analyze).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }

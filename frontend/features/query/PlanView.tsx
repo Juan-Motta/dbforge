@@ -15,8 +15,9 @@ export function PlanView({ plan }: { plan: Plan }) {
       <div className={styles.stats}>
         {plan.analyzed ? (
           <>
-            <Stat label="Execution" value={formatMs(plan.executionMs ?? 0)} />
-            <Stat label="Planning" value={formatMs(plan.planningMs ?? 0)} />
+            {plan.executionMs !== null && <Stat label="Execution" value={formatMs(plan.executionMs)} />}
+            {/* MySQL doesn't report planning time. */}
+            {plan.planningMs !== null && <Stat label="Planning" value={formatMs(plan.planningMs)} />}
             <Stat label="Rows returned" value={(plan.rows ?? 0).toLocaleString('en-US')} />
           </>
         ) : (

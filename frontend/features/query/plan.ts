@@ -128,6 +128,8 @@ function fieldsOf(raw: RawNode): [string, string][] {
 /** The parts of a node worth a glance, joined: `orders o · Filter: (total > 100)`. */
 function describe(raw: RawNode): string {
   const parts: string[] = []
+  // MySQL plans come with their description already written out.
+  if (typeof raw['Detail'] === 'string') parts.push(raw['Detail'])
   const relation = raw['Relation Name']
   if (typeof relation === 'string') {
     const alias = raw['Alias']
