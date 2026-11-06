@@ -16,8 +16,16 @@ export interface QueryOutcome {
   elapsedMs: number
 }
 
+/**
+ * Each console has a session: a connection the backend keeps open between runs,
+ * so transactions and SET carry over. It opens on the first run.
+ */
 export const queryApi = {
   /** Runs a script; `database` defaults to the connection's own. */
-  run: (connectionId: string, database: string | undefined, sql: string) =>
-    invoke<QueryOutcome>('run_query', { connectionId, database, sql }),
+  run: (sessionId: string, connectionId: string, database: string | undefined, sql: string) =>
+    invoke<QueryOutcome>('run_query', { sessionId, connectionId, database, sql }),
+  /** Stops the running query; its run then fails with a cancel error. */
+  cancel: (sessionId: string) => invoke<void>('cancel_query', { sessionId }),
+  /** Closes the connection; uncommitted work is rolled back. */
+  closeSession: (sessionId: string) => invoke<void>('close_session', { sessionId }),
 }

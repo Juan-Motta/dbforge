@@ -140,46 +140,68 @@ pub async fn fetch_rows(
     Ok(RowsPage { columns, rows, has_more })
 }
 
-/// Runs `sql` with the simple query protocol, which allows several statements
-/// and returns every value in its text form. All rows are read so the whole
-/// script completes, but only the first `row_limit` of each result are kept.
-pub async fn run_query(
-    connection: &Connection,
-    password: Option<&str>,
-    database: Option<&str>,
-    sql: &str,
-    row_limit: usize,
-) -> Result<QueryOutcome> {
-    let mut conn = connect(connection, password, database).await?;
-    let started = Instant::now();
+/// A connection kept open between runs, so transactions, `SET` and temporary
+/// tables carry over from one run to the next.
+pub struct Session {
+    conn: PgConnection,
+    /// The server process serving this connection; cancel requests target it.
+    pid: i32,
+}
 
-    let mut results = Vec::new();
-    let mut current = StatementResult::default();
-    let mut stream = sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut conn);
-    while let Some(item) = stream.try_next().await? {
-        match item {
-            Either::Right(row) => {
-                if current.columns.is_empty() {
-                    current.columns = columns_of(&row);
+pub async fn open_session(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Session> {
+    let mut conn = connect(connection, password, database).await?;
+    let pid = sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut conn).await?;
+    Ok(Session { conn, pid })
+}
+
+impl Session {
+    pub fn pid(&self) -> i32 {
+        self.pid
+    }
+
+    /// Runs `sql` with the simple query protocol, which allows several statements
+    /// and returns every value in its text form. All rows are read so the whole
+    /// script completes, but only the first `row_limit` of each result are kept.
+    pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
+        let started = Instant::now();
+        let mut results = Vec::new();
+        let mut current = StatementResult::default();
+        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn);
+        while let Some(item) = stream.try_next().await? {
+            match item {
+                Either::Right(row) => {
+                    if current.columns.is_empty() {
+                        current.columns = columns_of(&row);
+                    }
+                    if current.rows.len() < row_limit {
+                        current.rows.push(text_values(&row)?);
+                    } else {
+                        current.truncated = true;
+                    }
                 }
-                if current.rows.len() < row_limit {
-                    current.rows.push(text_values(&row)?);
-                } else {
-                    current.truncated = true;
+                // Marks the end of one statement.
+                Either::Left(done) => {
+                    current.rows_affected = done.rows_affected();
+                    results.push(std::mem::take(&mut current));
                 }
-            }
-            // Marks the end of one statement.
-            Either::Left(done) => {
-                current.rows_affected = done.rows_affected();
-                results.push(std::mem::take(&mut current));
             }
         }
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        Ok(QueryOutcome { results, elapsed_ms })
     }
-    drop(stream);
 
-    let elapsed_ms = started.elapsed().as_millis() as u64;
+    pub async fn is_alive(&mut self) -> bool {
+        self.conn.ping().await.is_ok()
+    }
+}
+
+/// Asks the server to cancel what process `pid` is running. The request goes
+/// over a separate connection because the session's own one is busy.
+pub async fn cancel(connection: &Connection, password: Option<&str>, database: Option<&str>, pid: i32) -> Result<()> {
+    let mut conn = connect(connection, password, database).await?;
+    sqlx::query("SELECT pg_cancel_backend($1)").bind(pid).execute(&mut conn).await?;
     conn.close().await?;
-    Ok(QueryOutcome { results, elapsed_ms })
+    Ok(())
 }
 
 fn columns_of(row: &PgRow) -> Vec<Column> {
@@ -318,7 +340,8 @@ mod tests {
                    INSERT INTO t VALUES (1, 'x'), (2, NULL);
                    SELECT * FROM t ORDER BY a;
                    SELECT g FROM generate_series(1, 5) g";
-        let outcome = run_query(&local(), PASSWORD, None, sql, 3).await.unwrap();
+        let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
+        let outcome = session.run(sql, 3).await.unwrap();
         let [create, insert, select, series] = outcome.results.as_slice() else {
             panic!("expected 4 results, got {:?}", outcome.results);
         };
@@ -339,8 +362,39 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a local PostgreSQL on port 55432"]
     async fn query_errors_carry_the_server_message() {
-        let error = run_query(&local(), PASSWORD, None, "SELECT 1/0", 10).await.unwrap_err();
+        let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
+        let error = session.run("SELECT 1/0", 10).await.unwrap_err();
         assert!(error.to_string().contains("division by zero"), "{error}");
+        assert!(session.is_alive().await, "a failed statement must not break the session");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn sessions_keep_state_between_runs() {
+        let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
+        session.run("BEGIN; CREATE TEMP TABLE kept (a int); SET application_name = 'dbforge'", 10).await.unwrap();
+        session.run("INSERT INTO kept VALUES (1); COMMIT", 10).await.unwrap();
+
+        let outcome = session.run("SELECT count(*) FROM kept; SHOW application_name", 10).await.unwrap();
+        assert_eq!(outcome.results[0].rows, [vec![Some("1".into())]]);
+        assert_eq!(outcome.results[1].rows, [vec![Some("dbforge".into())]]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn running_queries_can_be_cancelled() {
+        let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
+        let pid = session.pid();
+        let cancel_soon = async {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            cancel(&local(), PASSWORD, None, pid).await
+        };
+
+        let (outcome, cancelled) = tokio::join!(session.run("SELECT pg_sleep(30)", 10), cancel_soon);
+        cancelled.unwrap();
+        let error = outcome.unwrap_err();
+        assert!(error.to_string().contains("canceling statement"), "{error}");
+        assert!(session.run("SELECT 1", 10).await.is_ok(), "the session stays usable after a cancel");
     }
 
     #[tokio::test]

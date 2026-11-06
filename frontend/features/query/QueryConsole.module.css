@@ -25,6 +25,10 @@
   flex: 1;
 }
 
+.cancelError {
+  color: var(--err);
+}
+
 .shortcut {
   opacity: 0.7;
   font-weight: 500;

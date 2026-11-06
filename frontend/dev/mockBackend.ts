@@ -39,8 +39,11 @@ const objects: Record<string, DbObject[]> = {
 
 const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 300))
 
+/** Queries containing pg_sleep wait here until cancelled, by session id. */
+const sleeping = new Map<string, () => void>()
+
 export function installMockBackend() {
-  mockIPC((cmd, args) => {
+  mockIPC(async (cmd, args) => {
     const payload = args as Record<string, unknown>
     switch (cmd) {
       case 'list_connections':
@@ -93,6 +96,10 @@ export function installMockBackend() {
       case 'run_query': {
         const sql = String(payload.sql)
         if (/error/i.test(sql)) throw 'syntax error at or near "error"'
+        if (/pg_sleep/i.test(sql)) {
+          await new Promise<void>((resolve) => sleeping.set(String(payload.sessionId), resolve))
+          throw 'canceling statement due to user request'
+        }
         return delay({
           elapsedMs: 38,
           results: [
@@ -113,6 +120,11 @@ export function installMockBackend() {
           ],
         })
       }
+      case 'cancel_query':
+      case 'close_session':
+        sleeping.get(String(payload.sessionId))?.()
+        sleeping.delete(String(payload.sessionId))
+        return null
       default:
         throw new Error(`Mock backend: unknown command ${cmd}`)
     }

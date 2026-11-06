@@ -15,6 +15,7 @@ pub fn run() {
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("connections.json");
             app.manage(ConnectionStore::load(path)?);
+            app.manage(query::QuerySessions::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -25,6 +26,8 @@ pub fn run() {
             explorer::list_objects,
             explorer::fetch_rows,
             query::run_query,
+            query::cancel_query,
+            query::close_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");

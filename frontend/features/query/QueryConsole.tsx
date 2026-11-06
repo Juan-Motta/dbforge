@@ -7,15 +7,21 @@ import { useQueryRunner } from './useQueryRunner'
 import styles from './QueryConsole.module.css'
 
 interface QueryConsoleProps {
+  /** Identifies the console's session, the connection kept open between runs. */
+  sessionId: string
   connectionId: string
   /** Runs against this database; the connection's default when omitted. */
   database?: string
 }
 
 /** A SQL editor with the results of its last run below. */
-export function QueryConsole({ connectionId, database }: QueryConsoleProps) {
+export function QueryConsole({ sessionId, connectionId, database }: QueryConsoleProps) {
   const editor = useRef<SqlEditorHandle>(null)
-  const { running, lastRun, run } = useQueryRunner(connectionId, database)
+  const { running, cancelling, cancelError, lastRun, run, cancel } = useQueryRunner(
+    sessionId,
+    connectionId,
+    database,
+  )
 
   return (
     <div className={styles.console}>
@@ -24,11 +30,19 @@ export function QueryConsole({ connectionId, database }: QueryConsoleProps) {
           <Icon name="database" size={14} className={styles.inline} /> {database ?? 'default database'}
         </span>
         <span className={styles.spacer} />
-        <Button variant="primary" disabled={running} onClick={() => run(editor.current?.textToRun() ?? '')}>
-          <Icon name="play" />
-          {running ? 'Running…' : 'Run'}
-          <span className={styles.shortcut}>⌘↵</span>
-        </Button>
+        {cancelError && <span className={styles.cancelError}>Could not cancel: {cancelError}</span>}
+        {running ? (
+          <Button disabled={cancelling} onClick={cancel}>
+            <Icon name="stop" />
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={() => run(editor.current?.textToRun() ?? '')}>
+            <Icon name="play" />
+            Run
+            <span className={styles.shortcut}>⌘↵</span>
+          </Button>
+        )}
       </div>
 
       <div className={styles.editor}>

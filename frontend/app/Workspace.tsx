@@ -42,7 +42,7 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: Wor
       {tabs.map((tab) => (
         <div key={tab.id} className={styles.tabContent} hidden={tab.id !== activeId}>
           {tab.kind === 'query' ? (
-            <QueryConsole connectionId={tab.connectionId} database={tab.database} />
+            <QueryConsole sessionId={tab.id} connectionId={tab.connectionId} database={tab.database} />
           ) : (
             <TableView connectionId={tab.connectionId} table={tab.table} />
           )}

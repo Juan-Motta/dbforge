@@ -21,7 +21,7 @@ serde_json = "1.0"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
 tauri = { version = "2.12.5", features = [] }
 thiserror = "2.0"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["sync", "time"] }
 uuid = { version = "1.29", features = ["v4"] }
 
 [dev-dependencies]

@@ -11,8 +11,6 @@ use crate::connections::model::{Connection, Engine};
 use crate::error::{AppError, Result};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-/// User queries can legitimately run long; this only guards against hanging forever.
-const QUERY_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -121,23 +119,66 @@ pub async fn fetch_rows(
     .await
 }
 
-/// Runs a script of one or more statements and returns every statement's result.
-pub async fn run_query(
+/// A connection that stays open across query runs. Runs have no time limit;
+/// long ones are stopped with [`cancel`].
+pub enum Session {
+    Postgres(postgres::Session),
+}
+
+/// What a cancel request needs to find a session's running query on the server.
+#[derive(Debug, Clone, Copy)]
+pub enum CancelTarget {
+    Postgres { pid: i32 },
+}
+
+pub async fn open_session(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Session> {
+    with_timeout(async {
+        match connection.engine {
+            Engine::Postgres => Ok(Session::Postgres(postgres::open_session(connection, password, database).await?)),
+            other => Err(AppError::Unsupported(other.label())),
+        }
+    })
+    .await
+}
+
+impl Session {
+    pub fn cancel_target(&self) -> CancelTarget {
+        match self {
+            Session::Postgres(session) => CancelTarget::Postgres { pid: session.pid() },
+        }
+    }
+
+    /// Runs a script of one or more statements and returns every statement's result.
+    pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
+        match self {
+            Session::Postgres(session) => session.run(sql, row_limit).await,
+        }
+    }
+
+    /// False when the connection dropped and the session can't be used again.
+    pub async fn is_alive(&mut self) -> bool {
+        let check = async {
+            Ok(match self {
+                Session::Postgres(session) => session.is_alive().await,
+            })
+        };
+        with_timeout(check).await.unwrap_or(false)
+    }
+}
+
+/// Stops the query a session is running. Harmless when it is idle.
+pub async fn cancel(
     connection: &Connection,
     password: Option<&str>,
     database: Option<&str>,
-    sql: &str,
-    row_limit: usize,
-) -> Result<QueryOutcome> {
-    let request = async {
-        match connection.engine {
-            Engine::Postgres => postgres::run_query(connection, password, database, sql, row_limit).await,
-            other => Err(AppError::Unsupported(other.label())),
+    target: CancelTarget,
+) -> Result<()> {
+    with_timeout(async {
+        match target {
+            CancelTarget::Postgres { pid } => postgres::cancel(connection, password, database, pid).await,
         }
-    };
-    tokio::time::timeout(QUERY_TIMEOUT, request)
-        .await
-        .map_err(|_| AppError::Timeout(QUERY_TIMEOUT.as_secs()))?
+    })
+    .await
 }
 
 async fn with_timeout<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
