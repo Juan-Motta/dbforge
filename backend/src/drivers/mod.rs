@@ -1,5 +1,6 @@
 //! Entry points that dispatch to the right database driver by engine.
 
+mod mysql;
 mod postgres;
 
 use std::collections::BTreeMap;
@@ -238,6 +239,7 @@ pub async fn server_version(connection: &Connection, password: Option<&str>) -> 
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::server_version(connection, password).await,
+            Engine::Mysql => mysql::server_version(connection, password).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -248,6 +250,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_objects(connection, password, path).await,
+            Engine::Mysql => mysql::list_objects(connection, password, path).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -262,6 +265,7 @@ pub async fn list_relations(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::list_relations(connection, password, database).await,
+            Engine::Mysql => mysql::list_relations(connection, password, database).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -278,6 +282,7 @@ pub async fn stream_table(
 ) -> Result<()> {
     match connection.engine {
         Engine::Postgres => postgres::stream_table(connection, password, table, sink).await,
+        Engine::Mysql => mysql::stream_table(connection, password, table, sink).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -292,6 +297,7 @@ pub async fn fetch_rows(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::fetch_rows(connection, password, table, offset, limit).await,
+            Engine::Mysql => mysql::fetch_rows(connection, password, table, offset, limit).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -358,18 +364,21 @@ pub async fn table_structure(
 /// long ones are stopped with [`cancel`].
 pub enum Session {
     Postgres(postgres::Session),
+    Mysql(mysql::Session),
 }
 
 /// What a cancel request needs to find a session's running query on the server.
 #[derive(Debug, Clone, Copy)]
 pub enum CancelTarget {
     Postgres { pid: i32 },
+    Mysql { id: u64 },
 }
 
 pub async fn open_session(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Session> {
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => Ok(Session::Postgres(postgres::open_session(connection, password, database).await?)),
+            Engine::Mysql => Ok(Session::Mysql(mysql::open_session(connection, password, database).await?)),
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -380,6 +389,7 @@ impl Session {
     pub fn cancel_target(&self) -> CancelTarget {
         match self {
             Session::Postgres(session) => CancelTarget::Postgres { pid: session.pid() },
+            Session::Mysql(session) => CancelTarget::Mysql { id: session.id() },
         }
     }
 
@@ -387,6 +397,7 @@ impl Session {
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         match self {
             Session::Postgres(session) => session.run(sql, row_limit).await,
+            Session::Mysql(session) => session.run(sql, row_limit).await,
         }
     }
 
@@ -395,6 +406,7 @@ impl Session {
         let check = async {
             Ok(match self {
                 Session::Postgres(session) => session.is_alive().await,
+                Session::Mysql(session) => session.is_alive().await,
             })
         };
         with_timeout(check).await.unwrap_or(false)
@@ -425,6 +437,7 @@ pub async fn cancel(
     with_timeout(async {
         match target {
             CancelTarget::Postgres { pid } => postgres::cancel(connection, password, database, pid).await,
+            CancelTarget::Mysql { id } => mysql::cancel(connection, password, id).await,
         }
     })
     .await
