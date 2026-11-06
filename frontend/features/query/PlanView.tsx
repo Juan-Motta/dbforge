@@ -58,7 +58,7 @@ export function PlanView({ plan }: { plan: Plan }) {
                 )}
               </span>
               <span className={styles.numeric}>{node.actualRows?.toLocaleString('en-US') ?? ''}</span>
-              <span className={styles.numeric}>{node.estimatedRows.toLocaleString('en-US')}</span>
+              <span className={styles.numeric}>{node.estimatedRows?.toLocaleString('en-US') ?? '—'}</span>
               <span className={styles.numeric}>
                 {node.selfMs !== null ? formatMs(node.selfMs) : node.selfCost.toFixed(1)}
               </span>

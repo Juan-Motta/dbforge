@@ -87,7 +87,7 @@ fn table_to_plan(rows: &[sqlx::mysql::MySqlRow]) -> Value {
         .collect();
     let root = match <[Value; 1]>::try_from(nodes) {
         Ok([node]) => node,
-        Err(nodes) => json!({ "Node Type": "Plan", "Plan Rows": 0, "Plans": nodes }),
+        Err(nodes) => json!({ "Node Type": "Plan", "Plans": nodes }),
     };
     json!([{ "Plan": root }])
 }
@@ -148,8 +148,7 @@ fn tree_to_plan(text: &str) -> Value {
     }
     let mut iter = lines.into_iter().peekable();
     let mut roots = take_children(&mut iter, 0);
-    let root =
-        if roots.len() == 1 { roots.remove(0) } else { json!({ "Node Type": "Plan", "Plan Rows": 0, "Plans": roots }) };
+    let root = if roots.len() == 1 { roots.remove(0) } else { json!({ "Node Type": "Plan", "Plans": roots }) };
 
     let mut top = Map::new();
     // MySQL reports no separate execution time; the root's last row is when it finished.
@@ -176,8 +175,13 @@ fn parse_line(text: &str) -> Map<String, Value> {
         // `cost=a..b` on some nodes; the total is the last number.
         node.insert("Total Cost".into(), json!(number(cost.rsplit("..").next().unwrap_or(cost))));
     }
-    let estimate = measures.split(") (actual").next().unwrap_or("");
-    node.insert("Plan Rows".into(), json!(between(estimate, "rows=", ")").map_or(0.0, number)));
+    // Only the cost part holds an estimate; MySQL doesn't estimate some nodes (sorts,
+    // temporary tables), and their only `rows=` is the measured one.
+    if let Some(estimate) = measures.split("(actual").next().filter(|part| part.contains("(cost="))
+        && let Some(rows) = between(estimate, "rows=", ")")
+    {
+        node.insert("Plan Rows".into(), json!(number(rows)));
+    }
 
     if measures.contains("(never executed)") {
         node.insert("Actual Total Time".into(), json!(0.0));
@@ -250,6 +254,14 @@ mod tests {
         assert_eq!(lookup["Detail"], "c using PRIMARY (id=o.cid)");
         assert_eq!((lookup["Actual Rows"].as_f64(), lookup["Actual Loops"].as_f64()), (Some(1.0), Some(2.0)));
         assert_eq!(lookup["Actual Total Time"], 0.0034);
+    }
+
+    #[test]
+    fn nodes_mysql_does_not_estimate_have_no_estimate() {
+        let plan = tree_to_plan(ANALYZED);
+        let root = &plan[0]["Plan"];
+        assert!(root.get("Plan Rows").is_none(), "{root}");
+        assert_eq!(root["Actual Rows"], 2.0);
     }
 
     #[test]

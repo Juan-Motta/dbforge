@@ -161,6 +161,14 @@ describe('MySQL plans', () => {
     })
     expect(plan.planningMs).toBeNull()
   })
+
+  it('leaves nodes without an estimate unestimated and unwarned', () => {
+    const plan = parsePlan([
+      { Plan: { 'Node Type': 'Sort', 'Actual Total Time': 5, 'Actual Rows': 50000, 'Actual Loops': 1 } },
+    ])
+    expect(plan.nodes[0].estimatedRows).toBeNull()
+    expect(plan.nodes[0].warnings).toEqual([])
+  })
 })
 
 describe('formatMs', () => {

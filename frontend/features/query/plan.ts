@@ -5,7 +5,8 @@ export interface PlanNode {
   nodeType: string
   /** What the node works on: table, index, join or filter condition, sort key… */
   detail: string
-  estimatedRows: number
+  /** `null` when the engine didn't estimate this node (MySQL sorts, temporary tables). */
+  estimatedRows: number | null
   /** Rows produced over all loops; `null` without ANALYZE. */
   actualRows: number | null
   /** Time spent in this node alone, children excluded; `null` without ANALYZE. */
@@ -74,7 +75,7 @@ function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean, proc
   // processes overlap in time, so their total is split among the processes.
   const totalMs = (node: RawNode, inParallel: number) =>
     (num(node['Actual Total Time']) * num(node['Actual Loops'], 1)) / inParallel
-  const estimatedRows = num(raw['Plan Rows'])
+  const estimatedRows = numberOrNull(raw['Plan Rows'])
   const actualPerLoop = num(raw['Actual Rows'])
 
   const node: PlanNode = {
@@ -100,8 +101,11 @@ function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean, proc
   }
 
   if (analyzed) {
-    const [low, high] = [Math.min(estimatedRows, actualPerLoop), Math.max(estimatedRows, actualPerLoop)]
-    if (high >= 100 && high >= Math.max(low, 1) * 10) {
+    const [low, high] =
+      estimatedRows === null
+        ? [0, 0]
+        : [Math.min(estimatedRows, actualPerLoop), Math.max(estimatedRows, actualPerLoop)]
+    if (estimatedRows !== null && high >= 100 && high >= Math.max(low, 1) * 10) {
       node.warnings.push(
         `Estimated ${fmt(estimatedRows)} rows but got ${fmt(actualPerLoop)}; statistics may be stale.`,
       )
