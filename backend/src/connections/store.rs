@@ -27,11 +27,7 @@ impl ConnectionStore {
     }
 
     pub fn get(&self, id: &str) -> Result<Connection> {
-        self.lock()
-            .iter()
-            .find(|c| c.id == id)
-            .cloned()
-            .ok_or_else(|| AppError::NotFound(id.into()))
+        self.lock().iter().find(|c| c.id == id).cloned().ok_or_else(|| AppError::NotFound(id.into()))
     }
 
     /// Adds the connection, or replaces the one with the same id.
