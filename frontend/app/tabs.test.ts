@@ -13,6 +13,11 @@ describe('tabs', () => {
     expect(state.activeId).toBe('query:2')
   })
 
+  it('can prefill a query tab, e.g. from the history', () => {
+    const state = newQueryTab(NO_TABS, 'pg', 'shop', 'SELECT 1')
+    expect(state.tabs[0]).toMatchObject({ kind: 'query', database: 'shop', initialSql: 'SELECT 1' })
+  })
+
   it('keeps numbering after a query tab closes', () => {
     const one = newQueryTab(NO_TABS, 'pg')
     const state = newQueryTab(closeTab(one, 'query:1'), 'pg')

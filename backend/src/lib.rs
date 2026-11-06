@@ -2,6 +2,7 @@ mod connections;
 mod drivers;
 mod error;
 mod explorer;
+mod history;
 mod query;
 
 use tauri::Manager;
@@ -16,6 +17,8 @@ pub fn run() {
             let path = app.path().app_config_dir()?.join("connections.json");
             app.manage(ConnectionStore::load(path)?);
             app.manage(query::QuerySessions::default());
+            let history_path = app.path().app_data_dir()?.join("history.jsonl");
+            app.manage(history::HistoryStore::load(history_path)?);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -30,6 +33,7 @@ pub fn run() {
             query::run_query,
             query::cancel_query,
             query::close_session,
+            history::list_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");

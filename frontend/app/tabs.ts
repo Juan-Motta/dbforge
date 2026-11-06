@@ -1,7 +1,7 @@
 import type { TableRef } from '../domain/table'
 
 export type Tab = { id: string; title: string; connectionId: string } & (
-  { kind: 'query'; database?: string } | { kind: 'table'; table: TableRef }
+  { kind: 'query'; database?: string; initialSql?: string } | { kind: 'table'; table: TableRef }
 )
 
 export interface TabsState {
@@ -13,9 +13,22 @@ export interface TabsState {
 
 export const NO_TABS: TabsState = { tabs: [], activeId: null, queriesCreated: 0 }
 
-export function newQueryTab(state: TabsState, connectionId: string, database?: string): TabsState {
+/** Opens a new query console, optionally prefilled with `initialSql`. */
+export function newQueryTab(
+  state: TabsState,
+  connectionId: string,
+  database?: string,
+  initialSql?: string,
+): TabsState {
   const n = state.queriesCreated + 1
-  const tab: Tab = { id: `query:${n}`, kind: 'query', title: `Query ${n}`, connectionId, database }
+  const tab: Tab = {
+    id: `query:${n}`,
+    kind: 'query',
+    title: `Query ${n}`,
+    connectionId,
+    database,
+    initialSql,
+  }
   return { ...openTab(state, tab), queriesCreated: n }
 }
 

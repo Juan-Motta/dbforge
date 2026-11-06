@@ -12,10 +12,12 @@ interface QueryConsoleProps {
   connectionId: string
   /** Runs against this database; the connection's default when omitted. */
   database?: string
+  /** Text the editor starts with, e.g. a query reopened from the history. */
+  initialSql?: string
 }
 
 /** A SQL editor with the results of its last run below. */
-export function QueryConsole({ sessionId, connectionId, database }: QueryConsoleProps) {
+export function QueryConsole({ sessionId, connectionId, database, initialSql }: QueryConsoleProps) {
   const editor = useRef<SqlEditorHandle>(null)
   const { running, cancelling, cancelError, lastRun, run, cancel } = useQueryRunner(
     sessionId,
@@ -46,7 +48,7 @@ export function QueryConsole({ sessionId, connectionId, database }: QueryConsole
       </div>
 
       <div className={styles.editor}>
-        <SqlEditor ref={editor} onRun={run} />
+        <SqlEditor ref={editor} initialValue={initialSql} onRun={run} />
       </div>
 
       <div className={styles.results} aria-busy={running}>

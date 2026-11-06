@@ -3,14 +3,17 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::State;
+use uuid::Uuid;
 
 use crate::connections::model::Connection;
 use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, CancelTarget, QueryOutcome};
 use crate::error::{AppError, Result};
+use crate::history::{HistoryEntry, HistoryStore};
 
 /// Rows kept per result; the rest are read and dropped.
 const ROW_LIMIT: usize = 500;
@@ -67,24 +70,58 @@ impl QuerySession {
     }
 }
 
-/// Runs a SQL script in the console's session, opening it on first use.
-/// `database` defaults to the connection's own.
+/// Runs a SQL script in the console's session, opening it on first use, and
+/// records the run in the history. `database` defaults to the connection's own.
 #[tauri::command]
 pub async fn run_query(
     store: State<'_, ConnectionStore>,
     sessions: State<'_, QuerySessions>,
+    history: State<'_, HistoryStore>,
     session_id: String,
     connection_id: String,
     database: Option<String>,
     sql: String,
 ) -> Result<QueryOutcome> {
     let connection = store.get(&connection_id)?;
-    let session = match sessions.get(&session_id) {
+    let executed_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+    let started = Instant::now();
+    let outcome = run_in_session(&sessions, &session_id, connection.clone(), database.clone(), &sql).await;
+
+    let entry = HistoryEntry {
+        id: Uuid::new_v4().to_string(),
+        executed_at,
+        connection_id: connection.id,
+        connection_name: connection.name,
+        database,
+        elapsed_ms: match &outcome {
+            Ok(outcome) => outcome.elapsed_ms,
+            Err(_) => started.elapsed().as_millis() as u64,
+        },
+        statements: outcome.as_ref().map_or(0, |o| o.results.len()),
+        rows: outcome.as_ref().ok().and_then(|o| o.results.last()).map_or(0, |r| r.rows_affected),
+        error: outcome.as_ref().err().map(ToString::to_string),
+        sql,
+    };
+    // Losing a history line must never fail the query itself.
+    if let Err(error) = history.record(entry) {
+        eprintln!("Could not save query history: {error}");
+    }
+    outcome
+}
+
+async fn run_in_session(
+    sessions: &QuerySessions,
+    session_id: &str,
+    connection: Connection,
+    database: Option<String>,
+    sql: &str,
+) -> Result<QueryOutcome> {
+    let session = match sessions.get(session_id) {
         // Edited connection settings take effect on the next run.
         Some(session) if session.connection == connection && session.database == database => session,
         _ => {
             let session = Arc::new(QuerySession::open(connection, database).await?);
-            sessions.insert(session_id.clone(), session.clone());
+            sessions.insert(session_id.to_string(), session.clone());
             session
         }
     };
@@ -93,10 +130,10 @@ pub async fn run_query(
         .driver
         .try_lock()
         .map_err(|_| AppError::Invalid("A query is already running in this console".into()))?;
-    let outcome = driver.run(&sql, ROW_LIMIT).await;
+    let outcome = driver.run(sql, ROW_LIMIT).await;
     // A dropped connection can't be reused; the next run opens a new one.
     if outcome.is_err() && !driver.is_alive().await {
-        sessions.remove(&session_id, &session);
+        sessions.remove(session_id, &session);
     }
     outcome
 }

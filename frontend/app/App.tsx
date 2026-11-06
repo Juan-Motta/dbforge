@@ -3,6 +3,7 @@ import type { Connection } from '../domain/connection'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
 import { Explorer } from '../features/explorer/Explorer'
+import { HistoryPanel } from '../features/history/HistoryPanel'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
 import { useTheme } from '../features/settings/useTheme'
@@ -91,6 +92,16 @@ export function App() {
             }}
             onNewConnection={() => setDialog({})}
             onEditConnection={(connection) => setDialog({ connection })}
+          />
+        )}
+        {activity === 'history' && (
+          <HistoryPanel
+            canOpen={(entry) => connections.some((c) => c.id === entry.connectionId)}
+            onOpen={(entry) =>
+              setTabs((state) =>
+                newQueryTab(state, entry.connectionId, entry.database ?? undefined, entry.sql),
+              )
+            }
           />
         )}
         <main className={`island ${styles.main}`}>

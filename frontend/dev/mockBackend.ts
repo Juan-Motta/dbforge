@@ -120,6 +120,14 @@ export function installMockBackend() {
           ],
         })
       }
+      case 'list_history': {
+        const search = String(payload.search).toLowerCase()
+        return delay(
+          mockHistory.filter(
+            (entry) => entry.sql.toLowerCase().includes(search) && (!payload.errorsOnly || entry.error),
+          ),
+        )
+      }
       case 'list_relations':
         return delay({
           database: payload.database ?? 'shop',
@@ -239,3 +247,41 @@ CREATE INDEX customers_referrer_idx ON public.customers USING btree (referrer_id
 
 COMMENT ON TABLE public.customers IS 'Paying customers';`,
 }
+
+const hoursAgo = (hours: number) => Date.now() - hours * 60 * 60 * 1000
+const mockHistory = [
+  {
+    sql: 'SELECT c.id, c.name, COUNT(o.id) AS orders\nFROM customers c JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id',
+    at: 0.1,
+    ms: 38,
+    rows: 14,
+  },
+  {
+    sql: 'SELECT u.id, u.email, u.last_login FROM users u',
+    at: 0.6,
+    ms: 4,
+    rows: 0,
+    error: 'column u.last_login does not exist',
+  },
+  { sql: "UPDATE orders SET status = 'refunded' WHERE id = 98412", at: 1.2, ms: 6, rows: 1 },
+  {
+    sql: 'BEGIN; DELETE FROM sessions WHERE expires_at < now(); COMMIT',
+    at: 26,
+    ms: 420,
+    rows: 0,
+    statements: 3,
+  },
+  { sql: 'SELECT status, COUNT(*) FROM orders GROUP BY status', at: 27, ms: 210, rows: 5 },
+  { sql: 'SELECT * FROM payments WHERE order_id = 98301', at: 80, ms: 2, rows: 1, connectionId: 'deleted' },
+].map((entry, i) => ({
+  id: String(i),
+  executedAt: hoursAgo(entry.at),
+  connectionId: entry.connectionId ?? connections[0].id,
+  connectionName: entry.connectionId ? 'old-staging' : connections[0].name,
+  database: 'shop',
+  sql: entry.sql,
+  elapsedMs: entry.ms,
+  statements: entry.statements ?? 1,
+  rows: entry.rows,
+  error: entry.error ?? null,
+}))
