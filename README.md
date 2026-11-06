@@ -18,7 +18,7 @@ A lightweight, cross-platform database viewer built with Tauri 2, React 19 and T
 frontend/
   app/          App composition (layout of the shell)
   components/   Reusable, feature-agnostic UI (Button, Icon, Badge, EngineLogo)
-  domain/       Core types shared across features (Connection, Engine)
+  domain/       Core types shared across features (Connection, Engine, TableRef)
   features/     One folder per feature, with its components, logic and styles
     explorer/   Database explorer tree
     shell/      Title bar, activity rail, status bar

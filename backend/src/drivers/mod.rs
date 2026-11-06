@@ -83,6 +83,70 @@ pub struct QueryOutcome {
     pub elapsed_ms: u64,
 }
 
+/// Everything the structure view shows about a table or view.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableStructure {
+    /// `Table` or `View`.
+    pub kind: ObjectKind,
+    pub row_estimate: Option<i64>,
+    pub data_bytes: i64,
+    pub index_bytes: i64,
+    pub comment: Option<String>,
+    pub columns: Vec<ColumnInfo>,
+    pub indexes: Vec<IndexInfo>,
+    pub foreign_keys: Vec<ForeignKey>,
+    pub triggers: Vec<TriggerInfo>,
+    /// A `CREATE` script that rebuilds the object, comments and triggers included.
+    pub ddl: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    /// The default expression, or how the value is generated (identity, computed).
+    pub default: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexInfo {
+    pub name: String,
+    /// Access method, e.g. `btree` or `gin`.
+    pub method: String,
+    pub unique: bool,
+    pub primary: bool,
+    /// Key columns or expressions, in order.
+    pub columns: Vec<String>,
+    pub bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignKey {
+    pub name: String,
+    pub columns: Vec<String>,
+    /// Schema-qualified when outside the search path, e.g. `billing.invoices`.
+    pub referenced_table: String,
+    pub referenced_columns: Vec<String>,
+    /// SQL action names, e.g. `NO ACTION` or `CASCADE`.
+    pub on_update: String,
+    pub on_delete: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerInfo {
+    pub name: String,
+    pub enabled: bool,
+    /// The full `CREATE TRIGGER` statement.
+    pub definition: String,
+}
+
 pub async fn server_version(connection: &Connection, password: Option<&str>) -> Result<String> {
     with_timeout(async {
         match connection.engine {
@@ -113,6 +177,20 @@ pub async fn fetch_rows(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::fetch_rows(connection, password, table, offset, limit).await,
+            other => Err(AppError::Unsupported(other.label())),
+        }
+    })
+    .await
+}
+
+pub async fn table_structure(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+) -> Result<TableStructure> {
+    with_timeout(async {
+        match connection.engine {
+            Engine::Postgres => postgres::table_structure(connection, password, table).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -182,7 +260,5 @@ pub async fn cancel(
 }
 
 async fn with_timeout<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
-    tokio::time::timeout(TIMEOUT, request)
-        .await
-        .map_err(|_| AppError::Timeout(TIMEOUT.as_secs()))?
+    tokio::time::timeout(TIMEOUT, request).await.map_err(|_| AppError::Timeout(TIMEOUT.as_secs()))?
 }

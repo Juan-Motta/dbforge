@@ -1,6 +1,6 @@
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
-import type { TableRef } from './api'
+import type { TableRef } from '../../domain/table'
 import { DataGrid } from '../../components/data-grid/DataGrid'
 import { useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'

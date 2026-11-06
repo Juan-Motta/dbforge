@@ -5,6 +5,10 @@ use futures_util::TryStreamExt;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo, ValueRef};
 
+mod structure;
+
+pub use structure::table_structure;
+
 use super::{Column, DbObject, ObjectKind, QueryOutcome, RowsPage, StatementResult, TableRef};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
@@ -12,10 +16,8 @@ use crate::error::{AppError, Result};
 /// Opens a connection, optionally to a database other than the configured one.
 /// PostgreSQL can only read a database's schemas from a connection to that database.
 async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<PgConnection> {
-    let mut options = PgConnectOptions::new()
-        .host(&connection.host)
-        .port(connection.port)
-        .username(&connection.username);
+    let mut options =
+        PgConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username);
     let database = database.unwrap_or(&connection.database);
     if !database.is_empty() {
         options = options.database(database);
@@ -80,7 +82,9 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
                 })
                 .collect()
         }
-        _ => return Err(AppError::Invalid(format!("Unexpected path: {}", path.join("/")))),
+        _ => {
+            return Err(AppError::Invalid(format!("Unexpected path: {}", path.join("/"))));
+        }
     };
     Ok(objects)
 }
@@ -241,9 +245,9 @@ mod tests {
     use super::*;
     use crate::connections::model::Engine;
 
-    const PASSWORD: Option<&str> = Some("dbforge");
+    pub(super) const PASSWORD: Option<&str> = Some("dbforge");
 
-    fn local() -> Connection {
+    pub(super) fn local() -> Connection {
         Connection {
             id: "test".into(),
             name: "test".into(),
@@ -317,8 +321,12 @@ mod tests {
         let table = TableRef { database: "shop".into(), schema: "dbforge_rows".into(), name: r#"Odd "Name""#.into() };
 
         let first = fetch_rows(&local(), PASSWORD, &table, 0, 2).await.unwrap();
-        let columns: Vec<_> = first.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str(), c.primary_key)).collect();
-        assert_eq!(columns, [("id", "integer", true), ("label", "character varying(20)", false), ("paid", "numeric(10,2)", false)]);
+        let columns: Vec<_> =
+            first.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str(), c.primary_key)).collect();
+        assert_eq!(
+            columns,
+            [("id", "integer", true), ("label", "character varying(20)", false), ("paid", "numeric(10,2)", false)]
+        );
         let s = |v: &str| Some(v.to_string());
         assert_eq!(first.rows, [vec![s("1"), s("a"), s("12.50")], vec![s("2"), None, s("0.00")]]);
         assert!(first.has_more);

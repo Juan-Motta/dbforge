@@ -1,0 +1,95 @@
+.page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bar {
+  height: 36px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.views {
+  display: flex;
+  flex: none;
+}
+
+.view {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.view:hover {
+  color: var(--text);
+}
+
+.view[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.count {
+  color: var(--text3);
+  font-weight: 400;
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  color: var(--text3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bar > button {
+  align-self: center;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+}
+
+.content[hidden] {
+  display: none;
+}
+
+.content[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+.error,
+.loading {
+  margin: 16px;
+  font-size: 12.5px;
+  color: var(--text3);
+}
+
+.error {
+  color: var(--err);
+  -webkit-user-select: text;
+  user-select: text;
+}

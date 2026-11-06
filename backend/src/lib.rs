@@ -25,6 +25,7 @@ pub fn run() {
             commands::test_connection,
             explorer::list_objects,
             explorer::fetch_rows,
+            explorer::table_structure,
             query::run_query,
             query::cancel_query,
             query::close_session,

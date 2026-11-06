@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { errorMessage } from '../../lib/errors'
-import { tableDataApi, type RowsPage, type TableRef } from './api'
+import type { TableRef } from '../../domain/table'
+import { tableDataApi, type RowsPage } from './api'
 
 export const PAGE_SIZE = 200
 

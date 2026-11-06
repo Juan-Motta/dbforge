@@ -1,10 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-
-export interface TableRef {
-  database: string
-  schema: string
-  name: string
-}
+import type { TableRef } from '../../domain/table'
 
 export interface Column {
   name: string

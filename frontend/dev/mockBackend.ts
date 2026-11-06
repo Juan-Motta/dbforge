@@ -120,6 +120,8 @@ export function installMockBackend() {
           ],
         })
       }
+      case 'table_structure':
+        return delay(mockStructure)
       case 'cancel_query':
       case 'close_session':
         sleeping.get(String(payload.sessionId))?.()
@@ -129,4 +131,96 @@ export function installMockBackend() {
         throw new Error(`Mock backend: unknown command ${cmd}`)
     }
   })
+}
+
+const mockStructure = {
+  kind: 'table',
+  rowEstimate: 48213,
+  dataBytes: 9_856_000,
+  indexBytes: 3_250_000,
+  comment: 'Paying customers',
+  columns: [
+    {
+      name: 'id',
+      dataType: 'bigint',
+      nullable: false,
+      default: 'GENERATED ALWAYS AS IDENTITY',
+      comment: null,
+    },
+    {
+      name: 'email',
+      dataType: 'character varying(255)',
+      nullable: false,
+      default: null,
+      comment: 'Login email',
+    },
+    { name: 'name', dataType: 'character varying(120)', nullable: false, default: null, comment: null },
+    {
+      name: 'country',
+      dataType: 'character(2)',
+      nullable: false,
+      default: "'US'::bpchar",
+      comment: 'ISO 3166-1',
+    },
+    { name: 'referrer_id', dataType: 'bigint', nullable: true, default: null, comment: null },
+    {
+      name: 'created_at',
+      dataType: 'timestamp with time zone',
+      nullable: false,
+      default: 'now()',
+      comment: null,
+    },
+  ],
+  indexes: [
+    {
+      name: 'customers_pkey',
+      method: 'btree',
+      unique: true,
+      primary: true,
+      columns: ['id'],
+      bytes: 1_200_000,
+    },
+    {
+      name: 'customers_email_key',
+      method: 'btree',
+      unique: true,
+      primary: false,
+      columns: ['email'],
+      bytes: 1_100_000,
+    },
+    {
+      name: 'customers_referrer_idx',
+      method: 'btree',
+      unique: false,
+      primary: false,
+      columns: ['referrer_id'],
+      bytes: 200_000,
+    },
+  ],
+  foreignKeys: [
+    {
+      name: 'customers_referrer_id_fkey',
+      columns: ['referrer_id'],
+      referencedTable: 'customers',
+      referencedColumns: ['id'],
+      onUpdate: 'NO ACTION',
+      onDelete: 'SET NULL',
+    },
+  ],
+  triggers: [],
+  ddl: `CREATE TABLE public.customers (
+    id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+    email character varying(255) NOT NULL,
+    name character varying(120) NOT NULL,
+    country character(2) DEFAULT 'US'::bpchar NOT NULL,
+    referrer_id bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT customers_pkey PRIMARY KEY (id),
+    CONSTRAINT customers_email_key UNIQUE (email),
+    CONSTRAINT customers_referrer_id_fkey FOREIGN KEY (referrer_id) REFERENCES customers(id) ON DELETE SET NULL
+);
+
+CREATE INDEX customers_referrer_idx ON public.customers USING btree (referrer_id);
+
+COMMENT ON TABLE public.customers IS 'Paying customers';`,
 }

@@ -1,4 +1,4 @@
-import type { TableRef } from '../features/table-data/api'
+import type { TableRef } from '../domain/table'
 
 export type Tab = { id: string; title: string; connectionId: string } & (
   { kind: 'query'; database?: string } | { kind: 'table'; table: TableRef }

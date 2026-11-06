@@ -2,7 +2,7 @@ import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
 import { QueryConsole } from '../features/query/QueryConsole'
-import { TableView } from '../features/table-data/TableView'
+import { TablePage } from './TablePage'
 import type { Tab } from './tabs'
 import styles from './App.module.css'
 
@@ -44,7 +44,7 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery }: Wor
           {tab.kind === 'query' ? (
             <QueryConsole sessionId={tab.id} connectionId={tab.connectionId} database={tab.database} />
           ) : (
-            <TableView connectionId={tab.connectionId} table={tab.table} />
+            <TablePage connectionId={tab.connectionId} table={tab.table} />
           )}
         </div>
       ))}
