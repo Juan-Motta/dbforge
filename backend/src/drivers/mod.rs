@@ -1,6 +1,7 @@
 //! Entry points that dispatch to the right database driver by engine.
 
 mod edit_sql;
+mod mongodb;
 mod mysql;
 mod postgres;
 mod sqlite;
@@ -250,6 +251,7 @@ pub async fn server_version(connection: &Connection, password: Option<&str>) -> 
             Engine::Sqlite => sqlite::server_version(connection).await,
             Engine::Mysql | Engine::Mariadb => mysql::server_version(connection, password).await,
             Engine::Sqlserver => sqlserver::server_version(connection, password).await,
+            Engine::Mongodb => mongodb::server_version(connection, password).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -263,6 +265,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
             Engine::Sqlite => sqlite::list_objects(connection, path).await,
             Engine::Mysql | Engine::Mariadb => mysql::list_objects(connection, password, path).await,
             Engine::Sqlserver => sqlserver::list_objects(connection, password, path).await,
+            Engine::Mongodb => mongodb::list_objects(connection, password, path).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -280,6 +283,7 @@ pub async fn list_relations(
             Engine::Sqlite => sqlite::list_relations(connection).await,
             Engine::Mysql | Engine::Mariadb => mysql::list_relations(connection, password, database).await,
             Engine::Sqlserver => sqlserver::list_relations(connection, password, database).await,
+            Engine::Mongodb => mongodb::list_relations(connection, password, database).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -299,6 +303,7 @@ pub async fn stream_table(
         Engine::Sqlite => sqlite::stream_table(connection, table, sink).await,
         Engine::Mysql | Engine::Mariadb => mysql::stream_table(connection, password, table, sink).await,
         Engine::Sqlserver => sqlserver::stream_table(connection, password, table, sink).await,
+        Engine::Mongodb => mongodb::stream_table(connection, password, table, sink).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -316,6 +321,7 @@ pub async fn fetch_rows(
             Engine::Sqlite => sqlite::fetch_rows(connection, table, offset, limit).await,
             Engine::Mysql | Engine::Mariadb => mysql::fetch_rows(connection, password, table, offset, limit).await,
             Engine::Sqlserver => sqlserver::fetch_rows(connection, password, table, offset, limit).await,
+            Engine::Mongodb => mongodb::fetch_rows(connection, password, table, offset, limit).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })

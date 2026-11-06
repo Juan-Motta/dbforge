@@ -21,6 +21,20 @@ pub enum AppError {
     Database(#[from] sqlx::Error),
     #[error("{}", sqlserver_message(.0))]
     SqlServer(#[from] tiberius::error::Error),
+    #[error("{}", mongodb_message(.0))]
+    MongoDb(#[from] mongodb::error::Error),
+}
+
+/// The server's own message, without the driver's kind and labels.
+fn mongodb_message(error: &mongodb::error::Error) -> String {
+    use mongodb::error::{ErrorKind, WriteFailure};
+    match error.kind.as_ref() {
+        ErrorKind::Command(command) => command.message.clone(),
+        ErrorKind::Write(WriteFailure::WriteError(write)) => write.message.clone(),
+        ErrorKind::Authentication { message, .. } => format!("Authentication failed: {message}"),
+        ErrorKind::ServerSelection { message, .. } => format!("Could not reach the server: {message}"),
+        other => other.to_string(),
+    }
 }
 
 /// The server's own message, without tiberius's token and server details.
