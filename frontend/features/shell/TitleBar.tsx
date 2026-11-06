@@ -12,9 +12,10 @@ interface TitleBarProps {
   path: string[]
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
+  onOpenSettings: () => void
 }
 
-export function TitleBar({ connection, path, onNewQuery }: TitleBarProps) {
+export function TitleBar({ connection, path, onNewQuery, onOpenSettings }: TitleBarProps) {
   return (
     <header
       className={styles.titleBar}
@@ -72,7 +73,7 @@ export function TitleBar({ connection, path, onNewQuery }: TitleBarProps) {
       <IconButton label="Notifications">
         <Icon name="bell" />
       </IconButton>
-      <IconButton label="Settings">
+      <IconButton label="Settings" onClick={onOpenSettings}>
         <Icon name="settings" />
       </IconButton>
     </header>

@@ -3,6 +3,8 @@ import type { Connection } from '../domain/connection'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
 import { Explorer } from '../features/explorer/Explorer'
+import { SettingsDialog } from '../features/settings/SettingsDialog'
+import { useTheme } from '../features/settings/useTheme'
 import { ActivityRail, type Activity } from '../features/shell/ActivityRail'
 import { StatusBar } from '../features/shell/StatusBar'
 import { TitleBar } from '../features/shell/TitleBar'
@@ -24,6 +26,8 @@ export function App() {
   const [selection, setSelection] = useState<Selection | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [tabs, setTabs] = useState(NO_TABS)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const theme = useTheme()
 
   const activeConnection = connections.find((c) => c.id === selection?.connectionId)
   const activePath = activeConnection ? (selection?.path ?? []) : []
@@ -40,7 +44,12 @@ export function App() {
 
   return (
     <div className={styles.app}>
-      <TitleBar connection={activeConnection} path={activePath} onNewQuery={newQuery} />
+      <TitleBar
+        connection={activeConnection}
+        path={activePath}
+        onNewQuery={newQuery}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
       <div className={styles.body}>
         <ActivityRail active={activity} onChange={setActivity} />
@@ -81,6 +90,14 @@ export function App() {
           onSave={save}
           onDelete={removeConnection}
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {settingsOpen && (
+        <SettingsDialog
+          theme={theme.preference}
+          onThemeChange={theme.choose}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
     </div>

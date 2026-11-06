@@ -1,0 +1,116 @@
+.dialog {
+  width: 560px;
+}
+
+.section {
+  padding: 4px 20px 20px;
+}
+
+.section h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.theme {
+  width: 150px;
+  padding: 8px;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: 500 12.5px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* A thumbnail of each theme, so these colors are fixed rather than tokens. */
+.preview {
+  position: relative;
+  display: block;
+  height: 70px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.sidebar,
+.accentLine,
+.textLine {
+  position: absolute;
+}
+
+.sidebar {
+  inset: 0 70% 0 0;
+}
+
+.accentLine,
+.textLine {
+  left: 38%;
+  height: 5px;
+  border-radius: 3px;
+}
+
+.accentLine {
+  top: 12px;
+  width: 40%;
+}
+
+.textLine {
+  top: 24px;
+  width: 50%;
+}
+
+.dark {
+  border: 1px solid #24262b;
+  background: #111215;
+}
+
+.dark .sidebar {
+  background: #16171a;
+}
+
+.dark .accentLine {
+  background: #f07a3a;
+}
+
+.dark .textLine {
+  background: #30323a;
+}
+
+.light {
+  border: 1px solid #e2e2df;
+  background: #ffffff;
+}
+
+.light .sidebar {
+  background: #f8f8f7;
+}
+
+.light .accentLine {
+  background: #b9521a;
+}
+
+.light .textLine {
+  background: #d3d3cf;
+}
+
+.system {
+  border: 1px solid var(--border2);
+  background: linear-gradient(90deg, #111215 50%, #ffffff 50%);
+}
+
+.system span {
+  display: none;
+}
