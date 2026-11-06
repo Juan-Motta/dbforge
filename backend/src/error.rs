@@ -17,8 +17,27 @@ pub enum AppError {
     Format(#[from] serde_json::Error),
     #[error("Keychain error: {0}")]
     Keychain(#[from] keyring::Error),
-    #[error("{0}")]
+    #[error("{}", database_message(.0))]
     Database(#[from] sqlx::Error),
+}
+
+/// The server's message with its detail and hint, as psql shows them. sqlx's own
+/// text prefixes "error returned from database" and appends a line number that
+/// points into PostgreSQL's source code, not into the user's query.
+fn database_message(error: &sqlx::Error) -> String {
+    let Some(server) = error.as_database_error() else {
+        return error.to_string();
+    };
+    let mut message = server.message().to_string();
+    if let Some(pg) = server.try_downcast_ref::<sqlx::postgres::PgDatabaseError>() {
+        if let Some(detail) = pg.detail() {
+            message.push_str(&format!("\nDetail: {detail}"));
+        }
+        if let Some(hint) = pg.hint() {
+            message.push_str(&format!("\nHint: {hint}"));
+        }
+    }
+    message
 }
 
 impl Serialize for AppError {

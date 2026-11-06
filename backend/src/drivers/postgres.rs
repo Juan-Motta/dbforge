@@ -364,7 +364,14 @@ mod tests {
     async fn query_errors_carry_the_server_message() {
         let mut session = open_session(&local(), PASSWORD, None).await.unwrap();
         let error = session.run("SELECT 1/0", 10).await.unwrap_err();
-        assert!(error.to_string().contains("division by zero"), "{error}");
+        assert_eq!(error.to_string(), "division by zero");
+
+        let duplicate = "CREATE TEMP TABLE uniq (a int PRIMARY KEY); INSERT INTO uniq VALUES (1), (1)";
+        let error = session.run(duplicate, 10).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "duplicate key value violates unique constraint \"uniq_pkey\"\nDetail: Key (a)=(1) already exists."
+        );
         assert!(session.is_alive().await, "a failed statement must not break the session");
     }
 
