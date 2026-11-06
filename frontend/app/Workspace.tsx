@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { IconButton } from '../components/Button'
+import { sqlDialectOf, type Connection } from '../domain/connection'
 import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
 import { DiagramView } from '../features/diagram/DiagramView'
@@ -16,13 +17,13 @@ interface WorkspaceProps {
   onClose: (id: string) => void
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
-  isProduction: (connectionId: string) => boolean
+  connectionOf: (connectionId: string) => Connection | undefined
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram' } as const
 
 /** The main island: open query consoles, tables and diagrams, one visible at a time. */
-export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, isProduction }: WorkspaceProps) {
+export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, connectionOf }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
 
   if (tabs.length === 0) {
@@ -55,6 +56,12 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, isPro
               connectionId={tab.connectionId}
               database={tab.database}
               initialSql={tab.initialSql}
+              dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
+              explainUnsupported={
+                sqlDialectOf(connectionOf(tab.connectionId)?.engine) === 'mysql'
+                  ? "Explain isn't supported for MySQL yet"
+                  : undefined
+              }
               onExportResult={(result) =>
                 setExporting({
                   kind: 'rows',
@@ -70,7 +77,8 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, isPro
             <TablePage
               connectionId={tab.connectionId}
               table={tab.table}
-              production={isProduction(tab.connectionId)}
+              production={connectionOf(tab.connectionId)?.environment === 'production'}
+              dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
               onExport={() =>
                 setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table })
               }

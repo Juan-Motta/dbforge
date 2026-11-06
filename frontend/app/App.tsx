@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { Connection } from '../domain/connection'
+import { defaultSchema, type Connection } from '../domain/connection'
+import { tableRefFromPath } from '../domain/table'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
 import { Explorer } from '../features/explorer/Explorer'
@@ -40,14 +41,15 @@ export function App() {
     ? () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
     : undefined
 
-  // The diagram of the selected schema, or `public` when only a connection or database is selected.
+  // The diagram of the selected schema, or the default one when only a connection or database is selected.
   const diagramDatabase = activePath[0] ?? activeConnection?.database
+  const diagramSchema =
+    activeConnection && diagramDatabase
+      ? (activePath[1] ?? defaultSchema(activeConnection.engine, diagramDatabase))
+      : undefined
   const openDiagram =
     activeConnection && diagramDatabase
-      ? () =>
-          setTabs((state) =>
-            openDiagramTab(state, activeConnection.id, diagramDatabase, activePath[1] ?? 'public'),
-          )
+      ? () => setTabs((state) => openDiagramTab(state, activeConnection.id, diagramDatabase, diagramSchema!))
       : undefined
 
   // The rail's diagram and search buttons act instead of switching the side panel.
@@ -78,7 +80,8 @@ export function App() {
           {
             id: 'diagram',
             label: 'Show ER diagram',
-            detail: `${diagramDatabase}.${activePath[1] ?? 'public'}`,
+            detail:
+              diagramDatabase === diagramSchema ? diagramDatabase : `${diagramDatabase}.${diagramSchema}`,
             run: openDiagram,
           },
         ]
@@ -112,9 +115,8 @@ export function App() {
             connections={connections}
             onSelect={({ connectionId, path }) => setSelection({ connectionId, path })}
             onOpen={(node) => {
-              const [database, schema, name] = node.path
               if (node.kind === 'table' || node.kind === 'view') {
-                setTabs((state) => openTableTab(state, node.connectionId, { database, schema, name }))
+                setTabs((state) => openTableTab(state, node.connectionId, tableRefFromPath(node.path)))
               }
             }}
             onNewConnection={() => setDialog({})}
@@ -141,7 +143,7 @@ export function App() {
               onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
               onClose={(id) => setTabs((state) => closeTab(state, id))}
               onNewQuery={newQuery}
-              isProduction={(id) => connections.find((c) => c.id === id)?.environment === 'production'}
+              connectionOf={(id) => connections.find((c) => c.id === id)}
             />
           )}
         </main>

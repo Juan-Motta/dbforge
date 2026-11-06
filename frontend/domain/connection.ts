@@ -42,3 +42,18 @@ export const ENVIRONMENT_LABELS: Record<Environment, string> = {
   staging: 'Staging',
   production: 'Production',
 }
+
+/** Engines whose databases hold tables directly, with no schemas in between. */
+const SCHEMALESS: Engine[] = ['mysql', 'mariadb']
+
+/** The schema to use when only a database is selected. */
+export function defaultSchema(engine: Engine, database: string): string {
+  return SCHEMALESS.includes(engine) ? database : 'public'
+}
+
+export type SqlDialect = 'postgres' | 'mysql'
+
+/** How SQL is highlighted and completed for an engine. */
+export function sqlDialectOf(engine: Engine | undefined): SqlDialect {
+  return engine && SCHEMALESS.includes(engine) ? 'mysql' : 'postgres'
+}

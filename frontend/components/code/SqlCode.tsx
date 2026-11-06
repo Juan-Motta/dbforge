@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react'
-import { sql, PostgreSQL } from '@codemirror/lang-sql'
 import { EditorState } from '@codemirror/state'
 import { EditorView, lineNumbers } from '@codemirror/view'
+import type { SqlDialect } from '../../domain/connection'
+import { sqlLanguage } from './sqlLanguage'
 import { sqlTheme } from './sqlTheme'
 
 /** Read-only, highlighted SQL that can still be selected and copied. */
-export function SqlCode({ value }: { value: string }) {
+export function SqlCode({ value, dialect }: { value: string; dialect?: SqlDialect }) {
   const host = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -13,11 +14,11 @@ export function SqlCode({ value }: { value: string }) {
       parent: host.current!,
       state: EditorState.create({
         doc: value,
-        extensions: [lineNumbers(), sql({ dialect: PostgreSQL }), sqlTheme, EditorState.readOnly.of(true)],
+        extensions: [lineNumbers(), sqlLanguage(dialect), sqlTheme, EditorState.readOnly.of(true)],
       }),
     })
     return () => view.destroy()
-  }, [value])
+  }, [value, dialect])
 
   return <div ref={host} style={{ height: '100%' }} />
 }

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
+import type { SqlDialect } from '../../domain/connection'
 import type { StatementResult } from './api'
 import { PlanView } from './PlanView'
 import { ResultsPanel } from './ResultsPanel'
@@ -17,6 +18,9 @@ interface QueryConsoleProps {
   /** Text the editor starts with, e.g. a query reopened from the history. */
   initialSql?: string
   onExportResult: (result: StatementResult) => void
+  dialect: SqlDialect
+  /** Undefined when the engine supports EXPLAIN; otherwise why it doesn't. */
+  explainUnsupported?: string
 }
 
 /** A SQL editor with the results of its last run below. */
@@ -26,6 +30,8 @@ export function QueryConsole({
   database,
   initialSql,
   onExportResult,
+  dialect,
+  explainUnsupported,
 }: QueryConsoleProps) {
   const editor = useRef<SqlEditorHandle>(null)
   const { running, explaining, cancelling, cancelError, lastRun, run, explain, cancel } = useQueryRunner(
@@ -45,13 +51,18 @@ export function QueryConsole({
         <span className={styles.spacer} />
         {cancelError && <span className={styles.cancelError}>Could not cancel: {cancelError}</span>}
         <label
+          hidden={Boolean(explainUnsupported)}
           className={styles.analyze}
           title="Runs the statement to measure it, inside a transaction that is rolled back"
         >
           <input type="checkbox" checked={analyze} onChange={(event) => setAnalyze(event.target.checked)} />
           Analyze
         </label>
-        <Button disabled={running || explaining} onClick={() => explain(textToRun(), analyze)}>
+        <Button
+          disabled={running || explaining || Boolean(explainUnsupported)}
+          title={explainUnsupported}
+          onClick={() => explain(textToRun(), analyze)}
+        >
           <Icon name="plan" />
           {explaining ? 'Explaining…' : 'Explain'}
         </Button>
@@ -70,7 +81,7 @@ export function QueryConsole({
       </div>
 
       <div className={styles.editor}>
-        <SqlEditor ref={editor} initialValue={initialSql} onRun={run} />
+        <SqlEditor ref={editor} initialValue={initialSql} dialect={dialect} onRun={run} />
       </div>
 
       <div className={styles.results} aria-busy={running || explaining}>

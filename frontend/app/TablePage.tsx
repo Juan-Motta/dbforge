@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
+import type { SqlDialect } from '../domain/connection'
 import type { TableRef } from '../domain/table'
 import { TableView } from '../features/table-data/TableView'
 import { StructureSection } from '../features/table-structure/StructureSection'
@@ -16,11 +17,12 @@ interface TablePageProps {
   table: TableRef
   /** Editing a production connection's data asks for confirmation. */
   production: boolean
+  dialect: SqlDialect
   onExport: () => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
-export function TablePage({ connectionId, table, production, onExport }: TablePageProps) {
+export function TablePage({ connectionId, table, production, dialect, onExport }: TablePageProps) {
   const [view, setView] = useState<View>('data')
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
@@ -60,7 +62,7 @@ export function TablePage({ connectionId, table, production, onExport }: TablePa
           {error ? (
             <p className={styles.error}>{error}</p>
           ) : structure ? (
-            <StructureSection structure={structure} section={view} />
+            <StructureSection structure={structure} section={view} dialect={dialect} />
           ) : (
             <p className={styles.loading}>Loading…</p>
           )}

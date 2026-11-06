@@ -16,6 +16,16 @@ const connections: Connection[] = [
     database: 'shop',
     username: 'app',
   },
+  {
+    id: 'demo-mysql',
+    name: 'staging-mysql',
+    engine: 'mysql',
+    environment: 'staging',
+    host: 'localhost',
+    port: 3306,
+    database: 'app',
+    username: 'app',
+  },
 ]
 
 const table = (name: string, rowEstimate: number): DbObject => ({ name, kind: 'table', rowEstimate })
@@ -34,6 +44,16 @@ const objects: Record<string, DbObject[]> = {
     table('orders', 612_400),
     table('payments', 588_000),
     { name: 'active_customers', kind: 'view', rowEstimate: null },
+  ],
+}
+
+/** MySQL has no schemas: a database lists its tables directly. */
+const mysqlObjects: Record<string, DbObject[]> = {
+  '': [{ name: 'app', kind: 'database', rowEstimate: null }],
+  app: [
+    table('customers', 48_210),
+    table('orders', 612_400),
+    { name: 'v_daily_sales', kind: 'view', rowEstimate: null },
   ],
 }
 
@@ -66,7 +86,8 @@ export function installMockBackend() {
         return delay('PostgreSQL 17.0 (mock)')
       case 'list_objects': {
         const path = (payload.path as string[]).join('/')
-        return delay(objects[path] ?? [])
+        const source = payload.connectionId === 'demo-mysql' ? mysqlObjects : objects
+        return delay(source[path] ?? [])
       }
       case 'fetch_rows': {
         const offset = payload.offset as number

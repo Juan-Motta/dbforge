@@ -1,6 +1,7 @@
 import { Badge, type Tone } from '../../components/Badge'
 import { SqlCode } from '../../components/code/SqlCode'
 import { Icon } from '../../components/Icon'
+import type { SqlDialect } from '../../domain/connection'
 import type { TableStructure } from './api'
 import { columnKeys, formatBytes, type KeyKind } from './format'
 import type { Section } from './sections'
@@ -9,7 +10,15 @@ import styles from './StructureSection.module.css'
 const KEY_TONES: Record<KeyKind, Tone> = { PK: 'warn', FK: 'info', UNI: 'ok', IDX: 'muted' }
 
 /** One read-only part of a table's structure. */
-export function StructureSection({ structure, section }: { structure: TableStructure; section: Section }) {
+export function StructureSection({
+  structure,
+  section,
+  dialect,
+}: {
+  structure: TableStructure
+  section: Section
+  dialect?: SqlDialect
+}) {
   switch (section) {
     case 'columns':
       return <Columns structure={structure} />
@@ -20,7 +29,7 @@ export function StructureSection({ structure, section }: { structure: TableStruc
     case 'triggers':
       return <Triggers structure={structure} />
     case 'ddl':
-      return <SqlCode value={structure.ddl} />
+      return <SqlCode value={structure.ddl} dialect={dialect} />
   }
 }
 
