@@ -66,19 +66,30 @@ export function layout(
     return value
   }
 
-  const columns = new Map<number, { name: string; height: number }[]>()
+  const levels = new Map<number, { name: string; height: number }[]>()
   for (const table of [...tables].sort((a, b) => a.name.localeCompare(b.name))) {
-    const column = rankOf(table.name)
-    columns.set(column, [...(columns.get(column) ?? []), table])
+    const level = rankOf(table.name)
+    levels.set(level, [...(levels.get(level) ?? []), table])
   }
 
+  // A crowded level wraps into several columns so the diagram grows wider rather
+  // than very tall: aim for a column height that makes the whole thing about 16:10.
+  const area = tables.reduce((sum, t) => sum + (t.height + GAP_Y) * (CARD_WIDTH + GAP_X), 0)
+  const maxHeight = Math.max(Math.sqrt(area / 1.6), ...tables.map((t) => t.height))
+
   const positions = new Map<string, Point>()
-  for (const [column, members] of columns) {
+  let column = 0
+  for (const level of [...levels.keys()].sort((a, b) => a - b)) {
     let y = 0
-    for (const table of members) {
+    for (const table of levels.get(level)!) {
+      if (y > 0 && y + table.height > maxHeight) {
+        column += 1
+        y = 0
+      }
       positions.set(table.name, { x: column * (CARD_WIDTH + GAP_X), y })
       y += table.height + GAP_Y
     }
+    column += 1
   }
   return positions
 }
@@ -141,4 +152,14 @@ export function zoomAt(view: View, factor: number, anchor: Point): View {
   const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * factor))
   const ratio = scale / view.scale
   return { scale, x: anchor.x - (anchor.x - view.x) * ratio, y: anchor.y - (anchor.y - view.y) * ratio }
+}
+
+/** A table and every table it references or is referenced by. */
+export function neighborhood(name: string, relationships: Relationship[]): Set<string> {
+  const names = new Set([name])
+  for (const r of relationships) {
+    if (r.table === name) names.add(r.referencedTable)
+    if (r.referencedTable === name) names.add(r.table)
+  }
+  return names
 }

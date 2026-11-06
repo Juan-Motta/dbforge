@@ -10,6 +10,7 @@ import {
   fitView,
   layout,
   localRelationships,
+  neighborhood,
   relationshipPath,
   shownColumns,
   zoomAt,
@@ -64,13 +65,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
   const drag = useRef<Drag | null>(null)
 
   const cards = useMemo(
-    () =>
-      diagram.tables
-        .filter((t) => visible.has(t.name))
-        .map((table) => {
-          const columns = shownColumns(table, mode, foreignKeys)
-          return { table, columns, height: cardHeight(columns.length) }
-        }),
+    () => buildCards(diagram, visible, mode, foreignKeys),
     [diagram, visible, mode, foreignKeys],
   )
   const autoPositions = useMemo(
@@ -164,18 +159,50 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     }
   }
 
-  const onPointerUp = () => {
+  // The canvas captures the pointer while dragging, so the browser's dblclick lands
+  // on the canvas rather than the card; double clicks are detected here instead.
+  const lastClick = useRef<{ name: string; time: number } | null>(null)
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current
     drag.current = null
-    // A click without a drag focuses the card, or clears the focus on a second click.
-    if (current?.kind === 'card' && !current.moved) {
-      setFocused((name) => (name === current.name ? null : current.name))
+    if (current?.kind !== 'card' || current.moved) return
+    const previous = lastClick.current
+    if (previous?.name === current.name && event.timeStamp - previous.time < 400) {
+      lastClick.current = null
+      showNeighborhood(current.name)
+      return
     }
+    lastClick.current = { name: current.name, time: event.timeStamp }
+    // A single click focuses the card, or clears the focus on the same card.
+    setFocused((name) => (name === current.name ? null : current.name))
   }
 
   const zoomBy = (factor: number) => {
     const box = canvas.current?.getBoundingClientRect()
     if (box) setView((current) => zoomAt(current, factor, { x: box.width / 2, y: box.height / 2 }))
+  }
+
+  /** Shows only a table and its direct relations, laid out afresh and fitted to the view. */
+  const showNeighborhood = (name: string) => {
+    const names = neighborhood(name, relationships)
+    const nextCards = buildCards(diagram, names, mode, foreignKeys)
+    const positions = layout(
+      nextCards.map((c) => ({ name: c.table.name, height: c.height })),
+      relationships,
+    )
+    const box = canvas.current?.getBoundingClientRect()
+    setVisible(names)
+    setMoved(new Map())
+    setFocused(name)
+    if (box) {
+      setView(
+        fitView(
+          nextCards.map((c) => ({ position: positions.get(c.table.name)!, height: c.height })),
+          box,
+        ),
+      )
+    }
   }
 
   const toggle = (name: string) =>
@@ -287,7 +314,11 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
                 data-focused={focused === table.name || undefined}
                 data-dimmed={(focused !== null && !isRelated(table.name)) || undefined}
               >
-                <div className={styles.cardHeader} data-card={table.name}>
+                <div
+                  className={styles.cardHeader}
+                  data-card={table.name}
+                  title="Double-click to show only this table and its relations"
+                >
                   <Icon name="table" size={14} />
                   <span className={styles.cardName}>{table.name}</span>
                   {table.rowEstimate !== null && (
@@ -342,6 +373,16 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
       </div>
     </div>
   )
+}
+
+/** The cards to draw: the chosen tables with the columns the mode shows. */
+function buildCards(diagram: SchemaDiagram, names: Set<string>, mode: ColumnMode, foreignKeys: Set<string>) {
+  return diagram.tables
+    .filter((t) => names.has(t.name))
+    .map((table) => {
+      const columns = shownColumns(table, mode, foreignKeys)
+      return { table, columns, height: cardHeight(columns.length) }
+    })
 }
 
 function compact(rows: number): string {

@@ -7,6 +7,7 @@ import {
   fitView,
   layout,
   localRelationships,
+  neighborhood,
   relationshipPath,
   shownColumns,
   zoomAt,
@@ -47,6 +48,24 @@ describe('layout', () => {
   it('stacks the tables of a column by name', () => {
     expect(positions.get('customers')!.y).toBe(0)
     expect(positions.get('products')!.y).toBe(100 + 32)
+  })
+
+  it('wraps a crowded level into several columns, keeping levels left to right', () => {
+    // Like a real schema: one table everything references, and 30 tables that reference it.
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      name: `t${String(i).padStart(2, '0')}`,
+      height: 150,
+    }))
+    const wrapped = layout(
+      [{ name: 'accounts', height: 150 }, ...many],
+      many.map((t) => rel(t.name, 'accounts')),
+    )
+    const xs = new Set(many.map((t) => wrapped.get(t.name)!.x))
+    const tallest = Math.max(...many.map((t) => wrapped.get(t.name)!.y)) + 150
+
+    expect(xs.size).toBeGreaterThan(1)
+    expect(Math.min(...xs)).toBeGreaterThan(wrapped.get('accounts')!.x)
+    expect(tallest).toBeLessThan(30 * 150)
   })
 
   it('survives cycles and self-references', () => {
@@ -123,5 +142,16 @@ describe('zoomAt', () => {
   it('stays between 10% and 200%', () => {
     expect(zoomAt({ x: 0, y: 0, scale: 1 }, 10, { x: 0, y: 0 }).scale).toBe(2)
     expect(zoomAt({ x: 0, y: 0, scale: 1 }, 0.01, { x: 0, y: 0 }).scale).toBe(0.1)
+  })
+})
+
+describe('neighborhood', () => {
+  it('keeps the table and its direct relations only', () => {
+    const relationships = [
+      rel('orders', 'customers'),
+      rel('order_items', 'orders'),
+      rel('payments', 'invoices'),
+    ]
+    expect(neighborhood('orders', relationships)).toEqual(new Set(['orders', 'customers', 'order_items']))
   })
 })
