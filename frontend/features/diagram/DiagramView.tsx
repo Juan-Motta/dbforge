@@ -117,8 +117,8 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     [],
   )
 
-  // Pinch or ⌘/Ctrl+wheel zooms around the cursor; plain scrolling pans. React's own
-  // wheel listener is passive, so it could not stop the whole page from zooming.
+  // The wheel (and pinch) zooms around the cursor; dragging is how the canvas moves.
+  // React's own wheel listener is passive, so it could not stop the page from scrolling.
   useEffect(() => {
     const node = canvas.current
     if (!node) return
@@ -126,11 +126,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
       event.preventDefault()
       const box = node.getBoundingClientRect()
       const anchor = { x: event.clientX - box.left, y: event.clientY - box.top }
-      if (event.ctrlKey || event.metaKey) {
-        setView((current) => zoomAt(current, Math.exp(-event.deltaY / 300), anchor))
-      } else {
-        setView((current) => ({ ...current, x: current.x - event.deltaX, y: current.y - event.deltaY }))
-      }
+      setView((current) => zoomAt(current, Math.exp(-event.deltaY / 300), anchor))
     }
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
