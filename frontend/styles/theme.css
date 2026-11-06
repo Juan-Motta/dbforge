@@ -1,0 +1,67 @@
+/* Design tokens. Dark is the default; set data-theme="light" on <html> to switch. */
+:root {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --bg: #08090a;
+  --panel: #111215;
+  --surface: #16171a;
+  --elev: #1c1d21;
+  --hover: #202227;
+  --border: #24262b;
+  --border2: #30323a;
+  --text: #e6e7ea;
+  --text2: #a6a9b0;
+  --text3: #868a93;
+  --accent: #f07a3a;
+  --accent-ink: #1a0d05;
+  --accent-text: #f59a62;
+  --accent-soft: rgba(240, 122, 58, 0.14);
+  --ok: #4cc38a;
+  --warn: #e8b44c;
+  --err: #f06a6a;
+  --info: #6aa9f0;
+  --num: #f2c46d;
+  --kw: #8fb4ff;
+  --str: #a5d6a0;
+  --fn: #d7a6ff;
+  --com: #7d828b;
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  --scrim: rgba(5, 5, 7, 0.6);
+
+  --radius-island: 10px;
+  --radius-control: 6px;
+  --gap: 8px;
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #e6e6e2;
+  --panel: #f8f8f7;
+  --surface: #ffffff;
+  --elev: #ffffff;
+  --hover: #ecece9;
+  --border: #e2e2df;
+  --border2: #d3d3cf;
+  --text: #18191b;
+  --text2: #4f525a;
+  --text3: #676b73;
+  --accent: #b9521a;
+  --accent-ink: #ffffff;
+  --accent-text: #a9470f;
+  --accent-soft: rgba(185, 82, 26, 0.1);
+  --ok: #1e8553;
+  --warn: #8f6400;
+  --err: #c23030;
+  --info: #2468b8;
+  --num: #9a5c06;
+  --kw: #2a5bc9;
+  --str: #2d7a33;
+  --fn: #8a3fc7;
+  --com: #6c7077;
+  --shadow: 0 24px 64px rgba(20, 20, 20, 0.16);
+  --scrim: rgba(30, 30, 30, 0.28);
+
+  color-scheme: light;
+}

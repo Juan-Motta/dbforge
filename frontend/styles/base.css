@@ -1,0 +1,45 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  -webkit-user-select: none; /* WebKit (macOS webview) still needs the prefix */
+  user-select: none;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+/* Shared surface for every panel in the islands layout. */
+.island {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-island);
+  overflow: hidden;
+}
+
+.muted {
+  color: var(--text3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}

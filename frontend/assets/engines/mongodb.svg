@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18">
+<svg
+                  viewBox="9.5367431640625e-7 -0.000213623046875 93.33264064788818 611.9821472167969"
+                  preserveAspectRatio="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1.867" height="12.24" x="7.142" y="2.76" overflow="visible"
+                >
+                  <defs>
+                    <linearGradient
+                      id="g-do7Ma-fill-0"
+                      gradientUnits="userSpaceOnUse"
+                      x1="-67.801"
+                      y1="268.29"
+                      x2="148.106"
+                      y2="341.177"
+                    >
+                      <stop offset="23.1%" stop-color="rgb(153,152,117)" stop-opacity="1"></stop>
+                      <stop offset="56.3%" stop-color="rgb(155,153,119)" stop-opacity="1"></stop>
+                      <stop offset="68.3%" stop-color="rgb(160,159,126)" stop-opacity="1"></stop>
+                      <stop offset="76.8%" stop-color="rgb(169,168,137)" stop-opacity="1"></stop>
+                      <stop offset="83.7%" stop-color="rgb(183,182,154)" stop-opacity="1"></stop>
+                      <stop offset="89.6%" stop-color="rgb(201,199,176)" stop-opacity="1"></stop>
+                      <stop offset="94.8%" stop-color="rgb(222,221,203)" stop-opacity="1"></stop>
+                      <stop offset="99.4%" stop-color="rgb(248,246,235)" stop-opacity="1"></stop>
+                      <stop offset="100%" stop-color="rgb(251,249,239)" stop-opacity="1"></stop>
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M58.40765 611.98193l-18.77502-6.22497c0 0 2.5-94.99997-31.875-101.67502-22.49997-26.20001 3.32501-1118.52499 85.57501-3.72498-15.625 7.89063-27.57373 21.54245-33.32501 38.07505-3.1156 24.39233-3.65192 49.04516-1.59998 73.54992"
+                    fill="url(#g-do7Ma-fill-0)"
+                  ></path>
+                </svg>
+<svg
+                  viewBox="0 0.000003814697265625 160.55613708496094 606.4000205993652"
+                  preserveAspectRatio="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="3.211" height="12.128" x="7.938" y="1.036" overflow="visible"
+                >
+                  <defs>
+                    <linearGradient
+                      id="g-q81oc-fill-0"
+                      gradientUnits="userSpaceOnUse"
+                      x1="-28.451"
+                      y1="-3.228"
+                      x2="122.733"
+                      y2="583.562"
+                    >
+                      <stop offset="0%" stop-color="rgb(72,165,71)" stop-opacity="1"></stop>
+                      <stop offset="100%" stop-color="rgb(63,145,67)" stop-opacity="1"></stop>
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M28.77496 606.40002c102.0503-76.79791 150.71723-205.52185 125-330.625-36.74994-162.12501-123.77499-215.42501-133.14999-235.77501-8.06357-12.68616-14.96649-26.07373-20.62497-40.00001l6.92502 451.72504c0 0-14.35001 138.04992 21.85 154.67498"
+                    fill="url(#g-q81oc-fill-0)"
+                  ></path>
+                </svg>
+<svg
+                  viewBox="0 -0.000011444091796875 163.28366088867188 614.2249870300293"
+                  preserveAspectRatio="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="3.266" height="12.284" x="4.853" y="1" overflow="visible"
+                >
+                  <defs>
+                    <linearGradient
+                      id="g-c2SSc-fill-0"
+                      gradientUnits="userSpaceOnUse"
+                      x1="-12.794"
+                      y1="343.876"
+                      x2="251.806"
+                      y2="283.768"
+                    >
+                      <stop offset="0%" stop-color="rgb(65,162,71)" stop-opacity="1"></stop>
+                      <stop offset="35.2%" stop-color="rgb(75,167,75)" stop-opacity="1"></stop>
+                      <stop offset="95.6%" stop-color="rgb(103,181,84)" stop-opacity="1"></stop>
+                      <stop offset="100%" stop-color="rgb(105,182,85)" stop-opacity="1"></stop>
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M144.54457 614.22498c0 0-153.02501-104.22498-144.17502-288.59998 1.67036-112.46295 51.99878-218.68243 137.97501-291.2 10.04559-8.55878 15.63379-21.23576 15.17499-34.425 9.52499 20.5 7.97497 306.07501 8.975 339.47501 3.875 129.92501-7.22497 250.225-17.95001 274.74997"
+                    fill="url(#g-c2SSc-fill-0)"
+                  ></path>
+                </svg>
+</svg>

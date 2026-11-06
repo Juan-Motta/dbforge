@@ -1,0 +1,29 @@
+[package]
+name = "dbforge"
+version = "0.1.0"
+description = "A lightweight database viewer"
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "dbforge_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+either = "1"
+futures-util = { version = "0.3", default-features = false }
+keyring = "4.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+tauri = { version = "2.12.5", features = [] }
+thiserror = "2.0"
+tokio = { version = "1", features = ["time"] }
+uuid = { version = "1.29", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "time"] }

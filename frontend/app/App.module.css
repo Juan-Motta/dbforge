@@ -1,0 +1,52 @@
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--gap);
+  padding: 0 var(--gap) var(--gap);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  background: var(--surface);
+}
+
+.empty {
+  margin: auto;
+  color: var(--text3);
+}
+
+.error {
+  margin: auto;
+  color: var(--err);
+}
+
+.workspace {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.newTab {
+  margin: 0 4px;
+  flex: none;
+}
+
+.tabContent {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tabContent[hidden] {
+  display: none;
+}
