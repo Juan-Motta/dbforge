@@ -2,7 +2,13 @@
 //! lists databases and then their tables, and a table's `TableRef` carries the
 //! database name in both `database` and `schema`.
 
-// T3: mod diagram; mod edit; mod structure;
+mod diagram;
+mod edit;
+mod structure;
+
+pub use diagram::schema_diagram;
+pub use edit::{apply_changes, preview_changes};
+pub use structure::table_structure;
 
 use std::time::Instant;
 

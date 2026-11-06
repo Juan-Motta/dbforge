@@ -1,5 +1,6 @@
 //! Entry points that dispatch to the right database driver by engine.
 
+mod edit_sql;
 mod mysql;
 mod postgres;
 
@@ -313,6 +314,7 @@ pub async fn schema_diagram(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::schema_diagram(connection, password, database, schema).await,
+            Engine::Mysql => mysql::schema_diagram(connection, password, database, schema).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -329,6 +331,7 @@ pub async fn apply_changes(
 ) -> Result<ApplySummary> {
     match connection.engine {
         Engine::Postgres => postgres::apply_changes(connection, password, table, changes).await,
+        Engine::Mysql => mysql::apply_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -342,6 +345,7 @@ pub async fn preview_changes(
 ) -> Result<Vec<String>> {
     match connection.engine {
         Engine::Postgres => postgres::preview_changes(connection, password, table, changes).await,
+        Engine::Mysql => mysql::preview_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -354,6 +358,7 @@ pub async fn table_structure(
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => postgres::table_structure(connection, password, table).await,
+            Engine::Mysql => mysql::table_structure(connection, password, table).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -423,6 +428,7 @@ pub async fn explain(
 ) -> Result<serde_json::Value> {
     match connection.engine {
         Engine::Postgres => postgres::explain(connection, password, database, sql, analyze).await,
+        Engine::Mysql => Err(AppError::Invalid("Explain isn't supported for MySQL yet.".into())),
         other => Err(AppError::Unsupported(other.label())),
     }
 }
