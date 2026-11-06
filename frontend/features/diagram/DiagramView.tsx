@@ -38,7 +38,7 @@ export function DiagramView({ connectionId, database, schema }: DiagramViewProps
 
 /** What a pointer drag is moving: the whole canvas, or one card. */
 type Drag =
-  | { kind: 'pan'; start: Point; origin: View }
+  | { kind: 'pan'; start: Point; origin: View; moved: boolean }
   | { kind: 'card'; name: string; start: Point; origin: Point; moved: boolean }
 
 interface DiagramProps {
@@ -148,7 +148,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
           origin: positionOf(card.dataset.card!),
           moved: false,
         }
-      : { kind: 'pan', start, origin: view }
+      : { kind: 'pan', start, origin: view, moved: false }
     setDragging(card?.dataset.card ?? null)
     event.currentTarget.setPointerCapture(event.pointerId)
   }
@@ -159,6 +159,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     const dx = event.clientX - current.start.x
     const dy = event.clientY - current.start.y
     if (current.kind === 'pan') {
+      current.moved ||= Math.hypot(dx, dy) > 3
       setView({ ...current.origin, x: current.origin.x + dx, y: current.origin.y + dy })
     } else if (current.moved || Math.hypot(dx, dy) > 3) {
       current.moved = true
@@ -175,6 +176,11 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     const current = drag.current
     drag.current = null
     setDragging(null)
+    // A click on empty canvas (not a pan) clears the pinned highlight.
+    if (current?.kind === 'pan' && !current.moved) {
+      setPinned(null)
+      lastClick.current = null
+    }
     if (current?.kind !== 'card' || current.moved) return
     const previous = lastClick.current
     if (previous?.name === current.name && event.timeStamp - previous.time < 400) {
