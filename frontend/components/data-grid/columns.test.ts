@@ -2,12 +2,22 @@ import { describe, expect, it } from 'vitest'
 import { isNumericType, shortTypeName } from './columns'
 
 describe('isNumericType', () => {
-  it.each(['integer', 'bigint', 'numeric(10,2)', 'double precision', 'real', 'int4', 'float8'])(
-    '%s is numeric',
-    (type) => expect(isNumericType(type)).toBe(true),
-  )
-  it.each(['text', 'character varying(20)', 'uuid', 'text[]', 'jsonb'])('%s is not numeric', (type) =>
-    expect(isNumericType(type)).toBe(false),
+  it.each([
+    'integer',
+    'bigint',
+    'numeric(10,2)',
+    'double precision',
+    'real',
+    'int4',
+    'float8',
+    'int',
+    'tinyint',
+    'float',
+    'smallmoney',
+  ])('%s is numeric', (type) => expect(isNumericType(type)).toBe(true))
+  it.each(['text', 'character varying(20)', 'uuid', 'text[]', 'jsonb', 'interval', 'nvarchar(40)', 'bit'])(
+    '%s is not numeric',
+    (type) => expect(isNumericType(type)).toBe(false),
   )
 })
 

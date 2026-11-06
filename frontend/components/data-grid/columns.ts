@@ -1,6 +1,7 @@
-// Long names from table metadata and short ones from query results (int4, float8, …).
+// Long names from table metadata and short ones from query results (int4, float8, …),
+// plus the MySQL and SQL Server spellings (int, tinyint, float, smallmoney).
 const NUMERIC_TYPES =
-  /^(smallint|integer|bigint|numeric|decimal|real|double precision|money|int2|int4|int8|float4|float8|oid)\b/
+  /^(tinyint|smallint|mediumint|int|integer|bigint|numeric|decimal|real|float|double|double precision|money|smallmoney|int2|int4|int8|float4|float8|oid)\b/
 
 /** Numbers read better right-aligned. */
 export function isNumericType(dataType: string): boolean {

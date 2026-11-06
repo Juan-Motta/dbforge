@@ -62,14 +62,15 @@ export function defaultDatabase(connection: Connection): string {
 /** The schema to use when only a database is selected. */
 export function defaultSchema(engine: Engine, database: string): string {
   if (isFileEngine(engine)) return SQLITE_MAIN
+  if (engine === 'sqlserver') return 'dbo'
   return SCHEMALESS.includes(engine) ? database : 'public'
 }
 
-export type SqlDialect = 'postgres' | 'mysql' | 'sqlite'
+export type SqlDialect = 'postgres' | 'mysql' | 'sqlite' | 'sqlserver'
 
 /** How SQL is highlighted and completed for an engine. */
 export function sqlDialectOf(engine: Engine | undefined): SqlDialect {
-  if (engine === 'sqlite') return 'sqlite'
+  if (engine === 'sqlite' || engine === 'sqlserver') return engine
   return engine && SCHEMALESS.includes(engine) ? 'mysql' : 'postgres'
 }
 

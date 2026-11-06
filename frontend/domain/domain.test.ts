@@ -25,12 +25,14 @@ describe('engines', () => {
     expect(defaultSchema('postgres', 'shop')).toBe('public')
     expect(defaultSchema('mysql', 'shop')).toBe('shop')
     expect(defaultSchema('sqlite', '/tmp/app.db')).toBe('main')
+    expect(defaultSchema('sqlserver', 'shop')).toBe('dbo')
   })
 
   it('picks the SQL dialect', () => {
     expect(sqlDialectOf('mysql')).toBe('mysql')
     expect(sqlDialectOf('postgres')).toBe('postgres')
     expect(sqlDialectOf('sqlite')).toBe('sqlite')
+    expect(sqlDialectOf('sqlserver')).toBe('sqlserver')
     expect(sqlDialectOf(undefined)).toBe('postgres')
   })
 })
