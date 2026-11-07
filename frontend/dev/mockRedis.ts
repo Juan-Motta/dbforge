@@ -3,7 +3,7 @@
 import type { Entry, KeyEdit, KeyInfo, KeyValue, NewKey, Overview } from '../features/keyspace/api'
 
 type Value =
-  | { kind: 'string'; value: string }
+  | { kind: 'string'; value: string; hex?: string }
   | { kind: 'hash'; value: Map<string, string> }
   | { kind: 'list'; value: string[] }
   | { kind: 'set'; value: Set<string> }
@@ -66,6 +66,12 @@ put('leaderboard:weekly', {
   ]),
 })
 put('queue:emails', { kind: 'list', value: ['{"to":"ana@example.com","template":"welcome"}'] })
+// {"theme": "dark", "lang": "es", "beta": true} in MessagePack, which is binary.
+put('user:1:prefs', {
+  kind: 'string',
+  value: '',
+  hex: '83a57468656d65a46461726ba46c616e67a26573a462657461c3',
+})
 put('feature_flags', {
   kind: 'hash',
   value: new Map([
@@ -130,8 +136,15 @@ export function readKey(name: string, filter: string): KeyValue {
   let length: number
   switch (data.kind) {
     case 'string':
-      length = bytes(data.value)
-      entries = [{ key: null, value: text(data.value), score: null, size: length }]
+      length = data.hex ? data.hex.length / 2 : bytes(data.value)
+      entries = [
+        {
+          key: null,
+          value: data.hex ? { text: data.hex, binary: true } : text(data.value),
+          score: null,
+          size: length,
+        },
+      ]
       break
     case 'hash':
       length = data.value.size

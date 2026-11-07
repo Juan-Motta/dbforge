@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { asHex, asJson, formatBytes, formatTtl, hitRate, keyTree, visibleKeyRows } from './keyspace'
+import { encode } from '@msgpack/msgpack'
+import {
+  asHex,
+  asJson,
+  asMsgpack,
+  formatBytes,
+  formatTtl,
+  hitRate,
+  keyTree,
+  visibleKeyRows,
+} from './keyspace'
 import type { KeyInfo } from './api'
 
 const key = (name: string, kind = 'string', ttlMs: number | null = null): KeyInfo => ({ name, kind, ttlMs })
@@ -64,5 +74,31 @@ describe('formats', () => {
     expect(asJson('Mozilla/5.0')).toBeNull()
     expect(asHex('AB')).toBe('41 42')
     expect(asHex('é')).toBe('c3 a9')
+  })
+})
+
+describe('asMsgpack', () => {
+  const hex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+
+  it('decodes binary values the backend sent as hex', () => {
+    const packed = encode({
+      user: 'u_88412',
+      roles: ['admin'],
+      seen: 1730718422,
+      ok: true,
+      blob: new Uint8Array([1, 255]),
+    })
+    expect(asMsgpack({ text: hex(packed), binary: true })).toBe(
+      '{\n  "user": "u_88412",\n  "roles": [\n    "admin"\n  ],\n  "seen": 1730718422,\n  "ok": true,\n  "blob": "0x01ff"\n}',
+    )
+  })
+
+  it('leaves text alone: MessagePack is binary, and "5" would read as 53', () => {
+    expect(asMsgpack({ text: '5', binary: false })).toBeNull()
+  })
+
+  it('refuses anything that is not one whole MessagePack value', () => {
+    expect(asMsgpack({ text: 'hello', binary: false })).toBeNull()
+    expect(asMsgpack({ text: 'ff01', binary: true })).toBeNull()
   })
 })

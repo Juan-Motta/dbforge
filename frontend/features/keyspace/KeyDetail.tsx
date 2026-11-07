@@ -5,7 +5,16 @@ import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
 import { keyspaceApi, type Entry, type KeyEdit, type KeyValue } from './api'
 import { FormDialog, type FormField } from './FormDialog'
-import { asHex, asJson, formatBytes, formatTtl, kindLabel, parseFields, parseScore } from './keyspace'
+import {
+  asHex,
+  asJson,
+  asMsgpack,
+  formatBytes,
+  formatTtl,
+  kindLabel,
+  parseFields,
+  parseScore,
+} from './keyspace'
 import { kindClass } from './kindClass'
 import styles from './KeyBrowser.module.css'
 
@@ -363,21 +372,27 @@ interface ValueViewerProps {
 
 /** One value as text, JSON or hex, with editing where the type allows it. */
 function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }: ValueViewerProps) {
-  const [mode, setMode] = useState<'text' | 'json' | 'hex'>(() =>
-    asJson(entry.value.text) ? 'json' : 'text',
+  const json = asJson(entry.value.text)
+  const msgpack = asMsgpack(entry.value)
+  const binary = entry.value.binary
+  // Binary values have no text to show: MessagePack when they decode, else hex.
+  const [mode, setMode] = useState<'text' | 'json' | 'hex' | 'msgpack'>(() =>
+    binary ? (msgpack ? 'msgpack' : 'hex') : json ? 'json' : 'text',
   )
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const json = asJson(entry.value.text)
-  const shown = entry.value.binary
-    ? entry.value.text.replace(/(..)/g, '$1 ').trim()
-    : mode === 'json' && json
-      ? json
-      : mode === 'hex'
-        ? asHex(entry.value.text)
-        : entry.value.text
+  const shown =
+    mode === 'msgpack' && msgpack
+      ? msgpack
+      : binary
+        ? entry.value.text.replace(/(..)/g, '$1 ').trim()
+        : mode === 'json' && json
+          ? json
+          : mode === 'hex'
+            ? asHex(entry.value.text)
+            : entry.value.text
 
   const act = async (action: () => Promise<void>) => {
     setBusy(true)
@@ -397,26 +412,36 @@ function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }
       <div className={styles.viewerBar}>
         <span className={styles.label}>{label}</span>
         <span className={styles.spacer} />
-        {entry.value.binary ? (
-          <Badge>binary · hex</Badge>
-        ) : (
-          <div className={styles.seg} role="group" aria-label="Show value as">
-            <button type="button" aria-pressed={mode === 'text'} onClick={() => setMode('text')}>
-              Text
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === 'json'}
-              disabled={!json}
-              onClick={() => setMode('json')}
-            >
-              JSON
-            </button>
-            <button type="button" aria-pressed={mode === 'hex'} onClick={() => setMode('hex')}>
-              Hex
-            </button>
-          </div>
-        )}
+        <div className={styles.seg} role="group" aria-label="Show value as">
+          <button
+            type="button"
+            aria-pressed={mode === 'text'}
+            disabled={binary}
+            onClick={() => setMode('text')}
+          >
+            Text
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === 'json'}
+            disabled={!json}
+            onClick={() => setMode('json')}
+          >
+            JSON
+          </button>
+          <button type="button" aria-pressed={mode === 'hex'} onClick={() => setMode('hex')}>
+            Hex
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === 'msgpack'}
+            disabled={!msgpack}
+            title={binary ? undefined : 'MessagePack values are binary'}
+            onClick={() => setMode('msgpack')}
+          >
+            MsgPack
+          </button>
+        </div>
         {editable && draft === null && (
           <Button onClick={() => setDraft(score ? String(entry.score ?? '') : entry.value.text)}>
             {score ? 'Edit score' : 'Edit'}

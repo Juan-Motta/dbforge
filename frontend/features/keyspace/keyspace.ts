@@ -1,4 +1,5 @@
-import type { KeyInfo } from './api'
+import { decode } from '@msgpack/msgpack'
+import type { KeyInfo, Text } from './api'
 
 export type KeyNode =
   | { kind: 'folder'; label: string; prefix: string; count: number; children: KeyNode[] }
@@ -124,4 +125,38 @@ export function parseFields(text: string): [string, string][] {
       if (cut <= 0) throw `"${line}" isn't field=value.`
       return [line.slice(0, cut).trim(), line.slice(cut + 1)]
     })
+}
+
+/**
+ * A binary value pretty-printed as JSON when its bytes are exactly one
+ * MessagePack value, else `null`. Text is never read as MessagePack: maps,
+ * arrays and strings use bytes that aren't valid UTF-8, so only a lone small
+ * number could pass, and `"5"` would show as 53. Bytes become `0x…` strings,
+ * 64-bit integers decimal strings, and timestamps ISO dates.
+ */
+export function asMsgpack(value: Text): string | null {
+  if (!value.binary) return null
+  const bytes = fromHex(value.text)
+  if (!bytes || bytes.length === 0) return null
+  try {
+    // Throws on extra bytes, so ordinary text rarely passes for MessagePack.
+    const decoded = decode(bytes, { useBigInt64: true })
+    return JSON.stringify(
+      decoded,
+      (_, item: unknown) => {
+        if (typeof item === 'bigint') return item.toString()
+        if (item instanceof Uint8Array)
+          return '0x' + [...item].map((b) => b.toString(16).padStart(2, '0')).join('')
+        return item
+      },
+      2,
+    )
+  } catch {
+    return null
+  }
+}
+
+function fromHex(hex: string): Uint8Array | null {
+  if (hex.length % 2 !== 0 || /[^0-9a-f]/i.test(hex)) return null
+  return Uint8Array.from({ length: hex.length / 2 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16))
 }
