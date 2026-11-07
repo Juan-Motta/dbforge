@@ -5,6 +5,7 @@ mod error;
 mod explorer;
 mod export;
 mod history;
+mod keyspace;
 mod query;
 
 use tauri::Manager;
@@ -41,6 +42,9 @@ pub fn run() {
             query::cancel_query,
             query::close_session,
             history::list_history,
+            keyspace::redis_overview,
+            keyspace::redis_scan,
+            keyspace::redis_read_key,
             export::format_rows,
             export::export_rows,
             export::export_table,

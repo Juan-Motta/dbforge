@@ -23,6 +23,20 @@ pub enum AppError {
     SqlServer(#[from] tiberius::error::Error),
     #[error("{}", mongodb_message(.0))]
     MongoDb(#[from] mongodb::error::Error),
+    #[error("{}", redis_message(.0))]
+    Redis(#[from] redis::RedisError),
+}
+
+/// The server's reply as redis-cli prints it (`WRONGTYPE Operation against…`).
+fn redis_message(error: &redis::RedisError) -> String {
+    match (error.code(), error.detail()) {
+        (Some(code), Some(detail)) => format!("{code} {detail}"),
+        _ if error.kind() == redis::ErrorKind::AuthenticationFailed => {
+            "Authentication failed: wrong user name or password.".into()
+        }
+        _ if error.is_connection_refusal() => format!("Could not reach the server: {error}"),
+        _ => error.to_string(),
+    }
 }
 
 /// The server's own message, without the driver's kind and labels.

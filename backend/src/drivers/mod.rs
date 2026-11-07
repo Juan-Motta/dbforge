@@ -4,6 +4,7 @@ mod edit_sql;
 mod mongodb;
 mod mysql;
 mod postgres;
+pub mod redis;
 mod sqlite;
 mod sqlserver;
 
@@ -252,7 +253,7 @@ pub async fn server_version(connection: &Connection, password: Option<&str>) -> 
             Engine::Mysql | Engine::Mariadb => mysql::server_version(connection, password).await,
             Engine::Sqlserver => sqlserver::server_version(connection, password).await,
             Engine::Mongodb => mongodb::server_version(connection, password).await,
-            other => Err(AppError::Unsupported(other.label())),
+            Engine::Redis => redis::server_version(connection, password).await,
         }
     })
     .await
@@ -266,7 +267,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
             Engine::Mysql | Engine::Mariadb => mysql::list_objects(connection, password, path).await,
             Engine::Sqlserver => sqlserver::list_objects(connection, password, path).await,
             Engine::Mongodb => mongodb::list_objects(connection, password, path).await,
-            other => Err(AppError::Unsupported(other.label())),
+            Engine::Redis => redis::list_objects(connection, password, path).await,
         }
     })
     .await
