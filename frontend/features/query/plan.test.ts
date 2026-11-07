@@ -147,6 +147,35 @@ describe('parsePlan', () => {
       [null, null, 75],
     ])
   })
+
+  it('shares by cost when an analyzed plan ran too fast to time', () => {
+    // SQL Server reports whole milliseconds, so small queries measure 0 everywhere.
+    const fast = parsePlan([
+      {
+        Plan: {
+          'Node Type': 'Compute Scalar',
+          'Total Cost': 100,
+          'Actual Total Time': 0,
+          'Actual Rows': 3,
+          'Actual Loops': 1,
+          Plans: [
+            {
+              'Node Type': 'Clustered Index Scan',
+              'Total Cost': 75,
+              'Actual Total Time': 0,
+              'Actual Rows': 3,
+              'Actual Loops': 1,
+            },
+          ],
+        },
+      },
+    ])
+    expect(fast.analyzed).toBe(true)
+    expect(fast.nodes.map((n) => [n.actualRows, n.selfMs, n.share])).toEqual([
+      [3, 0, 25],
+      [3, 0, 75],
+    ])
+  })
 })
 
 describe('MySQL plans', () => {

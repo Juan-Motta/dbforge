@@ -45,7 +45,10 @@ export function parsePlan(json: unknown): Plan {
   }
   walk(root, 0, 1)
 
-  const weight = (n: PlanNode) => (analyzed ? (n.selfMs ?? 0) : n.selfCost)
+  // Shares follow measured time; a plan too fast to time (SQL Server counts
+  // whole milliseconds) shares by estimated cost instead.
+  const timed = analyzed && nodes.some((n) => (n.selfMs ?? 0) > 0)
+  const weight = (n: PlanNode) => (timed ? (n.selfMs ?? 0) : n.selfCost)
   const total = nodes.reduce((sum, n) => sum + weight(n), 0)
   for (const node of nodes) node.share = total > 0 ? Math.round((weight(node) / total) * 100) : 0
 
