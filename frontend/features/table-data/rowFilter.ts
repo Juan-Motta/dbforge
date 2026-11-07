@@ -67,3 +67,13 @@ export function sortBy(dialect: SqlDialect, column: string, current: RowFilter):
     now === null ? orderText(dialect, column, 'asc') : now === 'asc' ? orderText(dialect, column, 'desc') : ''
   return { ...current, order }
 }
+
+/** The header menu's choice: sort by `column` that way, or no order at all (`null`). */
+export function sortColumn(
+  dialect: SqlDialect,
+  column: string,
+  direction: 'asc' | 'desc' | null,
+  current: RowFilter,
+): RowFilter {
+  return { ...current, order: direction === null ? '' : orderText(dialect, column, direction) }
+}

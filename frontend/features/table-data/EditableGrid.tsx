@@ -29,6 +29,8 @@ interface EditableGridProps {
   sortOf?: (column: string) => 'asc' | 'desc' | null
   /** A header click: sorts by that column, then the other way, then not at all. */
   onSort?: (column: string) => void
+  /** The header menu: sorts by a column the chosen way, or clears the order (`null`). */
+  onSortColumn?: (column: string, direction: 'asc' | 'desc' | null) => void
 }
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
@@ -46,7 +48,21 @@ export function EditableGrid(props: EditableGridProps) {
     column: number
     state: CellState
   } | null>(null)
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; column: string } | null>(null)
   const numeric = columns.map((c) => isNumericType(c.dataType))
+
+  const openHeaderMenu = (column: string, x: number, y: number) => {
+    if (props.onSortColumn) setHeaderMenu({ x, y, column })
+  }
+  const headerItems = (column: string): MenuItem[] => {
+    const sorted = props.sortOf?.(column) ?? null
+    const sort = (direction: 'asc' | 'desc' | null) => () => props.onSortColumn?.(column, direction)
+    return [
+      { label: 'Sort ascending', onSelect: sort('asc'), disabled: sorted === 'asc' },
+      { label: 'Sort descending', onSelect: sort('desc'), disabled: sorted === 'desc' },
+      { label: 'Clear sort', onSelect: sort(null), disabled: sorted === null },
+    ]
+  }
 
   const setValue = (at: Editing, column: number, value: Value) => {
     if ('row' in at) props.onEditCell(at.row, column, value)
@@ -137,23 +153,45 @@ export function EditableGrid(props: EditableGridProps) {
                       ? 'descending'
                       : undefined
                 }
+                onContextMenu={(event) => {
+                  if (!props.onSortColumn) return
+                  event.preventDefault()
+                  openHeaderMenu(column.name, event.clientX, event.clientY)
+                }}
               >
-                <button
-                  type="button"
-                  className={styles.header}
-                  disabled={!props.onSort}
-                  onClick={() => props.onSort?.(column.name)}
-                >
-                  {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
-                  {column.name}
-                  {column.generated && <span className={styles.computed}>auto</span>}
-                  <span className={styles.type}>{shortTypeName(column.dataType)}</span>
-                  {props.sortOf?.(column.name) && (
-                    <span className={styles.sorted} aria-hidden="true">
-                      {props.sortOf(column.name) === 'asc' ? '↑' : '↓'}
-                    </span>
+                <span className={styles.headerCell}>
+                  <button
+                    type="button"
+                    className={styles.header}
+                    disabled={!props.onSort}
+                    onClick={() => props.onSort?.(column.name)}
+                  >
+                    {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
+                    {column.name}
+                    {column.generated && <span className={styles.computed}>auto</span>}
+                    <span className={styles.type}>{shortTypeName(column.dataType)}</span>
+                    {props.sortOf?.(column.name) && (
+                      <span className={styles.sorted} aria-hidden="true">
+                        {props.sortOf(column.name) === 'asc' ? '↑' : '↓'}
+                      </span>
+                    )}
+                  </button>
+                  {props.onSortColumn && (
+                    <button
+                      type="button"
+                      className={styles.headerMenu}
+                      aria-label={`Sort options for ${column.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={headerMenu?.column === column.name}
+                      onClick={(event) => {
+                        const box = event.currentTarget.getBoundingClientRect()
+                        openHeaderMenu(column.name, box.left, box.bottom + 4)
+                      }}
+                    >
+                      <Icon name="more" size={14} />
+                    </button>
                   )}
-                </button>
+                </span>
               </th>
             ))}
           </tr>
@@ -208,6 +246,14 @@ export function EditableGrid(props: EditableGridProps) {
           })}
         </tbody>
       </table>
+      {headerMenu && (
+        <ContextMenu
+          x={headerMenu.x}
+          y={headerMenu.y}
+          items={headerItems(headerMenu.column)}
+          onClose={() => setHeaderMenu(null)}
+        />
+      )}
       {menu && (
         <ContextMenu
           x={menu.x}

@@ -69,6 +69,13 @@ const PATHS = {
   trash: <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9" />,
   refresh: <path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5" />,
   collapse: <path d="M4 7l4-3 4 3M4 12l4-3 4 3" />,
+  more: (
+    <>
+      <circle cx="3.5" cy="8" r=".9" />
+      <circle cx="8" cy="8" r=".9" />
+      <circle cx="12.5" cy="8" r=".9" />
+    </>
+  ),
   sidebar: (
     <>
       <rect x="2.5" y="3" width="11" height="10" rx="2" />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NO_FILTER, sortBy, sortOf } from './rowFilter'
+import { NO_FILTER, sortBy, sortColumn, sortOf } from './rowFilter'
 
 describe('sortBy', () => {
   it('cycles a column through ascending, descending and no order, quoted for the dialect', () => {
@@ -30,5 +30,18 @@ describe('sortOf', () => {
     expect(sortOf('postgres', 'total', '"total"')).toBe('asc')
     expect(sortOf('mongodb', 'total', '{total: -1}')).toBe('desc')
     expect(sortOf('postgres', 'total', 'total DESC')).toBeNull()
+  })
+})
+
+describe('sortColumn', () => {
+  it('sorts a column the chosen way, or clears the order, keeping the filter', () => {
+    const filtered = { filter: 'total > 10', order: 'id' }
+    expect(sortColumn('postgres', 'total', 'desc', filtered)).toEqual({
+      filter: 'total > 10',
+      order: '"total" DESC',
+    })
+    expect(sortColumn('sqlserver', 'total', 'asc', filtered).order).toBe('[total]')
+    expect(sortColumn('mongodb', 'total', 'desc', NO_FILTER).order).toBe('{total: -1}')
+    expect(sortColumn('postgres', 'total', null, filtered)).toEqual({ filter: 'total > 10', order: '' })
   })
 })
