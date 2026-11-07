@@ -333,6 +333,9 @@ mod tests {
             port: 0,
             database: path.to_string_lossy().into_owned(),
             username: String::new(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         };
         (dir, connection)
     }

@@ -534,6 +534,15 @@ pub async fn cancel(
     .await
 }
 
+/// rustls needs one process-wide crypto provider when several are compiled in,
+/// as here (the drivers bring their own). Installing it twice is harmless.
+pub(crate) fn install_crypto() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 async fn with_timeout<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
     tokio::time::timeout(TIMEOUT, request).await.map_err(|_| AppError::Timeout(TIMEOUT.as_secs()))?
 }

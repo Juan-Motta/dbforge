@@ -328,6 +328,9 @@ mod tests {
             port: 53306,
             database: "shop".into(),
             username: "root".into(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         }
     }
 

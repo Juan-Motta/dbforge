@@ -12,6 +12,7 @@ import {
   isFileEngine,
   NOSQL_ENGINES,
   RELATIONAL_ENGINES,
+  TLS_ENGINES,
   type Connection,
   type Engine,
   type Environment,
@@ -24,6 +25,7 @@ import {
   emptyForm,
   formFromConnection,
   isValidPort,
+  parseConnectionUrl,
   toInput,
   withEngine,
   type ConnectionForm,
@@ -46,10 +48,10 @@ interface ConnectionDialogProps {
   onClose: () => void
 }
 
-/** Engines whose host field also takes a whole connection URL. */
+/** Engines whose host field also takes a pasted URL, which it splits into the fields. */
 const HOST_HINTS: Partial<Record<Engine, string>> = {
-  mongodb: 'localhost or mongodb+srv://…',
-  redis: 'localhost or rediss://… for TLS',
+  mongodb: 'localhost, or paste a mongodb:// URL',
+  redis: 'localhost, or paste a redis:// URL',
 }
 
 export function ConnectionDialog({ connection, onSave, onDelete, onClose }: ConnectionDialogProps) {
@@ -60,10 +62,22 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  /** What a pasted URL held that the form can't, or `null` when nothing was pasted. */
+  const [fromUrl, setFromUrl] = useState<string[] | null>(null)
 
   const update = (changes: Partial<ConnectionForm>) => {
     setForm((current) => ({ ...current, ...changes }))
     setTest({ status: 'idle' })
+  }
+
+  /** Splits a connection URL into the fields; false when `text` isn't one. */
+  const fillFromUrl = (text: string) => {
+    const parsed = parseConnectionUrl(text)
+    if (!parsed) return false
+    setForm((current) => ({ ...withEngine(current, parsed.changes.engine!), ...parsed.changes }))
+    setTest({ status: 'idle' })
+    setFromUrl(parsed.ignored)
+    return true
   }
 
   /** Picks the SQLite file with the native dialog; cancelling keeps the current path. */
@@ -198,20 +212,34 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 <TextField
                   label="Host"
                   mono
-                  // A whole connection string works too, as managed services give them.
                   placeholder={HOST_HINTS[form.engine]}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
+                  // A connection URL, pasted or typed, fills the fields instead of staying in Host.
+                  onPaste={(e) => {
+                    if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
+                  }}
+                  onBlur={() => fillFromUrl(form.host)}
                 />
                 <TextField
                   label="Port"
                   mono
                   inputMode="numeric"
-                  aria-invalid={!isValidPort(form.port)}
-                  value={form.port}
+                  disabled={form.engine === 'mongodb' && form.srv}
+                  aria-invalid={!(form.engine === 'mongodb' && form.srv) && !isValidPort(form.port)}
+                  value={form.engine === 'mongodb' && form.srv ? '' : form.port}
+                  placeholder={form.engine === 'mongodb' && form.srv ? 'From DNS' : undefined}
                   onChange={(e) => update({ port: e.target.value })}
                 />
               </div>
+              {fromUrl && (
+                <p className={styles.hint} role="status">
+                  Filled in from the URL.
+                  {fromUrl.length > 0 && (
+                    <span className={styles.ignored}> Not carried over: {fromUrl.join(', ')}.</span>
+                  )}
+                </p>
+              )}
 
               <TextField
                 label="Database"
@@ -239,6 +267,39 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 />
               </div>
               <p className={styles.hint}>Passwords are stored in your OS keychain, never in a file.</p>
+
+              {TLS_ENGINES.includes(form.engine) && (
+                <div className={styles.options}>
+                  {form.engine === 'mongodb' && (
+                    <label className={styles.check}>
+                      <input
+                        type="checkbox"
+                        checked={form.srv}
+                        onChange={(e) => update({ srv: e.target.checked, tls: form.tls || e.target.checked })}
+                      />
+                      DNS seed list (mongodb+srv), as Atlas uses
+                    </label>
+                  )}
+                  <label className={styles.check}>
+                    <input
+                      type="checkbox"
+                      checked={form.tls || (form.engine === 'mongodb' && form.srv)}
+                      disabled={form.engine === 'mongodb' && form.srv}
+                      onChange={(e) => update({ tls: e.target.checked })}
+                    />
+                    Use TLS
+                  </label>
+                  <label className={styles.check}>
+                    <input
+                      type="checkbox"
+                      checked={form.allowSelfSigned}
+                      disabled={!(form.tls || (form.engine === 'mongodb' && form.srv))}
+                      onChange={(e) => update({ allowSelfSigned: e.target.checked })}
+                    />
+                    Accept self-signed certificate
+                  </label>
+                </div>
+              )}
             </>
           )}
         </form>

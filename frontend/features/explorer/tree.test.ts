@@ -12,6 +12,9 @@ const connection: Connection = {
   port: 5432,
   database: 'shop',
   username: 'app',
+  tls: false,
+  allowSelfSigned: false,
+  srv: false,
 }
 
 const object = (name: string, kind: DbObject['kind'], rowEstimate: number | null = null): DbObject => ({

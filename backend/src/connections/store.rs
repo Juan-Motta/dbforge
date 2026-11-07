@@ -82,6 +82,9 @@ mod tests {
             port: 5432,
             database: "shop".into(),
             username: "app".into(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         }
     }
 

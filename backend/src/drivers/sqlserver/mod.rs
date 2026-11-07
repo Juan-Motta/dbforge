@@ -549,6 +549,9 @@ pub(super) mod tests {
             port: 51433,
             database: String::new(),
             username: "sa".into(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         }
     }
 

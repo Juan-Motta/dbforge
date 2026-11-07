@@ -140,6 +140,31 @@
   color: var(--text3);
 }
 
+.ignored {
+  color: var(--warn);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.check:has(input:disabled) {
+  color: var(--text3);
+  cursor: default;
+}
+
 .footer {
   height: 60px;
   display: flex;

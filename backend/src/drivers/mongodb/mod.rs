@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use futures_util::TryStreamExt;
 use mongodb::bson::{Bson, Document, doc};
-use mongodb::options::{ClientOptions, Credential, ServerAddress};
+use mongodb::options::{ClientOptions, Credential, ServerAddress, Tls, TlsOptions};
 use mongodb::{Client, Database};
 
 use super::{Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout};
@@ -32,37 +32,53 @@ use crate::error::{AppError, Result};
 /// Databases the server keeps for itself; never shown.
 const SYSTEM_DATABASES: [&str; 3] = ["admin", "config", "local"];
 
-/// A client for the connection. The host may be a whole connection string
-/// (`mongodb://…` or `mongodb+srv://…`, as Atlas gives them); otherwise users
-/// authenticate against `admin`, where mongod's users usually live.
+/// A client for the connection. Users authenticate against `admin`, where
+/// mongod's users usually live. Hosts saved as a whole `mongodb://` or
+/// `mongodb+srv://` URL, before the form split URLs into fields, still work.
 async fn connect(connection: &Connection, password: Option<&str>) -> Result<Client> {
-    let mut options = if is_uri(&connection.host) {
+    Ok(Client::with_options(options(connection, password).await?)?)
+}
+
+async fn options(connection: &Connection, password: Option<&str>) -> Result<ClientOptions> {
+    let uri = is_uri(&connection.host);
+    if connection.tls || connection.srv || uri {
+        super::install_crypto();
+    }
+    let mut options = if uri {
         ClientOptions::parse(&connection.host).await?
+    } else if connection.srv {
+        // The seed list's DNS records name the servers, their port and options.
+        ClientOptions::parse(format!("mongodb+srv://{}/", connection.host)).await?
     } else {
         let mut options = ClientOptions::default();
         options.hosts = vec![ServerAddress::Tcp { host: connection.host.clone(), port: Some(connection.port) }];
         // Talk to this server even when it belongs to a replica set whose
         // members advertise names only reachable from inside their network.
         options.direct_connection = Some(true);
-        if !connection.username.is_empty() {
-            options.credential = Some(
-                Credential::builder()
-                    .username(connection.username.clone())
-                    .password(password.map(String::from))
-                    .source("admin".to_string())
-                    .build(),
-            );
-        }
         options
     };
+    if !uri && !connection.username.is_empty() {
+        options.credential = Some(
+            Credential::builder()
+                .username(connection.username.clone())
+                .password(password.map(String::from))
+                .source("admin".to_string())
+                .build(),
+        );
+    }
     if password.is_some() && options.credential.as_ref().is_some_and(|c| c.password.is_none()) {
         options.credential.as_mut().expect("checked").password = password.map(String::from);
+    }
+    if connection.tls && !uri {
+        let mut tls = TlsOptions::default();
+        tls.allow_invalid_certificates = Some(connection.allow_self_signed);
+        options.tls = Some(Tls::Enabled(tls));
     }
     options.app_name = Some("DBForge".into());
     // Fail fast when the server is unreachable instead of waiting 30 seconds.
     options.server_selection_timeout = Some(Duration::from_secs(8));
     options.connect_timeout = Some(Duration::from_secs(8));
-    Ok(Client::with_options(options)?)
+    Ok(options)
 }
 
 fn is_uri(host: &str) -> bool {
@@ -364,6 +380,9 @@ pub(super) mod tests {
             port: 57017,
             database: String::new(),
             username: "root".into(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         }
     }
 
@@ -423,6 +442,18 @@ pub(super) mod tests {
         let relations = list_relations(&connection, PASSWORD, None).await.unwrap();
         assert_eq!(relations.database, "dbforge_list");
         assert_eq!(relations.relations.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn tls_options_reach_the_driver() {
+        let plain = options(&local(), PASSWORD).await.unwrap();
+        assert!(plain.tls.is_none());
+        let tls = Connection { tls: true, allow_self_signed: true, ..local() };
+        let Some(Tls::Enabled(settings)) = options(&tls, PASSWORD).await.unwrap().tls else { panic!("no TLS") };
+        assert_eq!(settings.allow_invalid_certificates, Some(true));
+        let verified = Connection { allow_self_signed: false, ..tls };
+        let Some(Tls::Enabled(settings)) = options(&verified, PASSWORD).await.unwrap().tls else { panic!("no TLS") };
+        assert_eq!(settings.allow_invalid_certificates, Some(false));
     }
 
     #[tokio::test]

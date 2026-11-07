@@ -16,6 +16,9 @@ const connections: Connection[] = [
     port: 5432,
     database: 'shop',
     username: 'app',
+    tls: false,
+    allowSelfSigned: false,
+    srv: false,
   },
   {
     id: 'demo-sqlite',
@@ -26,6 +29,9 @@ const connections: Connection[] = [
     port: 0,
     database: '/Users/demo/app.db',
     username: '',
+    tls: false,
+    allowSelfSigned: false,
+    srv: false,
   },
   {
     id: 'demo-mysql',
@@ -36,6 +42,9 @@ const connections: Connection[] = [
     port: 3306,
     database: 'app',
     username: 'app',
+    tls: false,
+    allowSelfSigned: false,
+    srv: false,
   },
   {
     id: 'demo-redis',
@@ -46,6 +55,9 @@ const connections: Connection[] = [
     port: 6379,
     database: '0',
     username: '',
+    tls: false,
+    allowSelfSigned: false,
+    srv: false,
   },
 ]
 

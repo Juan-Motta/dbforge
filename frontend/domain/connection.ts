@@ -12,7 +12,16 @@ export interface Connection {
   port: number
   database: string
   username: string
+  /** Encrypts the connection (Redis and MongoDB). */
+  tls: boolean
+  /** Accepts a certificate no authority signed, as development servers have. */
+  allowSelfSigned: boolean
+  /** MongoDB: the host names a DNS seed list (`mongodb+srv://`). */
+  srv: boolean
 }
+
+/** Engines whose connections can use TLS from the form. */
+export const TLS_ENGINES: Engine[] = ['redis', 'mongodb']
 
 export const ENGINE_LABELS: Record<Engine, string> = {
   postgres: 'PostgreSQL',

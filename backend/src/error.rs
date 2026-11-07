@@ -30,14 +30,18 @@ pub enum AppError {
 /// The server's reply as redis-cli prints it (`WRONGTYPE Operation against…`).
 fn redis_message(error: &redis::RedisError) -> String {
     match (error.code(), error.detail()) {
+        (Some("NOAUTH"), _) => "This server requires a password. Enter it in Password.".into(),
         (Some(code), Some(detail)) => format!("{code} {detail}"),
         _ if error.kind() == redis::ErrorKind::AuthenticationFailed => {
             "Authentication failed: wrong user name or password.".into()
         }
+        _ if error.to_string().contains("failed to lookup address") => {
+            "Could not find the host. Check its name, or that you are on the network that can see it.".into()
+        }
         _ if error.is_connection_refusal() => format!("Could not reach the server: {error}"),
         _ if error.to_string().contains("invalid peer certificate") => format!(
-            "The server's TLS certificate isn't trusted ({error}). For a self-signed certificate, end the host \
-             with #insecure, e.g. rediss://host:6380/#insecure."
+            "The server's TLS certificate isn't trusted ({error}). If the server uses a self-signed \
+             certificate, turn on Accept self-signed certificate."
         ),
         _ => error.to_string(),
     }

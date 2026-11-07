@@ -26,9 +26,9 @@ use crate::error::{AppError, Result};
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// A connection to database `db`, or the connection's own when `None`. The host
-/// may be a whole `redis://` URL, or `rediss://` for TLS; ending it in
-/// `#insecure` accepts certificates no authority signed.
+/// A connection to database `db`, or the connection's own when `None`, over TLS
+/// when the connection asks for it. Hosts saved as a whole `redis://` or
+/// `rediss://` URL, before the form split URLs into fields, still work.
 pub(crate) async fn connect(
     connection: &Connection,
     password: Option<&str>,
@@ -36,11 +36,15 @@ pub(crate) async fn connect(
     response_timeout: Option<Duration>,
 ) -> Result<MultiplexedConnection> {
     let url = is_url(&connection.host);
-    if connection.host.starts_with("rediss://") {
-        install_crypto();
+    if connection.tls || connection.host.starts_with("rediss://") {
+        super::install_crypto();
     }
     let mut info: ConnectionInfo = if url {
         connection.host.as_str().into_connection_info()?
+    } else if connection.tls {
+        let (host, port) = (connection.host.clone(), connection.port);
+        ConnectionAddr::TcpTls { host, port, insecure: connection.allow_self_signed, tls_params: None }
+            .into_connection_info()?
     } else {
         ConnectionAddr::Tcp(connection.host.clone(), connection.port).into_connection_info()?
     };
@@ -62,15 +66,6 @@ pub(crate) async fn connect(
         .set_connection_timeout(Some(CONNECT_TIMEOUT))
         .set_response_timeout(response_timeout);
     Ok(Client::open(info)?.get_multiplexed_async_connection_with_config(&config).await?)
-}
-
-/// rustls needs one process-wide crypto provider when several are compiled in,
-/// as here (the SQL drivers bring their own). Installing it twice is harmless.
-fn install_crypto() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
 }
 
 fn is_url(host: &str) -> bool {
@@ -216,6 +211,9 @@ pub(super) mod tests {
             port: 56379,
             database: String::new(),
             username: String::new(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         }
     }
 
@@ -257,14 +255,26 @@ pub(super) mod tests {
     #[tokio::test]
     #[ignore = "needs a local Redis with TLS on port 56380 (self-signed certificate)"]
     async fn connects_over_tls() {
-        // `#insecure` accepts a certificate no authority signed, as development servers have.
-        let tls = Connection { host: "rediss://127.0.0.1:56380/#insecure".into(), port: 0, ..local() };
+        let tls = Connection { port: 56380, tls: true, allow_self_signed: true, ..local() };
         assert!(server_version(&tls, PASSWORD).await.unwrap().starts_with("Redis 7."));
+        // Hosts saved as URLs keep working.
+        let url = Connection { host: "rediss://127.0.0.1:56380/#insecure".into(), port: 0, ..local() };
+        assert!(server_version(&url, PASSWORD).await.is_ok());
 
-        let verified = Connection { host: "rediss://127.0.0.1:56380".into(), ..tls };
+        let verified = Connection { allow_self_signed: false, ..tls };
         let error = server_version(&verified, PASSWORD).await.unwrap_err().to_string();
         assert!(error.starts_with("The server's TLS certificate isn't trusted"), "{error}");
-        assert!(error.contains("#insecure"), "{error}");
+        assert!(error.contains("Accept self-signed certificate"), "{error}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local Redis on port 56379"]
+    async fn a_missing_password_or_an_unknown_host_says_what_to_fix() {
+        let error = server_version(&local(), None).await.unwrap_err();
+        assert_eq!(error.to_string(), "This server requires a password. Enter it in Password.");
+        let nowhere = Connection { host: "no-such-host.invalid".into(), ..local() };
+        let error = server_version(&nowhere, PASSWORD).await.unwrap_err();
+        assert!(error.to_string().starts_with("Could not find the host."), "{error}");
     }
 
     #[tokio::test]

@@ -58,6 +58,9 @@ describe('connectionAddress', () => {
     port: 5432,
     database: 'shop',
     username: 'app',
+    tls: false,
+    allowSelfSigned: false,
+    srv: false,
   }
 
   it('shows user, host and port for servers', () => {

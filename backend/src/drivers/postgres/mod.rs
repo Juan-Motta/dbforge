@@ -354,6 +354,9 @@ mod tests {
             port: 55432,
             database: "shop".into(),
             username: "postgres".into(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
         }
     }
 
