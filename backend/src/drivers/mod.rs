@@ -359,6 +359,7 @@ pub async fn apply_changes(
         Engine::Sqlite => sqlite::apply_changes(connection, table, changes).await,
         Engine::Mysql | Engine::Mariadb => mysql::apply_changes(connection, password, table, changes).await,
         Engine::Sqlserver => sqlserver::apply_changes(connection, password, table, changes).await,
+        Engine::Mongodb => mongodb::apply_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -375,6 +376,7 @@ pub async fn preview_changes(
         Engine::Sqlite => sqlite::preview_changes(connection, table, changes).await,
         Engine::Mysql | Engine::Mariadb => mysql::preview_changes(connection, password, table, changes).await,
         Engine::Sqlserver => sqlserver::preview_changes(connection, password, table, changes).await,
+        Engine::Mongodb => mongodb::preview_changes(connection, password, table, changes).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }

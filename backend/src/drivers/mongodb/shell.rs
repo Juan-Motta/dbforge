@@ -47,7 +47,6 @@ pub fn parse(script: &str) -> Result<Vec<Statement>, String> {
 }
 
 /// Reads one value, such as a cell typed into the grid.
-#[allow(dead_code)] // Used by row editing, which comes next.
 pub fn parse_value(text: &str) -> Result<Bson, String> {
     let mut parser = Parser { text, at: 0 };
     let value = parser.value()?;
@@ -465,7 +464,7 @@ fn whole(value: &Bson) -> Option<i64> {
 }
 
 /// Dates as mongosh reads them; without a zone they are UTC.
-fn date(text: &str) -> Option<DateTime> {
+pub fn date(text: &str) -> Option<DateTime> {
     let millis = if let Ok(date) = ChronoDateTime::parse_from_rfc3339(text) {
         date.timestamp_millis()
     } else if let Ok(date) = NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f")
