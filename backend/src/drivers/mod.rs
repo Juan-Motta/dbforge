@@ -404,6 +404,7 @@ pub enum Session {
     Sqlite(sqlite::Session),
     /// Boxed: a tiberius client is much larger than the other sessions.
     Sqlserver(Box<sqlserver::Session>),
+    Mongodb(mongodb::Session),
 }
 
 /// What a cancel request needs to find a session's running query on the server.
@@ -417,6 +418,10 @@ pub enum CancelTarget {
     },
     /// SQL Server cancels on the session's own connection, which this wakes.
     Signal(Arc<tokio::sync::Notify>),
+    /// MongoDB finds the operations tagged with the session's comment.
+    Mongodb {
+        tag: String,
+    },
     /// SQLite can't stop a query from another connection.
     Unavailable,
 }
@@ -432,6 +437,7 @@ pub async fn open_session(connection: &Connection, password: Option<&str>, datab
             Engine::Sqlserver => {
                 Ok(Session::Sqlserver(Box::new(sqlserver::open_session(connection, password, database).await?)))
             }
+            Engine::Mongodb => Ok(Session::Mongodb(mongodb::open_session(connection, password, database).await?)),
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -445,6 +451,7 @@ impl Session {
             Session::Mysql(session) => CancelTarget::Mysql { id: session.id() },
             Session::Sqlite(_) => CancelTarget::Unavailable,
             Session::Sqlserver(session) => CancelTarget::Signal(session.canceller()),
+            Session::Mongodb(session) => CancelTarget::Mongodb { tag: session.tag() },
         }
     }
 
@@ -455,6 +462,7 @@ impl Session {
             Session::Mysql(session) => session.run(sql, row_limit).await,
             Session::Sqlite(session) => session.run(sql, row_limit).await,
             Session::Sqlserver(session) => session.run(sql, row_limit).await,
+            Session::Mongodb(session) => session.run(sql, row_limit).await,
         }
     }
 
@@ -466,6 +474,7 @@ impl Session {
                 Session::Mysql(session) => session.is_alive().await,
                 Session::Sqlite(session) => session.is_alive().await,
                 Session::Sqlserver(session) => session.is_alive().await,
+                Session::Mongodb(session) => session.is_alive().await,
             })
         };
         with_timeout(check).await.unwrap_or(false)
@@ -504,6 +513,7 @@ pub async fn cancel(
                 sqlserver::cancel(&canceller);
                 Ok(())
             }
+            CancelTarget::Mongodb { tag } => mongodb::cancel(connection, password, &tag).await,
             CancelTarget::Unavailable => Err(AppError::Invalid("This database can't cancel a running query.".into())),
         }
     })

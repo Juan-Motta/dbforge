@@ -6,6 +6,11 @@
 //! Documents are shown as rows: each top-level field is a column and nested
 //! values are written as JSON, in the syntax mongosh reads (see [`literal`]).
 
+mod session;
+mod shell;
+
+pub use session::{Session, cancel, open_session};
+
 use std::collections::BTreeSet;
 use std::time::Duration;
 
