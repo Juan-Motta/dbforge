@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
+use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
     with_timeout,
@@ -84,10 +85,16 @@ async fn relations(connection: &Connection) -> Result<Vec<(String, ObjectKind)>>
         .collect())
 }
 
-pub async fn fetch_rows(connection: &Connection, table: &TableRef, offset: u64, limit: u32) -> Result<RowsPage> {
+pub async fn fetch_rows(
+    connection: &Connection,
+    table: &TableRef,
+    filter: &RowFilter,
+    offset: u64,
+    limit: u32,
+) -> Result<RowsPage> {
     let mut conn = connect(connection).await?;
     let columns = table_columns(&mut conn, &table.name).await?;
-    let sql = format!("{} LIMIT ? OFFSET ?", select_all(&columns, &table.name));
+    let sql = format!("{} LIMIT ? OFFSET ?", select_all(&columns, &table.name, filter));
     let mut query = sqlx::query(AssertSqlSafe(sql)).bind(i64::from(limit) + 1).bind(offset as i64).fetch(&mut conn);
     let mut rows = Vec::new();
     while let Some(row) = query.try_next().await? {
@@ -101,11 +108,16 @@ pub async fn fetch_rows(connection: &Connection, table: &TableRef, offset: u64, 
     Ok(RowsPage { columns, rows, has_more })
 }
 
-pub async fn stream_table(connection: &Connection, table: &TableRef, sink: &mut impl RowSink) -> Result<()> {
+pub async fn stream_table(
+    connection: &Connection,
+    table: &TableRef,
+    filter: &RowFilter,
+    sink: &mut impl RowSink,
+) -> Result<()> {
     let mut conn = with_timeout(connect(connection)).await?;
     let columns = with_timeout(table_columns(&mut conn, &table.name)).await?;
     sink.columns(&columns)?;
-    let sql = select_all(&columns, &table.name);
+    let sql = select_all(&columns, &table.name, filter);
     let mut rows = sqlx::query(AssertSqlSafe(sql)).fetch(&mut conn);
     while let Some(row) = rows.try_next().await? {
         sink.row(&text_values(&row))?;
@@ -138,15 +150,10 @@ async fn table_columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<C
         .collect())
 }
 
-fn select_all(columns: &[Column], table: &str) -> String {
+fn select_all(columns: &[Column], table: &str, filter: &RowFilter) -> String {
     let names: Vec<String> = columns.iter().map(|c| quote_ident(&c.name)).collect();
     let order_by: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(&c.name)).collect();
-    format!(
-        "SELECT {} FROM {}{}",
-        names.join(", "),
-        quote_ident(table),
-        if order_by.is_empty() { String::new() } else { format!(" ORDER BY {}", order_by.join(", ")) }
-    )
+    format!("SELECT {} FROM {}{}", names.join(", "), quote_ident(table), sql_clauses(filter, &order_by))
 }
 
 /// A connection kept open between runs, so transactions and temporary tables
@@ -379,7 +386,8 @@ mod tests {
     #[tokio::test]
     async fn pages_rows_as_text_in_primary_key_order() {
         let (_dir, connection) = database(SHOP).await;
-        let page = fetch_rows(&connection, &table("orders"), 0, 2).await.unwrap();
+        let page =
+            fetch_rows(&connection, &table("orders"), &crate::drivers::RowFilter::default(), 0, 2).await.unwrap();
         let columns: Vec<_> =
             page.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str(), c.generated)).collect();
         assert_eq!(
@@ -432,7 +440,14 @@ mod tests {
         assert!(error.to_string().contains("one statement"), "{error}");
         let error = explain(&connection, "SELECT 1", true).await.unwrap_err();
         assert!(error.to_string().contains("Analyze isn't available"), "{error}");
-        assert_eq!(fetch_rows(&connection, &table("orders"), 0, 10).await.unwrap().rows.len(), 3);
+        assert_eq!(
+            fetch_rows(&connection, &table("orders"), &crate::drivers::RowFilter::default(), 0, 10)
+                .await
+                .unwrap()
+                .rows
+                .len(),
+            3
+        );
     }
 
     #[test]
@@ -456,5 +471,33 @@ mod tests {
         assert_eq!(root["Plans"][1]["Node Type"], "SEARCH");
         assert_eq!(root["Plans"][1]["Detail"], "c USING INTEGER PRIMARY KEY (rowid=?)");
         assert_eq!(root["Plans"][2]["Node Type"], "USE TEMP B-TREE FOR ORDER BY");
+    }
+    #[tokio::test]
+    async fn filters_and_orders_rows_and_exports_only_those() {
+        let (_dir, connection) = database(SHOP).await;
+        let f = |filter: &str, order: &str| crate::drivers::RowFilter { filter: filter.into(), order: order.into() };
+        let ids = |page: &RowsPage| page.rows.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>();
+
+        let page =
+            fetch_rows(&connection, &table("orders"), &f("total > 10 -- big ones", "total DESC"), 0, 10).await.unwrap();
+        assert_eq!(ids(&page), ["3", "1"]);
+        let page = fetch_rows(&connection, &table("orders"), &f("id = 1 OR id = 3", ""), 0, 1).await.unwrap();
+        assert_eq!((ids(&page), page.has_more), (vec!["1".to_string()], true));
+        let error = fetch_rows(&connection, &table("orders"), &f("nope = 1", ""), 0, 10).await.unwrap_err();
+        assert!(error.to_string().contains("nope"), "{error}");
+
+        struct Ids(Vec<String>);
+        impl RowSink for Ids {
+            fn columns(&mut self, _: &[Column]) -> Result<()> {
+                Ok(())
+            }
+            fn row(&mut self, values: &[Option<String>]) -> Result<()> {
+                self.0.push(values[0].clone().unwrap());
+                Ok(())
+            }
+        }
+        let mut sink = Ids(Vec::new());
+        stream_table(&connection, &table("orders"), &f("customer_id = 1", "id"), &mut sink).await.unwrap();
+        assert_eq!(sink.0, ["2", "3"]);
     }
 }

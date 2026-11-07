@@ -11,7 +11,7 @@ use tauri::State;
 
 use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
-use crate::drivers::{self, Column, RowSink, TableRef};
+use crate::drivers::{self, Column, RowFilter, RowSink, TableRef};
 use crate::error::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -217,12 +217,14 @@ pub fn export_rows(
     write_rows(BufWriter::new(File::create(path)?), format, &quote_ident(&name), &columns, &rows)
 }
 
-/// Streams every row of a table or view to `path`; returns how many were written.
+/// Streams every row of a table or view to `path`, only those `filter` keeps
+/// when given; returns how many were written.
 #[tauri::command]
 pub async fn export_table(
     store: State<'_, ConnectionStore>,
     connection_id: String,
     table: TableRef,
+    filter: Option<RowFilter>,
     format: Format,
     path: PathBuf,
 ) -> Result<u64> {
@@ -230,7 +232,7 @@ pub async fn export_table(
     let password = secrets::get_password(&connection.id)?;
     let name = format!("{}.{}", quote_ident(&table.schema), quote_ident(&table.name));
     let mut writer = RowWriter::new(BufWriter::new(File::create(path)?), format, &name);
-    drivers::stream_table(&connection, password.as_deref(), &table, &mut writer).await?;
+    drivers::stream_table(&connection, password.as_deref(), &table, &filter.unwrap_or_default(), &mut writer).await?;
     writer.finish()
 }
 

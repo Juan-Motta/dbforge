@@ -324,7 +324,16 @@ mod tests {
         for script in ["db.orders.deleteMany({})", "db.orders.updateMany({}, {$set: {total: 0}})"] {
             explain(&connection, PASSWORD, None, script, true).await.unwrap();
         }
-        let page = fetch_rows(&connection, PASSWORD, &table("dbforge_explain_agg", "orders"), 0, 100).await.unwrap();
+        let page = fetch_rows(
+            &connection,
+            PASSWORD,
+            &table("dbforge_explain_agg", "orders"),
+            &crate::drivers::RowFilter::default(),
+            0,
+            100,
+        )
+        .await
+        .unwrap();
         assert_eq!(page.rows.len(), 20);
         assert_eq!(page.rows[0][2].as_deref(), Some("10"));
 

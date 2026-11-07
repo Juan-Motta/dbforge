@@ -23,6 +23,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
+use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
     with_timeout,
@@ -197,13 +198,14 @@ pub async fn fetch_rows(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
     let mut client = connect(connection, password, Some(&table.database)).await?;
     let columns = table_columns(&mut client, table).await?;
     // Fetch one extra row to know whether another page exists.
-    let sql = format!("{} OFFSET @P1 ROWS FETCH NEXT @P2 ROWS ONLY", select(&columns, table));
+    let sql = format!("{} OFFSET @P1 ROWS FETCH NEXT @P2 ROWS ONLY", select(&columns, table, filter));
     let mut page = Query::new(sql);
     page.bind(offset as i64);
     page.bind(i64::from(limit) + 1);
@@ -220,13 +222,14 @@ pub async fn stream_table(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     sink: &mut impl RowSink,
 ) -> Result<()> {
     let mut client = with_timeout(connect(connection, password, Some(&table.database))).await?;
     let columns = with_timeout(table_columns(&mut client, table)).await?;
     sink.columns(&columns)?;
 
-    let mut stream = client.simple_query(select(&columns, table)).await?;
+    let mut stream = client.simple_query(select(&columns, table, filter)).await?;
     while let Some(item) = stream.try_next().await? {
         if let QueryItem::Row(row) = item {
             sink.row(&text_values(&row))?;
@@ -293,15 +296,15 @@ fn type_name(name: &str, max_length: &str, precision: &str, scale: &str) -> Stri
 
 /// `SELECT` of every column, ordered by primary key; `OFFSET` needs an order,
 /// so a table without a key gets an arbitrary one.
-fn select(columns: &[Column], table: &TableRef) -> String {
+fn select(columns: &[Column], table: &TableRef, filter: &RowFilter) -> String {
     let names: Vec<String> = columns.iter().map(|c| quote_ident(&c.name)).collect();
     let key: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(&c.name)).collect();
     format!(
-        "SELECT {} FROM {}.{} ORDER BY {}",
+        "SELECT {} FROM {}.{}{}",
         names.join(", "),
         quote_ident(&table.schema),
         quote_ident(&table.name),
-        if key.is_empty() { "(SELECT NULL)".to_string() } else { key.join(", ") },
+        sql_clauses(filter, &if key.is_empty() { vec!["(SELECT NULL)".to_string()] } else { key }),
     )
 }
 
@@ -649,7 +652,8 @@ pub(super) mod tests {
         .await;
         let items = TableRef { schema: "sales".into(), ..table("dbforge_rows", "items") };
 
-        let page = fetch_rows(&connection, PASSWORD, &items, 0, 2).await.unwrap();
+        let page =
+            fetch_rows(&connection, PASSWORD, &items, &crate::drivers::RowFilter::default(), 0, 2).await.unwrap();
         let columns: Vec<_> =
             page.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str(), c.primary_key, c.generated)).collect();
         assert_eq!(
@@ -684,11 +688,19 @@ pub(super) mod tests {
         );
         assert!(page.has_more);
 
-        let last = fetch_rows(&connection, PASSWORD, &items, 2, 2).await.unwrap();
+        let last =
+            fetch_rows(&connection, PASSWORD, &items, &crate::drivers::RowFilter::default(), 2, 2).await.unwrap();
         assert_eq!((last.rows.len(), last.has_more), (1, false));
 
         let view = TableRef { name: "cheap".into(), ..items.clone() };
-        assert_eq!(fetch_rows(&connection, PASSWORD, &view, 0, 10).await.unwrap().rows.len(), 2);
+        assert_eq!(
+            fetch_rows(&connection, PASSWORD, &view, &crate::drivers::RowFilter::default(), 0, 10)
+                .await
+                .unwrap()
+                .rows
+                .len(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -768,5 +780,27 @@ pub(super) mod tests {
         assert_eq!(type_name("decimal", "9", "10", "2"), "decimal(10,2)");
         assert_eq!(type_name("datetime2", "8", "27", "7"), "datetime2(7)");
         assert_eq!(type_name("int", "4", "10", "0"), "int");
+    }
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
+    async fn filters_and_orders_rows_as_typed() {
+        let connection = database(
+            "dbforge_filter",
+            "CREATE TABLE items (id int PRIMARY KEY, paid decimal(10,2));
+             INSERT INTO items VALUES (1, 12.50), (2, 0), (3, NULL);",
+        )
+        .await;
+        let items = table("dbforge_filter", "items");
+        let f = |filter: &str, order: &str| crate::drivers::RowFilter { filter: filter.into(), order: order.into() };
+        let ids = |page: &RowsPage| page.rows.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>();
+
+        let page = fetch_rows(&connection, PASSWORD, &items, &f("paid IS NOT NULL -- priced only", "paid DESC"), 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(ids(&page), ["1", "2"]);
+        let page = fetch_rows(&connection, PASSWORD, &items, &f("id = 1 OR id = 3", ""), 0, 1).await.unwrap();
+        assert_eq!((ids(&page), page.has_more), (vec!["1".to_string()], true));
+        let error = fetch_rows(&connection, PASSWORD, &items, &f("nope = 1", ""), 0, 10).await.unwrap_err();
+        assert!(error.to_string().contains("nope"), "{error}");
     }
 }

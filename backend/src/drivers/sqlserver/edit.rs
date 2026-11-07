@@ -102,7 +102,17 @@ mod tests {
         CREATE TABLE loose (name nvarchar(10));";
 
     async fn rows(connection: &Connection, name: &str) -> Vec<Vec<Option<String>>> {
-        super::super::fetch_rows(connection, PASSWORD, &table(&connection.database, name), 0, 50).await.unwrap().rows
+        super::super::fetch_rows(
+            connection,
+            PASSWORD,
+            &table(&connection.database, name),
+            &crate::drivers::RowFilter::default(),
+            0,
+            50,
+        )
+        .await
+        .unwrap()
+        .rows
     }
 
     #[tokio::test]

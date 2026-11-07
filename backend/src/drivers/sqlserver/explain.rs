@@ -292,7 +292,16 @@ mod tests {
 
         // Nothing runs: the delete is only compiled.
         explain(&connection, PASSWORD, None, "DELETE FROM orders", false).await.unwrap();
-        let orders = fetch_rows(&connection, PASSWORD, &table("dbforge_explain", "orders"), 0, 10).await.unwrap();
+        let orders = fetch_rows(
+            &connection,
+            PASSWORD,
+            &table("dbforge_explain", "orders"),
+            &crate::drivers::RowFilter::default(),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
         assert_eq!(orders.rows.len(), 1);
 
         let error = explain(&connection, PASSWORD, None, "SELECT 1 FROM orders; SELECT 2 FROM orders", false)
@@ -316,7 +325,16 @@ mod tests {
         // The delete really runs (one row), then is rolled back.
         let plan = explain(&connection, PASSWORD, None, "DELETE FROM orders", true).await.unwrap();
         assert_eq!(plan[0]["Plan"]["Actual Rows"], 1.0, "{plan}");
-        let orders = fetch_rows(&connection, PASSWORD, &table("dbforge_analyze", "orders"), 0, 10).await.unwrap();
+        let orders = fetch_rows(
+            &connection,
+            PASSWORD,
+            &table("dbforge_analyze", "orders"),
+            &crate::drivers::RowFilter::default(),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
         assert_eq!(orders.rows.len(), 1);
 
         // Nothing runs that could end the transaction it is rolled back in.
@@ -331,7 +349,16 @@ mod tests {
             let error = explain(&connection, PASSWORD, None, sql, true).await.unwrap_err();
             assert_eq!(error.to_string(), message, "{sql}");
         }
-        let orders = fetch_rows(&connection, PASSWORD, &table("dbforge_analyze", "orders"), 0, 10).await.unwrap();
+        let orders = fetch_rows(
+            &connection,
+            PASSWORD,
+            &table("dbforge_analyze", "orders"),
+            &crate::drivers::RowFilter::default(),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
         assert_eq!(orders.rows.len(), 1);
     }
 

@@ -13,6 +13,7 @@ pub use diagram::schema_diagram;
 pub use edit::{apply_changes, preview_changes};
 pub use structure::table_structure;
 
+use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
     with_timeout,
@@ -132,6 +133,7 @@ pub async fn fetch_rows(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
@@ -139,7 +141,7 @@ pub async fn fetch_rows(
     let columns = table_columns(&mut conn, table).await?;
 
     // Fetch one extra row to know whether another page exists.
-    let sql = format!("{} LIMIT $1 OFFSET $2", select_as_text(&columns, table));
+    let sql = format!("{} LIMIT $1 OFFSET $2", select_as_text(&columns, table, filter));
     let mut rows: Vec<Vec<Option<String>>> = sqlx::query_scalar(AssertSqlSafe(sql))
         .bind(i64::from(limit) + 1)
         .bind(offset as i64)
@@ -157,13 +159,14 @@ pub async fn stream_table(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     sink: &mut impl RowSink,
 ) -> Result<()> {
     let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
     let columns = with_timeout(table_columns(&mut conn, table)).await?;
     sink.columns(&columns)?;
 
-    let sql = select_as_text(&columns, table);
+    let sql = select_as_text(&columns, table, filter);
     let mut rows = sqlx::query_scalar::<_, Vec<Option<String>>>(AssertSqlSafe(sql)).fetch(&mut conn);
     while let Some(values) = rows.try_next().await? {
         sink.row(&values)?;
@@ -199,7 +202,7 @@ async fn table_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<
 }
 
 /// Every value is cast to text so any column type can be shown or exported as-is.
-fn select_as_text(columns: &[Column], table: &TableRef) -> String {
+fn select_as_text(columns: &[Column], table: &TableRef, filter: &RowFilter) -> String {
     let values: Vec<String> = columns.iter().map(|c| format!("{}::text", quote_ident(&c.name))).collect();
     let order_by: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(&c.name)).collect();
     format!(
@@ -207,7 +210,7 @@ fn select_as_text(columns: &[Column], table: &TableRef) -> String {
         values.join(", "),
         quote_ident(&table.schema),
         quote_ident(&table.name),
-        if order_by.is_empty() { String::new() } else { format!(" ORDER BY {}", order_by.join(", ")) },
+        sql_clauses(filter, &order_by),
     )
 }
 
@@ -420,7 +423,7 @@ mod tests {
         }
         let table = TableRef { database: "shop".into(), schema: "dbforge_rows".into(), name: r#"Odd "Name""#.into() };
 
-        let first = fetch_rows(&local(), PASSWORD, &table, 0, 2).await.unwrap();
+        let first = fetch_rows(&local(), PASSWORD, &table, &crate::drivers::RowFilter::default(), 0, 2).await.unwrap();
         let columns: Vec<_> =
             first.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str(), c.primary_key)).collect();
         assert_eq!(
@@ -431,12 +434,12 @@ mod tests {
         assert_eq!(first.rows, [vec![s("1"), s("a"), s("12.50")], vec![s("2"), None, s("0.00")]]);
         assert!(first.has_more);
 
-        let last = fetch_rows(&local(), PASSWORD, &table, 2, 2).await.unwrap();
+        let last = fetch_rows(&local(), PASSWORD, &table, &crate::drivers::RowFilter::default(), 2, 2).await.unwrap();
         assert_eq!(last.rows, [vec![s("3"), s("c"), None]]);
         assert!(!last.has_more);
 
         let missing = TableRef { name: "nope".into(), ..table };
-        assert!(fetch_rows(&local(), PASSWORD, &missing, 0, 2).await.is_err());
+        assert!(fetch_rows(&local(), PASSWORD, &missing, &crate::drivers::RowFilter::default(), 0, 2).await.is_err());
 
         sqlx::query("DROP SCHEMA dbforge_rows CASCADE").execute(&mut conn).await.unwrap();
     }
@@ -566,7 +569,7 @@ mod tests {
 
         let table = TableRef { database: "shop".into(), schema: "dbforge_export".into(), name: "items".into() };
         let mut sink = Collect::default();
-        stream_table(&local(), PASSWORD, &table, &mut sink).await.unwrap();
+        stream_table(&local(), PASSWORD, &table, &crate::drivers::RowFilter::default(), &mut sink).await.unwrap();
 
         assert_eq!(sink.0, ["id", "label"]);
         assert_eq!(sink.1.len(), 1500, "more than any page size");
@@ -629,7 +632,7 @@ mod tests {
         .unwrap();
 
         let table = TableRef { database: "shop".into(), schema: "dbforge_generated".into(), name: "items".into() };
-        let page = fetch_rows(&local(), PASSWORD, &table, 0, 1).await.unwrap();
+        let page = fetch_rows(&local(), PASSWORD, &table, &crate::drivers::RowFilter::default(), 0, 1).await.unwrap();
         let flags: Vec<_> = page.columns.iter().map(|c| (c.name.as_str(), c.generated)).collect();
         // BY DEFAULT identities and plain defaults can still be given a value.
         assert_eq!(flags, [("id", true), ("seq", false), ("qty", false), ("doubled", true)]);
@@ -642,5 +645,31 @@ mod tests {
     async fn wrong_password_is_reported() {
         let error = server_version(&local(), Some("wrong")).await.unwrap_err();
         assert!(error.to_string().contains("password authentication failed"), "{error}");
+    }
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn filters_and_orders_rows_as_typed() {
+        let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
+        for statement in [
+            "DROP SCHEMA IF EXISTS dbforge_filter CASCADE",
+            "CREATE SCHEMA dbforge_filter",
+            "CREATE TABLE dbforge_filter.items (id int PRIMARY KEY, paid numeric(10,2))",
+            "INSERT INTO dbforge_filter.items VALUES (1, 12.50), (2, 0), (3, NULL)",
+        ] {
+            sqlx::query(statement).execute(&mut conn).await.unwrap();
+        }
+        let items = TableRef { database: "shop".into(), schema: "dbforge_filter".into(), name: "items".into() };
+        let f = |filter: &str, order: &str| crate::drivers::RowFilter { filter: filter.into(), order: order.into() };
+        let ids = |page: &RowsPage| page.rows.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>();
+
+        let page = fetch_rows(&local(), PASSWORD, &items, &f("paid IS NOT NULL -- priced only", "paid DESC"), 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(ids(&page), ["1", "2"]);
+        // The OR stays inside the filter: the page size still applies.
+        let page = fetch_rows(&local(), PASSWORD, &items, &f("id = 1 OR id = 3", ""), 0, 1).await.unwrap();
+        assert_eq!((ids(&page), page.has_more), (vec!["1".to_string()], true));
+        let error = fetch_rows(&local(), PASSWORD, &items, &f("nope = 1", ""), 0, 10).await.unwrap_err();
+        assert!(error.to_string().contains("nope"), "{error}");
     }
 }

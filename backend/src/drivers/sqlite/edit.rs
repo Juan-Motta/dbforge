@@ -70,7 +70,10 @@ mod tests {
         CREATE TABLE loose (name TEXT);";
 
     async fn rows(connection: &Connection) -> Vec<Vec<Option<String>>> {
-        super::super::fetch_rows(connection, &table("items"), 0, 50).await.unwrap().rows
+        super::super::fetch_rows(connection, &table("items"), &crate::drivers::RowFilter::default(), 0, 50)
+            .await
+            .unwrap()
+            .rows
     }
 
     #[tokio::test]

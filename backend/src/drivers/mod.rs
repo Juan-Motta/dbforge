@@ -2,6 +2,9 @@
 
 mod edit_sql;
 mod mongodb;
+mod row_filter;
+
+pub use row_filter::RowFilter;
 mod mysql;
 mod postgres;
 pub mod redis;
@@ -297,14 +300,15 @@ pub async fn stream_table(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     sink: &mut impl RowSink,
 ) -> Result<()> {
     match connection.engine {
-        Engine::Postgres => postgres::stream_table(connection, password, table, sink).await,
-        Engine::Sqlite => sqlite::stream_table(connection, table, sink).await,
-        Engine::Mysql | Engine::Mariadb => mysql::stream_table(connection, password, table, sink).await,
-        Engine::Sqlserver => sqlserver::stream_table(connection, password, table, sink).await,
-        Engine::Mongodb => mongodb::stream_table(connection, password, table, sink).await,
+        Engine::Postgres => postgres::stream_table(connection, password, table, filter, sink).await,
+        Engine::Sqlite => sqlite::stream_table(connection, table, filter, sink).await,
+        Engine::Mysql | Engine::Mariadb => mysql::stream_table(connection, password, table, filter, sink).await,
+        Engine::Sqlserver => sqlserver::stream_table(connection, password, table, filter, sink).await,
+        Engine::Mongodb => mongodb::stream_table(connection, password, table, filter, sink).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -313,16 +317,19 @@ pub async fn fetch_rows(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
     with_timeout(async {
         match connection.engine {
-            Engine::Postgres => postgres::fetch_rows(connection, password, table, offset, limit).await,
-            Engine::Sqlite => sqlite::fetch_rows(connection, table, offset, limit).await,
-            Engine::Mysql | Engine::Mariadb => mysql::fetch_rows(connection, password, table, offset, limit).await,
-            Engine::Sqlserver => sqlserver::fetch_rows(connection, password, table, offset, limit).await,
-            Engine::Mongodb => mongodb::fetch_rows(connection, password, table, offset, limit).await,
+            Engine::Postgres => postgres::fetch_rows(connection, password, table, filter, offset, limit).await,
+            Engine::Sqlite => sqlite::fetch_rows(connection, table, filter, offset, limit).await,
+            Engine::Mysql | Engine::Mariadb => {
+                mysql::fetch_rows(connection, password, table, filter, offset, limit).await
+            }
+            Engine::Sqlserver => sqlserver::fetch_rows(connection, password, table, filter, offset, limit).await,
+            Engine::Mongodb => mongodb::fetch_rows(connection, password, table, filter, offset, limit).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })

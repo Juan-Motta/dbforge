@@ -25,6 +25,7 @@ use mongodb::bson::{Bson, Document, doc};
 use mongodb::options::{ClientOptions, Credential, ServerAddress, Tls, TlsOptions};
 use mongodb::{Client, Database};
 
+use super::row_filter::RowFilter;
 use super::{Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
@@ -178,15 +179,17 @@ pub async fn fetch_rows(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
+    let (query, sort) = documents_of(filter)?;
     let client = connect(connection, password).await?;
     let mut documents: Vec<Document> = client
         .database(&table.database)
         .collection::<Document>(&table.name)
-        .find(doc! {})
-        .sort(doc! { "_id": 1 })
+        .find(query)
+        .sort(sort)
         .skip(offset)
         // One extra document tells whether another page exists.
         .limit(i64::from(limit) + 1)
@@ -208,11 +211,14 @@ pub async fn stream_table(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     sink: &mut impl RowSink,
 ) -> Result<()> {
+    let (query, sort) = documents_of(filter)?;
     let client = with_timeout(connect(connection, password)).await?;
     let collection = client.database(&table.database).collection::<Document>(&table.name);
     let pipeline = vec![
+        doc! { "$match": query.clone() },
         doc! { "$project": { "fields": { "$objectToArray": "$$ROOT" } } },
         doc! { "$unwind": "$fields" },
         doc! { "$group": { "_id": "$fields.k" } },
@@ -225,11 +231,11 @@ pub async fn stream_table(
         .iter()
         .filter_map(|group| group.get_str("_id").ok().map(String::from))
         .collect();
-    let first = collection.find_one(doc! {}).sort(doc! { "_id": 1 }).await?;
+    let first = collection.find_one(query.clone()).sort(sort.clone()).await?;
     let columns = ordered_columns(first.iter(), names);
     sink.columns(&columns)?;
 
-    let mut cursor = collection.find(doc! {}).sort(doc! { "_id": 1 }).await?;
+    let mut cursor = collection.find(query).sort(sort).await?;
     while let Some(document) = cursor.try_next().await? {
         sink.row(&row(&document, &columns))?;
     }
@@ -237,6 +243,24 @@ pub async fn stream_table(
     drop(cursor);
     client.shutdown().await;
     Ok(())
+}
+
+/// The filter and sort documents typed in the table view, in mongosh syntax:
+/// `{status: 'paid'}` and `{total: -1}`. Without a sort, documents keep `_id` order.
+fn documents_of(filter: &RowFilter) -> Result<(Document, Document)> {
+    let read = |text: &str, what: &str, example: &str| -> Result<Option<Document>> {
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        match shell::parse_value(text) {
+            Ok(Bson::Document(document)) => Ok(Some(document)),
+            Ok(_) => Err(AppError::Invalid(format!("The {what} must be a document, like {example}."))),
+            Err(error) => Err(AppError::Invalid(format!("The {what} can't be read: {error}"))),
+        }
+    };
+    let query = read(&filter.filter, "filter", "{status: 'paid'}")?.unwrap_or_default();
+    let sort = read(&filter.order, "sort", "{total: -1}")?.unwrap_or_else(|| doc! { "_id": 1 });
+    Ok((query, sort))
 }
 
 /// The fields of `documents`, `_id` first and then in the order they first
@@ -478,7 +502,8 @@ pub(super) mod tests {
         let connection = database("dbforge_rows", &[("people", documents)]).await;
         let people = table("dbforge_rows", "people");
 
-        let page = fetch_rows(&connection, PASSWORD, &people, 0, 2).await.unwrap();
+        let page =
+            fetch_rows(&connection, PASSWORD, &people, &crate::drivers::RowFilter::default(), 0, 2).await.unwrap();
         let columns: Vec<_> =
             page.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str(), c.primary_key)).collect();
         assert_eq!(
@@ -511,7 +536,8 @@ pub(super) mod tests {
         assert_eq!(page.rows[1][2], some("5.5"));
         assert!(page.has_more);
 
-        let last = fetch_rows(&connection, PASSWORD, &people, 2, 2).await.unwrap();
+        let last =
+            fetch_rows(&connection, PASSWORD, &people, &crate::drivers::RowFilter::default(), 2, 2).await.unwrap();
         assert_eq!((last.rows.len(), last.has_more), (1, false));
     }
 
@@ -535,7 +561,15 @@ pub(super) mod tests {
         let documents = vec![doc! { "_id": 1, "b": 1 }, doc! { "_id": 2, "z": "late", "a": 2 }];
         let connection = database("dbforge_stream", &[("things", documents)]).await;
         let mut sink = Collected::default();
-        stream_table(&connection, PASSWORD, &table("dbforge_stream", "things"), &mut sink).await.unwrap();
+        stream_table(
+            &connection,
+            PASSWORD,
+            &table("dbforge_stream", "things"),
+            &crate::drivers::RowFilter::default(),
+            &mut sink,
+        )
+        .await
+        .unwrap();
         let names: Vec<_> = sink.0.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["_id", "b", "a", "z"]);
         assert_eq!(sink.1[1], [Some("2".into()), None, Some("2".into()), Some("late".into())]);
@@ -551,5 +585,27 @@ pub(super) mod tests {
             literal(&value),
             r#"{"id": ObjectId("65a0f0f0f0f0f0f0f0f0f0f0"), "n": NumberLong(2), "x": 1.0, "s": "a\"b", "d": ISODate("1970-01-01T00:00:00Z"), "list": [1, null]}"#
         );
+    }
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn filters_and_sorts_documents_in_mongosh_syntax() {
+        let documents = vec![doc! { "_id": 1, "paid": 12.5 }, doc! { "_id": 2, "paid": 0 }, doc! { "_id": 3 }];
+        let connection = database("dbforge_filter", &[("items", documents)]).await;
+        let items = table("dbforge_filter", "items");
+        let f = |filter: &str, order: &str| crate::drivers::RowFilter { filter: filter.into(), order: order.into() };
+        let ids = |page: &RowsPage| page.rows.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>();
+
+        let page = fetch_rows(&connection, PASSWORD, &items, &f("{paid: {$exists: true}}", "{paid: -1}"), 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(ids(&page), ["1", "2"]);
+        let error = fetch_rows(&connection, PASSWORD, &items, &f("[1]", ""), 0, 10).await.unwrap_err();
+        assert_eq!(error.to_string(), "The filter must be a document, like {status: 'paid'}.");
+        let error = fetch_rows(&connection, PASSWORD, &items, &f("{paid: ", ""), 0, 10).await.unwrap_err();
+        assert!(error.to_string().starts_with("The filter can't be read: "), "{error}");
+
+        let mut sink = Collected::default();
+        stream_table(&connection, PASSWORD, &items, &f("{_id: {$gt: 1}}", "{_id: -1}"), &mut sink).await.unwrap();
+        assert_eq!(sink.1.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>(), ["3", "2"]);
     }
 }

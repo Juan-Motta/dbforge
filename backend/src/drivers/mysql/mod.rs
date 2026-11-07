@@ -21,6 +21,7 @@ use futures_util::TryStreamExt;
 use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
+use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
     with_timeout,
@@ -126,12 +127,13 @@ pub async fn fetch_rows(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
     let mut conn = connect(connection, password, Some(&table.database)).await?;
     let columns = table_columns(&mut conn, table).await?;
-    let sql = format!("{} LIMIT ? OFFSET ?", select_as_text(&columns, table));
+    let sql = format!("{} LIMIT ? OFFSET ?", select_as_text(&columns, table, filter));
     let mut query = sqlx::query(AssertSqlSafe(sql)).bind(u64::from(limit) + 1).bind(offset).fetch(&mut conn);
     let mut rows = Vec::new();
     while let Some(row) = query.try_next().await? {
@@ -151,12 +153,13 @@ pub async fn stream_table(
     connection: &Connection,
     password: Option<&str>,
     table: &TableRef,
+    filter: &RowFilter,
     sink: &mut impl RowSink,
 ) -> Result<()> {
     let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
     let columns = with_timeout(table_columns(&mut conn, table)).await?;
     sink.columns(&columns)?;
-    let sql = select_as_text(&columns, table);
+    let sql = select_as_text(&columns, table, filter);
     let mut rows = sqlx::query(AssertSqlSafe(sql)).fetch(&mut conn);
     while let Some(row) = rows.try_next().await? {
         sink.row(&text_values(&row))?;
@@ -198,7 +201,7 @@ fn is_generated(extra: &str) -> bool {
 }
 
 /// Every value cast to text so any column type can be shown or exported as-is.
-fn select_as_text(columns: &[Column], table: &TableRef) -> String {
+fn select_as_text(columns: &[Column], table: &TableRef, filter: &RowFilter) -> String {
     let values: Vec<String> = columns.iter().map(|c| format!("CAST({} AS CHAR)", quote_ident(&c.name))).collect();
     let order_by: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(&c.name)).collect();
     format!(
@@ -206,7 +209,7 @@ fn select_as_text(columns: &[Column], table: &TableRef) -> String {
         values.join(", "),
         quote_ident(&table.schema),
         quote_ident(&table.name),
-        if order_by.is_empty() { String::new() } else { format!(" ORDER BY {}", order_by.join(", ")) },
+        sql_clauses(filter, &order_by),
     )
 }
 
@@ -417,13 +420,15 @@ mod tests {
         .await;
             let items = table("dbforge_rows", "items");
 
-            let page = fetch_rows(&local(), PASSWORD, &items, 1, 1).await.unwrap();
+            let page =
+                fetch_rows(&local(), PASSWORD, &items, &crate::drivers::RowFilter::default(), 1, 1).await.unwrap();
             assert_eq!(page.rows, [vec![Some("2".into()), Some("b".into()), Some("2.00".into()), None]]);
             assert!(page.has_more);
             assert!(page.columns[0].primary_key);
             assert_eq!(page.columns[2].data_type, "decimal(6,2)");
 
-            let last = fetch_rows(&local(), PASSWORD, &items, 2, 5).await.unwrap();
+            let last =
+                fetch_rows(&local(), PASSWORD, &items, &crate::drivers::RowFilter::default(), 2, 5).await.unwrap();
             assert_eq!(last.rows[0][3].as_deref(), Some("2026-11-05 10:00:00"));
             assert!(!last.has_more);
         }
@@ -446,7 +451,16 @@ mod tests {
                  );",
             )
             .await;
-            let page = fetch_rows(&server, PASSWORD, &table("dbforge_generated", "items"), 0, 1).await.unwrap();
+            let page = fetch_rows(
+                &server,
+                PASSWORD,
+                &table("dbforge_generated", "items"),
+                &crate::drivers::RowFilter::default(),
+                0,
+                1,
+            )
+            .await
+            .unwrap();
             let flags: Vec<_> = page.columns.iter().map(|c| (c.name.as_str(), c.generated)).collect();
             // AUTO_INCREMENT and expression defaults (MySQL's DEFAULT_GENERATED) can still be set.
             assert_eq!(
@@ -488,6 +502,33 @@ mod tests {
             // MySQL ends an interrupted SLEEP early and returns 1 instead of failing.
             assert!(outcome.map_or(true, |o| o.results[0].rows == [vec![Some("1".into())]]));
             assert!(session.is_alive().await, "the session stays usable after a cancel");
+        }
+    }
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn filters_and_orders_rows_as_typed() {
+        for server in servers() {
+            let _conn = run(
+                &server,
+                "DROP DATABASE IF EXISTS dbforge_filter;
+                 CREATE DATABASE dbforge_filter;
+                 CREATE TABLE dbforge_filter.items (id int PRIMARY KEY, paid decimal(10,2));
+                 INSERT INTO dbforge_filter.items VALUES (1, 12.50), (2, 0), (3, NULL);",
+            )
+            .await;
+            let items = table("dbforge_filter", "items");
+            let f =
+                |filter: &str, order: &str| crate::drivers::RowFilter { filter: filter.into(), order: order.into() };
+            let ids = |page: &RowsPage| page.rows.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>();
+
+            let page = fetch_rows(&server, PASSWORD, &items, &f("paid IS NOT NULL -- priced only", "paid DESC"), 0, 10)
+                .await
+                .unwrap();
+            assert_eq!(ids(&page), ["1", "2"]);
+            let page = fetch_rows(&server, PASSWORD, &items, &f("id = 1 OR id = 3", ""), 0, 1).await.unwrap();
+            assert_eq!((ids(&page), page.has_more), (vec!["1".to_string()], true));
+            let error = fetch_rows(&server, PASSWORD, &items, &f("nope = 1", ""), 0, 10).await.unwrap_err();
+            assert!(error.to_string().contains("nope"), "{error}");
         }
     }
 }
