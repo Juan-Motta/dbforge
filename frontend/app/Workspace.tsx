@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
 import { DiagramView } from '../features/diagram/DiagramView'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
+import type { HistoryEntry } from '../features/history/api'
 import { KeyBrowser } from '../features/keyspace/KeyBrowser'
 import { QueryConsole } from '../features/query/QueryConsole'
 import { TablePage } from './TablePage'
@@ -19,12 +20,22 @@ interface WorkspaceProps {
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
   connectionOf: (connectionId: string) => Connection | undefined
+  /** Opens a query from the history in a new console. */
+  onOpenQuery: (entry: HistoryEntry) => void
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram', keyspace: 'database' } as const
 
 /** The main island: open query consoles, tables and diagrams, one visible at a time. */
-export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, connectionOf }: WorkspaceProps) {
+export function Workspace({
+  tabs,
+  activeId,
+  onSelect,
+  onClose,
+  onNewQuery,
+  connectionOf,
+  onOpenQuery,
+}: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
 
   if (tabs.length === 0) {
@@ -57,6 +68,8 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, conne
               connectionId={tab.connectionId}
               database={tab.database}
               initialSql={tab.initialSql}
+              onOpenQuery={onOpenQuery}
+              canOpen={(entry) => connectionOf(entry.connectionId) !== undefined}
               dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
               onExportResult={(result) =>
                 setExporting({

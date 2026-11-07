@@ -1,30 +1,54 @@
-import { useState } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { HistoryEntry } from './api'
-import { firstLine, formatDuration, formatTime, groupByDay, outcomeLabel } from './format'
+import {
+  firstLine,
+  formatDuration,
+  formatTime,
+  groupByDay,
+  inScope,
+  outcomeLabel,
+  type HistoryScope,
+} from './format'
 import { useHistory } from './useHistory'
 import styles from './HistoryPanel.module.css'
 
 interface HistoryPanelProps {
-  /** Opens the entry's SQL in a new console, without running it. */
-  onOpen: (entry: HistoryEntry) => void
+  /** The console's connection: its runs are shown first, or alone. */
+  connectionId: string
+  /** Changes after each run, so the newest one appears. */
+  reloadKey: unknown
+  /** Puts the entry's SQL in the console, without running it. */
+  onLoad: (entry: HistoryEntry) => void
+  /** Opens the entry's SQL in a new console on its own connection. */
+  onOpenNew: (entry: HistoryEntry) => void
   /** False once the entry's connection has been deleted. */
   canOpen: (entry: HistoryEntry) => boolean
+  onClose: () => void
 }
 
-/** Every query run from a console, newest first, grouped by day. */
-export function HistoryPanel({ onOpen, canOpen }: HistoryPanelProps) {
+/** The queries run from consoles, newest first, grouped by day, beside a console. */
+export function HistoryPanel({
+  connectionId,
+  reloadKey,
+  onLoad,
+  onOpenNew,
+  canOpen,
+  onClose,
+}: HistoryPanelProps) {
   const [search, setSearch] = useState('')
   const [errorsOnly, setErrorsOnly] = useState(false)
-  const { entries, loadedAt, error, loading, reload } = useHistory(search, errorsOnly)
+  const [scope, setScope] = useState<HistoryScope>('connection')
+  const { entries: all, loadedAt, error, loading } = useHistory(search, errorsOnly, reloadKey)
+  const entries = all && inScope(all, scope, connectionId)
 
   return (
-    <aside className={`island ${styles.panel}`} aria-label="Query history">
+    <aside className={styles.panel} aria-label="Query history">
       <div className={styles.header}>
-        <span className={styles.title}>Query history</span>
-        <IconButton label="Reload history" disabled={loading} onClick={reload}>
-          <Icon name="refresh" />
+        <span className={styles.title}>History</span>
+        <IconButton label="Close history" onClick={onClose}>
+          <Icon name="close" />
         </IconButton>
       </div>
 
@@ -48,6 +72,14 @@ export function HistoryPanel({ onOpen, canOpen }: HistoryPanelProps) {
           Errors
         </button>
       </div>
+      <div className={styles.scope} role="group" aria-label="Whose runs">
+        <button type="button" aria-pressed={scope === 'connection'} onClick={() => setScope('connection')}>
+          This connection
+        </button>
+        <button type="button" aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
+          All
+        </button>
+      </div>
 
       <div className={styles.list} aria-busy={loading}>
         {error ? (
@@ -62,31 +94,30 @@ export function HistoryPanel({ onOpen, canOpen }: HistoryPanelProps) {
             <section key={group.label} aria-label={group.label}>
               <h3 className={styles.day}>{group.label}</h3>
               {group.entries.map((entry) => (
-                <Entry key={entry.id} entry={entry} available={canOpen(entry)} onOpen={() => onOpen(entry)} />
+                <Entry
+                  key={entry.id}
+                  entry={entry}
+                  onClick={(event) => {
+                    // ⌘-click (Ctrl-click) opens a new console, as links open a new tab.
+                    if ((event.metaKey || event.ctrlKey) && canOpen(entry)) onOpenNew(entry)
+                    else onLoad(entry)
+                  }}
+                />
               ))}
             </section>
           ))
         )}
       </div>
+      <p className={styles.hint}>Click to load into the editor · ⌘-click opens a new tab</p>
     </aside>
   )
 }
 
-function Entry({
-  entry,
-  available,
-  onOpen,
-}: {
-  entry: HistoryEntry
-  available: boolean
-  onOpen: () => void
-}) {
+function Entry({ entry, onClick }: { entry: HistoryEntry; onClick: (event: MouseEvent) => void }) {
   const failed = entry.error !== null
-  const tooltip = [entry.sql, entry.error, available ? null : 'Its connection was deleted.']
-    .filter(Boolean)
-    .join('\n\n')
+  const tooltip = [entry.sql, entry.error].filter(Boolean).join('\n\n')
   return (
-    <button type="button" className={styles.entry} disabled={!available} title={tooltip} onClick={onOpen}>
+    <button type="button" className={styles.entry} title={tooltip} onClick={onClick}>
       <span
         className={`${styles.dot} ${failed ? styles.failed : styles.ok}`}
         aria-label={failed ? 'Failed' : 'Succeeded'}

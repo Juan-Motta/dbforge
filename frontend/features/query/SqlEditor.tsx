@@ -9,6 +9,8 @@ import type { SqlDialect } from '../../domain/connection'
 export interface SqlEditorHandle {
   /** The selected text, or the whole script when nothing is selected. */
   textToRun: () => string
+  /** Replaces the whole script, e.g. with a query from the history. */
+  replace: (text: string) => void
 }
 
 interface SqlEditorProps {
@@ -27,7 +29,22 @@ export function SqlEditor({ initialValue = '', dialect, onRun, ref }: SqlEditorP
   // A tab's engine never changes, so the language is set once with the editor.
   const initialDialect = useRef(dialect)
 
-  useImperativeHandle(ref, () => ({ textToRun: () => (view.current ? textToRun(view.current) : '') }), [])
+  useImperativeHandle(
+    ref,
+    () => ({
+      textToRun: () => (view.current ? textToRun(view.current) : ''),
+      replace: (text: string) => {
+        const editor = view.current
+        if (!editor) return
+        editor.dispatch({
+          changes: { from: 0, to: editor.state.doc.length, insert: text },
+          selection: { anchor: text.length },
+        })
+        editor.focus()
+      },
+    }),
+    [],
+  )
 
   // The editor is created once; this keeps it calling the latest callback.
   const onRunRef = useRef(onRun)

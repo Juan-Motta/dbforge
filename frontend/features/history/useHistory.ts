@@ -4,11 +4,11 @@ import { historyApi, type HistoryEntry } from './api'
 
 type Result = { key: string } & ({ entries: HistoryEntry[]; loadedAt: number } | { error: string })
 
-/** Loads matching history entries, again whenever the filters change or on `reload()`. */
-export function useHistory(search: string, errorsOnly: boolean) {
+/** Loads matching history entries, again whenever the filters or `reloadKey` change, or on `reload()`. */
+export function useHistory(search: string, errorsOnly: boolean, reloadKey?: unknown) {
   const [reloads, setReloads] = useState(0)
   const [result, setResult] = useState<Result | null>(null)
-  const key = JSON.stringify([search, errorsOnly, reloads])
+  const key = JSON.stringify([search, errorsOnly, reloads, reloadKey ?? null])
 
   useEffect(() => {
     const request = { cancelled: false }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HistoryEntry } from './api'
-import { firstLine, formatDuration, groupByDay, outcomeLabel } from './format'
+import { firstLine, formatDuration, groupByDay, outcomeLabel, inScope } from './format'
 
 const entry = (overrides: Partial<HistoryEntry> = {}): HistoryEntry => ({
   id: '1',
@@ -58,5 +58,27 @@ describe('outcomeLabel', () => {
 describe('firstLine', () => {
   it('skips blank lines and indentation', () => {
     expect(firstLine('\n   SELECT id\n  FROM t')).toBe('SELECT id')
+  })
+})
+
+describe('inScope', () => {
+  const entry = (id: string, connectionId: string) =>
+    ({
+      id,
+      connectionId,
+      connectionName: connectionId,
+      executedAt: 0,
+      database: null,
+      sql: 'SELECT 1',
+      elapsedMs: 1,
+      statements: 1,
+      rows: 1,
+      error: null,
+    }) as const
+
+  it('keeps one connection’s runs, or every run', () => {
+    const entries = [entry('1', 'pg'), entry('2', 'my'), entry('3', 'pg')]
+    expect(inScope(entries, 'connection', 'pg').map((e) => e.id)).toEqual(['1', '3'])
+    expect(inScope(entries, 'all', 'pg').map((e) => e.id)).toEqual(['1', '2', '3'])
   })
 })

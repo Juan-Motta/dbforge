@@ -154,6 +154,11 @@ export function App() {
               onClose={(id) => setTabs((state) => closeTab(state, id))}
               onNewQuery={newQuery}
               connectionOf={(id) => connections.find((c) => c.id === id)}
+              onOpenQuery={(entry) =>
+                setTabs((state) =>
+                  newQueryTab(state, entry.connectionId, entry.database ?? undefined, entry.sql),
+                )
+              }
             />
           )}
         </main>

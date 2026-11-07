@@ -55,3 +55,14 @@ export function firstLine(sql: string): string {
       .find(Boolean) ?? ''
   )
 }
+
+export type HistoryScope = 'connection' | 'all'
+
+/** The runs of one connection, or all of them. */
+export function inScope<T extends { connectionId: string }>(
+  entries: T[],
+  scope: HistoryScope,
+  connectionId: string,
+): T[] {
+  return scope === 'all' ? entries : entries.filter((entry) => entry.connectionId === connectionId)
+}

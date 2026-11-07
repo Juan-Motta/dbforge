@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { SqlDialect } from '../../domain/connection'
+import type { HistoryEntry } from '../history/api'
+import { HistoryPanel } from '../history/HistoryPanel'
 import type { StatementResult } from './api'
 import { PlanView } from './PlanView'
 import { ResultsPanel } from './ResultsPanel'
@@ -19,6 +21,10 @@ interface QueryConsoleProps {
   initialSql?: string
   onExportResult: (result: StatementResult) => void
   dialect: SqlDialect
+  /** Opens a query from the history in a new console on its own connection. */
+  onOpenQuery: (entry: HistoryEntry) => void
+  /** False once a history entry's connection has been deleted. */
+  canOpen: (entry: HistoryEntry) => boolean
 }
 
 /** A SQL editor with the results of its last run below. */
@@ -29,6 +35,8 @@ export function QueryConsole({
   initialSql,
   onExportResult,
   dialect,
+  onOpenQuery,
+  canOpen,
 }: QueryConsoleProps) {
   const editor = useRef<SqlEditorHandle>(null)
   const { running, explaining, cancelling, cancelError, lastRun, run, explain, cancel } = useQueryRunner(
@@ -37,16 +45,35 @@ export function QueryConsole({
     database,
   )
   const [analyze, setAnalyze] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const textToRun = () => editor.current?.textToRun() ?? ''
 
   return (
-    <div className={styles.console}>
+    <div
+      className={styles.console}
+      onKeyDown={(event) => {
+        // ⌘Y shows or hides the history while focus is in this console.
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') {
+          event.preventDefault()
+          setHistoryOpen((open) => !open)
+        }
+      }}
+    >
       <div className={styles.toolbar}>
         <span className="muted">
           <Icon name="database" size={14} className={styles.inline} /> {database ?? 'default database'}
         </span>
         <span className={styles.spacer} />
         {cancelError && <span className={styles.cancelError}>Could not cancel: {cancelError}</span>}
+        <Button
+          aria-pressed={historyOpen}
+          className={historyOpen ? styles.toggled : undefined}
+          title="Query history ⌘Y"
+          onClick={() => setHistoryOpen((open) => !open)}
+        >
+          <Icon name="history" />
+          History
+        </Button>
         <label
           className={styles.analyze}
           title="Runs the statement to measure it, inside a transaction that is rolled back"
@@ -72,24 +99,38 @@ export function QueryConsole({
         )}
       </div>
 
-      <div className={styles.editor}>
-        <SqlEditor ref={editor} initialValue={initialSql} dialect={dialect} onRun={run} />
-      </div>
+      <div className={styles.body}>
+        <div className={styles.main}>
+          <div className={styles.editor}>
+            <SqlEditor ref={editor} initialValue={initialSql} dialect={dialect} onRun={run} />
+          </div>
 
-      <div className={styles.results} aria-busy={running || explaining}>
-        {lastRun && 'error' in lastRun ? (
-          <p className={styles.error}>{lastRun.error}</p>
-        ) : lastRun && 'plan' in lastRun ? (
-          <PlanView key={lastRun.id} plan={lastRun.plan} />
-        ) : lastRun ? (
-          // Remount per run so the selected result tab resets.
-          <ResultsPanel key={lastRun.id} outcome={lastRun.outcome} onExport={onExportResult} />
-        ) : (
-          <p className={styles.placeholder}>
-            {running || explaining
-              ? 'Running…'
-              : 'Write a query and press ⌘↵ to run it. Select text to run only that part.'}
-          </p>
+          <div className={styles.results} aria-busy={running || explaining}>
+            {lastRun && 'error' in lastRun ? (
+              <p className={styles.error}>{lastRun.error}</p>
+            ) : lastRun && 'plan' in lastRun ? (
+              <PlanView key={lastRun.id} plan={lastRun.plan} />
+            ) : lastRun ? (
+              // Remount per run so the selected result tab resets.
+              <ResultsPanel key={lastRun.id} outcome={lastRun.outcome} onExport={onExportResult} />
+            ) : (
+              <p className={styles.placeholder}>
+                {running || explaining
+                  ? 'Running…'
+                  : 'Write a query and press ⌘↵ to run it. Select text to run only that part.'}
+              </p>
+            )}
+          </div>
+        </div>
+        {historyOpen && (
+          <HistoryPanel
+            connectionId={connectionId}
+            reloadKey={lastRun?.id}
+            canOpen={canOpen}
+            onLoad={(entry) => editor.current?.replace(entry.sql)}
+            onOpenNew={onOpenQuery}
+            onClose={() => setHistoryOpen(false)}
+          />
         )}
       </div>
     </div>
