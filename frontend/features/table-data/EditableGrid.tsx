@@ -29,8 +29,6 @@ interface EditableGridProps {
   sortOf?: (column: string) => 'asc' | 'desc' | null
   /** A header click: sorts by that column, then the other way, then not at all. */
   onSort?: (column: string) => void
-  /** The header menu: sorts by a column the chosen way, or clears the order (`null`). */
-  onSortColumn?: (column: string, direction: 'asc' | 'desc' | null) => void
 }
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
@@ -48,21 +46,7 @@ export function EditableGrid(props: EditableGridProps) {
     column: number
     state: CellState
   } | null>(null)
-  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; column: string } | null>(null)
   const numeric = columns.map((c) => isNumericType(c.dataType))
-
-  const openHeaderMenu = (column: string, x: number, y: number) => {
-    if (props.onSortColumn) setHeaderMenu({ x, y, column })
-  }
-  const headerItems = (column: string): MenuItem[] => {
-    const sorted = props.sortOf?.(column) ?? null
-    const sort = (direction: 'asc' | 'desc' | null) => () => props.onSortColumn?.(column, direction)
-    return [
-      { label: 'Sort ascending', onSelect: sort('asc'), disabled: sorted === 'asc' },
-      { label: 'Sort descending', onSelect: sort('desc'), disabled: sorted === 'desc' },
-      { label: 'Clear sort', onSelect: sort(null), disabled: sorted === null },
-    ]
-  }
 
   const setValue = (at: Editing, column: number, value: Value) => {
     if ('row' in at) props.onEditCell(at.row, column, value)
@@ -142,24 +126,14 @@ export function EditableGrid(props: EditableGridProps) {
         <thead>
           <tr>
             <th className={styles.rowNumber}>#</th>
-            {columns.map((column) => (
-              <th
-                key={column.name}
-                title={column.generated ? `${column.dataType} · ${COMPUTED}` : column.dataType}
-                aria-sort={
-                  props.sortOf?.(column.name) === 'asc'
-                    ? 'ascending'
-                    : props.sortOf?.(column.name) === 'desc'
-                      ? 'descending'
-                      : undefined
-                }
-                onContextMenu={(event) => {
-                  if (!props.onSortColumn) return
-                  event.preventDefault()
-                  openHeaderMenu(column.name, event.clientX, event.clientY)
-                }}
-              >
-                <span className={styles.headerCell}>
+            {columns.map((column) => {
+              const sorted = props.sortOf?.(column.name) ?? null
+              return (
+                <th
+                  key={column.name}
+                  title={column.generated ? `${column.dataType} · ${COMPUTED}` : column.dataType}
+                  aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
+                >
                   <button
                     type="button"
                     className={styles.header}
@@ -170,30 +144,19 @@ export function EditableGrid(props: EditableGridProps) {
                     {column.name}
                     {column.generated && <span className={styles.computed}>auto</span>}
                     <span className={styles.type}>{shortTypeName(column.dataType)}</span>
-                    {props.sortOf?.(column.name) && (
-                      <span className={styles.sorted} aria-hidden="true">
-                        {props.sortOf(column.name) === 'asc' ? '↑' : '↓'}
-                      </span>
+                    {props.onSort && (
+                      // A click sorts ascending, then descending, then not at all.
+                      <Icon
+                        name={sorted === 'asc' ? 'chevronUp' : sorted === 'desc' ? 'chevronDown' : 'sortable'}
+                        size={12}
+                        className={sorted ? styles.sorted : styles.sortable}
+                        aria-hidden="true"
+                      />
                     )}
                   </button>
-                  {props.onSortColumn && (
-                    <button
-                      type="button"
-                      className={styles.headerMenu}
-                      aria-label={`Sort options for ${column.name}`}
-                      aria-haspopup="menu"
-                      aria-expanded={headerMenu?.column === column.name}
-                      onClick={(event) => {
-                        const box = event.currentTarget.getBoundingClientRect()
-                        openHeaderMenu(column.name, box.left, box.bottom + 4)
-                      }}
-                    >
-                      <Icon name="more" size={14} />
-                    </button>
-                  )}
-                </span>
-              </th>
-            ))}
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
@@ -246,14 +209,6 @@ export function EditableGrid(props: EditableGridProps) {
           })}
         </tbody>
       </table>
-      {headerMenu && (
-        <ContextMenu
-          x={headerMenu.x}
-          y={headerMenu.y}
-          items={headerItems(headerMenu.column)}
-          onClose={() => setHeaderMenu(null)}
-        />
-      )}
       {menu && (
         <ContextMenu
           x={menu.x}

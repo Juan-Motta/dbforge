@@ -25,7 +25,7 @@ import {
   type Edits,
 } from './edits'
 import { FilterBar } from './FilterBar'
-import { isFiltered, sortBy, sortColumn, sortOf, type RowFilter } from './rowFilter'
+import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
 import { useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
 
@@ -216,11 +216,6 @@ export function TableView({
               }
               sortOf={(column) => sortOf(dialect, column, filter.order)}
               onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
-              onSortColumn={
-                pending
-                  ? undefined
-                  : (column, direction) => onFilterChange(sortColumn(dialect, column, direction, filter))
-              }
             />
           )
         )}

@@ -69,13 +69,6 @@ const PATHS = {
   trash: <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9" />,
   refresh: <path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5" />,
   collapse: <path d="M4 7l4-3 4 3M4 12l4-3 4 3" />,
-  more: (
-    <>
-      <circle cx="3.5" cy="8" r=".9" />
-      <circle cx="8" cy="8" r=".9" />
-      <circle cx="12.5" cy="8" r=".9" />
-    </>
-  ),
   sidebar: (
     <>
       <rect x="2.5" y="3" width="11" height="10" rx="2" />
@@ -94,6 +87,8 @@ const PATHS = {
   pulse: <path d="M2.5 8h3l2-4 2 8 2-4h2" />,
   check: <path d="M3.5 8.5l3 3 6-7" />,
   chevronDown: <path d="M4 6l4 4 4-4" />,
+  chevronUp: <path d="M4 10l4-4 4 4" />,
+  sortable: <path d="M5 6.5 8 3.5l3 3M5 9.5l3 3 3-3" />,
   play: <path d="M5 3.5v9l7-4.5z" fill="currentColor" />,
   stop: <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />,
   download: <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />,
