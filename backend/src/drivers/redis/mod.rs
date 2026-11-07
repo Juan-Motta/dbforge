@@ -3,6 +3,7 @@
 //! browser rather than a table grid (see `keys`). The connection's `database`
 //! field is the database number, `0` when empty.
 
+mod edit;
 mod keys;
 
 use std::collections::BTreeMap;
@@ -12,6 +13,7 @@ use redis::aio::MultiplexedConnection;
 use redis::{AsyncConnectionConfig, Client, ConnectionAddr, ConnectionInfo, IntoConnectionInfo, RedisConnectionInfo};
 use serde::Serialize;
 
+pub use edit::{KeyEdit, NewKey, create_key, edit_key};
 pub use keys::{KeyValue, ScanPage, read_key, scan};
 
 use super::{DbObject, ObjectKind};

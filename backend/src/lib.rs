@@ -45,6 +45,8 @@ pub fn run() {
             keyspace::redis_overview,
             keyspace::redis_scan,
             keyspace::redis_read_key,
+            keyspace::redis_edit_key,
+            keyspace::redis_create_key,
             export::format_rows,
             export::export_rows,
             export::export_table,

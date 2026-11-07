@@ -5,7 +5,7 @@ use tauri::State;
 use crate::connections::model::Engine;
 use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
-use crate::drivers::redis::{self, KeyValue, Overview, ScanPage};
+use crate::drivers::redis::{self, KeyEdit, KeyValue, NewKey, Overview, ScanPage};
 use crate::error::{AppError, Result};
 
 /// Keys per page of the browser, and items per page of a value.
@@ -61,4 +61,30 @@ pub async fn redis_read_key(
     let (connection, password) = redis_connection(&store, &connection_id)?;
     let limit = limit.clamp(1, MAX_PAGE);
     redis::read_key(&connection, password.as_deref(), db, &key, cursor.as_deref(), &filter, limit).await
+}
+
+/// Changes `key`, which the browser showed as a `kind` (see `redis::KeyEdit`).
+#[tauri::command]
+pub async fn redis_edit_key(
+    store: State<'_, ConnectionStore>,
+    connection_id: String,
+    db: i64,
+    key: String,
+    kind: String,
+    edit: KeyEdit,
+) -> Result<()> {
+    let (connection, password) = redis_connection(&store, &connection_id)?;
+    redis::edit_key(&connection, password.as_deref(), db, &key, &kind, &edit).await
+}
+
+/// Creates a key with its first element; refused when the name is taken.
+#[tauri::command]
+pub async fn redis_create_key(
+    store: State<'_, ConnectionStore>,
+    connection_id: String,
+    db: i64,
+    key: NewKey,
+) -> Result<()> {
+    let (connection, password) = redis_connection(&store, &connection_id)?;
+    redis::create_key(&connection, password.as_deref(), db, &key).await
 }
