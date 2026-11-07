@@ -3,6 +3,7 @@ import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
 import type { SqlDialect } from '../domain/connection'
 import type { TableRef } from '../domain/table'
+import { DiagramView } from '../features/diagram/DiagramView'
 import { TableView } from '../features/table-data/TableView'
 import { StructureSection } from '../features/table-structure/StructureSection'
 import { SECTIONS, sectionCount, type Section } from '../features/table-structure/sections'
@@ -10,7 +11,7 @@ import { summary } from '../features/table-structure/format'
 import { useTableStructure } from '../features/table-structure/useTableStructure'
 import styles from './TablePage.module.css'
 
-type View = 'data' | Section
+type View = 'data' | 'diagram' | Section
 
 interface TablePageProps {
   connectionId: string
@@ -18,11 +19,22 @@ interface TablePageProps {
   /** Editing a production connection's data asks for confirmation. */
   production: boolean
   dialect: SqlDialect
+  /** Relational engines draw the table with its relations. */
+  diagram: boolean
+  onOpenSchemaDiagram: () => void
   onExport: () => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
-export function TablePage({ connectionId, table, production, dialect, onExport }: TablePageProps) {
+export function TablePage({
+  connectionId,
+  table,
+  production,
+  dialect,
+  diagram,
+  onOpenSchemaDiagram,
+  onExport,
+}: TablePageProps) {
   const [view, setView] = useState<View>('data')
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
@@ -41,12 +53,15 @@ export function TablePage({ connectionId, table, production, dialect, onExport }
               onSelect={() => setView(id)}
             />
           ))}
+          {diagram && (
+            <ViewTab label="Diagram" selected={view === 'diagram'} onSelect={() => setView('diagram')} />
+          )}
         </div>
         <span className={styles.summary}>{structure && summary(structure)}</span>
         <IconButton label="Export rows" onClick={onExport}>
           <Icon name="download" />
         </IconButton>
-        {view !== 'data' && (
+        {view !== 'data' && view !== 'diagram' && (
           <IconButton label="Reload structure" disabled={loading} onClick={reload}>
             <Icon name="refresh" />
           </IconButton>
@@ -57,7 +72,18 @@ export function TablePage({ connectionId, table, production, dialect, onExport }
       <div className={styles.content} hidden={view !== 'data'}>
         <TableView connectionId={connectionId} table={table} production={production} />
       </div>
-      {view !== 'data' && (
+      {view === 'diagram' && (
+        <div className={styles.content}>
+          <DiagramView
+            connectionId={connectionId}
+            database={table.database}
+            schema={table.schema}
+            focus={table.name}
+            onOpenSchema={onOpenSchemaDiagram}
+          />
+        </div>
+      )}
+      {view !== 'data' && view !== 'diagram' && (
         <div className={styles.content} aria-busy={loading}>
           {error ? (
             <p className={styles.error}>{error}</p>

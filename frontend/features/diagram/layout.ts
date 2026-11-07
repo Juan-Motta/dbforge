@@ -167,3 +167,28 @@ export function centerOn(
     y: viewport.height / 2 - (position.y + height / 2) * scale,
   }
 }
+
+/**
+ * `table` and every table within `steps` relations of it, following foreign
+ * keys in either direction: what a table's own diagram shows.
+ */
+export function neighborhood(relationships: Relationship[], table: string, steps: number): Set<string> {
+  const reached = new Set([table])
+  let frontier = [table]
+  for (let step = 0; step < steps && frontier.length > 0; step++) {
+    const next: string[] = []
+    for (const r of relationships) {
+      for (const [from, to] of [
+        [r.table, r.referencedTable],
+        [r.referencedTable, r.table],
+      ]) {
+        if (frontier.includes(from) && !reached.has(to)) {
+          reached.add(to)
+          next.push(to)
+        }
+      }
+    }
+    frontier = next
+  }
+  return reached
+}

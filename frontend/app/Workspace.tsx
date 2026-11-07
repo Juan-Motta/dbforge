@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { IconButton } from '../components/Button'
-import { sqlDialectOf, type Connection } from '../domain/connection'
+import { hasDiagram, sqlDialectOf, type Connection } from '../domain/connection'
 import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
 import { DiagramView } from '../features/diagram/DiagramView'
@@ -22,6 +22,7 @@ interface WorkspaceProps {
   connectionOf: (connectionId: string) => Connection | undefined
   /** Opens a query from the history in a new console. */
   onOpenQuery: (entry: HistoryEntry) => void
+  onOpenDiagram: (connectionId: string, database: string, schema: string) => void
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram', keyspace: 'database' } as const
@@ -35,6 +36,7 @@ export function Workspace({
   onNewQuery,
   connectionOf,
   onOpenQuery,
+  onOpenDiagram,
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
 
@@ -95,6 +97,10 @@ export function Workspace({
               table={tab.table}
               production={connectionOf(tab.connectionId)?.environment === 'production'}
               dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
+              diagram={hasDiagram(connectionOf(tab.connectionId)?.engine ?? 'redis')}
+              onOpenSchemaDiagram={() =>
+                onOpenDiagram(tab.connectionId, tab.table.database, tab.table.schema)
+              }
               onExport={() =>
                 setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table })
               }

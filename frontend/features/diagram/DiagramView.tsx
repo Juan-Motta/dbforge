@@ -11,6 +11,7 @@ import {
   fitView,
   layout,
   localRelationships,
+  neighborhood,
   relationshipPath,
   shownColumns,
   zoomAt,
@@ -25,16 +26,39 @@ interface DiagramViewProps {
   connectionId: string
   database: string
   schema: string
+  /** A table's own diagram: centred on it, with its neighbours, and no table list. */
+  focus?: string
+  /** Opens the whole schema's diagram, from a table's own one. */
+  onOpenSchema?: () => void
 }
 
-/** The ER diagram of one schema. */
-export function DiagramView({ connectionId, database, schema }: DiagramViewProps) {
+/** The ER diagram of one schema, or of one table and its neighbours. */
+export function DiagramView({ connectionId, database, schema, focus, onOpenSchema }: DiagramViewProps) {
   const { diagram, error, reload } = useSchemaDiagram(connectionId, database, schema)
   if (error) return <p className={styles.message + ' ' + styles.error}>{error}</p>
   if (!diagram) return <p className={styles.message}>Loading {schema}…</p>
   if (diagram.tables.length === 0) return <p className={styles.message}>{schema} has no tables.</p>
-  return <Diagram diagram={diagram} schema={schema} database={database} onReload={reload} />
+  if (focus && !diagram.tables.some((t) => t.name === focus)) {
+    return <p className={styles.message}>{focus} is a view: only tables have relations to draw.</p>
+  }
+  return (
+    <Diagram
+      diagram={diagram}
+      schema={schema}
+      database={database}
+      focus={focus}
+      onOpenSchema={onOpenSchema}
+      onReload={reload}
+    />
+  )
 }
+
+/** How far a table's diagram follows relations; `null` shows the whole schema. */
+const REACH: { label: string; steps: number | null }[] = [
+  { label: 'Direct', steps: 1 },
+  { label: '2 steps', steps: 2 },
+  { label: 'Whole schema', steps: null },
+]
 
 /** What a pointer drag is moving: the whole canvas, or one card. */
 type Drag =
@@ -45,23 +69,28 @@ interface DiagramProps {
   diagram: SchemaDiagram
   schema: string
   database: string
+  focus?: string
+  onOpenSchema?: () => void
   onReload: () => void
 }
 
-function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
+function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: DiagramProps) {
   const relationships = useMemo(() => localRelationships(diagram, schema), [diagram, schema])
   // Every foreign key column gets a mark, even when its target is in another schema.
   const foreignKeys = useMemo(
     () => new Set(diagram.relationships.flatMap((r) => r.columns.map((c) => `${r.table}.${c}`))),
     [diagram],
   )
-  const [visible, setVisible] = useState(() => defaultSelection(diagram, relationships))
+  const [reach, setReach] = useState<number | null>(1)
+  const [visible, setVisible] = useState(() =>
+    focus ? neighborhood(relationships, focus, 1) : defaultSelection(diagram, relationships),
+  )
   const [mode, setMode] = useState<ColumnMode>('all')
   const [filter, setFilter] = useState('')
   const [moved, setMoved] = useState<Map<string, Point>>(new Map())
   const [view, setView] = useState<View>({ x: 40, y: 40, scale: 1 })
   /** Pinned with a click; stays highlighted when the pointer moves away. */
-  const [pinned, setPinned] = useState<string | null>(null)
+  const [pinned, setPinned] = useState<string | null>(focus ?? null)
   const [hovered, setHovered] = useState<string | null>(null)
   // Pointer capture makes the card "lose" the hover mid-drag, so the dragged one is tracked too.
   const [dragging, setDragging] = useState<string | null>(null)
@@ -193,6 +222,24 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
     setPinned((name) => (name === current.name ? null : current.name))
   }
 
+  // A table's diagram refits whenever its reach changes, once the new cards are laid out.
+  const refit = useRef(false)
+  useEffect(() => {
+    if (!refit.current) return
+    refit.current = false
+    fit()
+  })
+  const changeReach = (steps: number | null) => {
+    setReach(steps)
+    setVisible(
+      steps === null
+        ? new Set(diagram.tables.map((t) => t.name))
+        : neighborhood(relationships, focus!, steps),
+    )
+    setMoved(new Map())
+    refit.current = true
+  }
+
   const zoomBy = (factor: number) => {
     const box = canvas.current?.getBoundingClientRect()
     if (box) setView((current) => zoomAt(current, factor, { x: box.width / 2, y: box.height / 2 }))
@@ -217,47 +264,55 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
 
   return (
     <div className={styles.diagram}>
-      <aside className={styles.sidebar} aria-label="Diagram tables">
-        <div className={styles.sidebarHeader}>
-          <span className={styles.title}>
-            {database}.{schema}
-          </span>
-          <span className="muted">
-            {visible.size} of {diagram.tables.length}
-          </span>
-        </div>
-        <input
-          type="search"
-          className={styles.filter}
-          aria-label="Filter tables"
-          placeholder="Filter tables…"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
-        <div className={styles.bulk}>
-          <button
-            type="button"
-            onClick={() => setVisible(new Set([...visible, ...listed.map((t) => t.name)]))}
-          >
-            Show all
-          </button>
-          <button
-            type="button"
-            onClick={() => setVisible(new Set([...visible].filter((n) => !listed.some((t) => t.name === n))))}
-          >
-            Hide all
-          </button>
-        </div>
-        <div className={styles.tables}>
-          {listed.map((table) => (
-            <label key={table.name} className={styles.tableOption}>
-              <input type="checkbox" checked={visible.has(table.name)} onChange={() => toggle(table.name)} />
-              <Icon name="table" size={14} />
-              <span>{table.name}</span>
-            </label>
-          ))}
-        </div>
-      </aside>
+      {!focus && (
+        <aside className={styles.sidebar} aria-label="Diagram tables">
+          <div className={styles.sidebarHeader}>
+            <span className={styles.title}>
+              {database}.{schema}
+            </span>
+            <span className="muted">
+              {visible.size} of {diagram.tables.length}
+            </span>
+          </div>
+          <input
+            type="search"
+            className={styles.filter}
+            aria-label="Filter tables"
+            placeholder="Filter tables…"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          <div className={styles.bulk}>
+            <button
+              type="button"
+              onClick={() => setVisible(new Set([...visible, ...listed.map((t) => t.name)]))}
+            >
+              Show all
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setVisible(new Set([...visible].filter((n) => !listed.some((t) => t.name === n))))
+              }
+            >
+              Hide all
+            </button>
+          </div>
+          <div className={styles.tables}>
+            {listed.map((table) => (
+              <label key={table.name} className={styles.tableOption}>
+                <input
+                  type="checkbox"
+                  checked={visible.has(table.name)}
+                  onChange={() => toggle(table.name)}
+                />
+                <Icon name="table" size={14} />
+                <span>{table.name}</span>
+              </label>
+            ))}
+          </div>
+        </aside>
+      )}
 
       <div
         ref={attachCanvas}
@@ -339,6 +394,20 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
         </div>
 
         <div className={styles.toolbar} onPointerDown={(event) => event.stopPropagation()}>
+          {focus && (
+            <div className={styles.segmented} role="group" aria-label="Relations followed">
+              {REACH.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  aria-pressed={reach === option.steps}
+                  onClick={() => changeReach(option.steps)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className={styles.segmented} role="group" aria-label="Columns shown">
             <button type="button" aria-pressed={mode === 'all'} onClick={() => setMode('all')}>
               Columns
@@ -351,6 +420,7 @@ function Diagram({ diagram, schema, database, onReload }: DiagramProps) {
           <IconButton label="Reload diagram" onClick={onReload}>
             <Icon name="refresh" />
           </IconButton>
+          {onOpenSchema && <Button onClick={onOpenSchema}>Open schema diagram</Button>}
         </div>
 
         <div className={styles.zoom} onPointerDown={(event) => event.stopPropagation()}>

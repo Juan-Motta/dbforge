@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DiagramTable, Relationship, SchemaDiagram } from './api'
 import {
+  neighborhood,
   CARD_WIDTH,
   cardHeight,
   centerOn,
@@ -149,5 +150,44 @@ describe('centerOn', () => {
   it('puts the middle of the card in the middle of the viewport', () => {
     const view = centerOn({ x: 400, y: 100 }, 200, { width: 1000, height: 800 })
     expect(view).toEqual({ scale: 1, x: 500 - (400 + CARD_WIDTH / 2), y: 400 - 200 })
+  })
+})
+
+describe('neighborhood', () => {
+  const fk = (table: string, referencedTable: string) => ({
+    name: `${table}_${referencedTable}`,
+    table,
+    columns: ['x'],
+    referencedSchema: 'public',
+    referencedTable,
+    referencedColumns: ['id'],
+  })
+  // customers ← orders → stores; order_items → orders; order_items → products; products → vendors
+  const relations = [
+    fk('orders', 'customers'),
+    fk('orders', 'stores'),
+    fk('order_items', 'orders'),
+    fk('order_items', 'products'),
+    fk('products', 'vendors'),
+  ]
+
+  it('follows relations both ways, as many steps as asked', () => {
+    expect([...neighborhood(relations, 'orders', 1)].sort()).toEqual([
+      'customers',
+      'order_items',
+      'orders',
+      'stores',
+    ])
+    expect([...neighborhood(relations, 'orders', 2)].sort()).toEqual([
+      'customers',
+      'order_items',
+      'orders',
+      'products',
+      'stores',
+    ])
+  })
+
+  it('is just the table when it has no relations', () => {
+    expect([...neighborhood(relations, 'audit_log', 1)]).toEqual(['audit_log'])
   })
 })

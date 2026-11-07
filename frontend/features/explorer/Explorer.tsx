@@ -12,6 +12,8 @@ interface ExplorerProps {
   onSelect: (node: TreeNode) => void
   /** Double-click on a table or view. */
   onOpen: (node: TreeNode) => void
+  /** Opens the ER diagram of a schema node; `null` when the node has none. */
+  diagramOf: (node: TreeNode) => (() => void) | null
   onNewConnection: () => void
   onEditConnection: (connection: Connection) => void
 }
@@ -20,6 +22,7 @@ export function Explorer({
   connections,
   onSelect,
   onOpen,
+  diagramOf,
   onNewConnection,
   onEditConnection,
 }: ExplorerProps) {
@@ -77,6 +80,7 @@ export function Explorer({
               onToggle={toggle}
               onOpen={onOpen}
               onEdit={(node) => node.kind === 'connection' && onEditConnection(node.connection)}
+              onDiagram={diagramOf(row.node) ?? undefined}
             />
           ) : (
             <p

@@ -139,6 +139,20 @@ export function App() {
                 setTabs((state) => openKeyspaceTab(state, connection.id, connection.name, node.name))
               }
             }}
+            diagramOf={(node) => {
+              const connection = connections.find((c) => c.id === node.connectionId)
+              if (!connection || !hasDiagram(connection.engine)) return null
+              const [database, schemaName] = node.path
+              // Schemaless engines (MySQL) draw a database; the others draw a schema.
+              const schema =
+                node.kind === 'schema'
+                  ? schemaName
+                  : node.kind === 'database' && defaultSchema(connection.engine, database) === database
+                    ? database
+                    : null
+              if (!schema) return null
+              return () => setTabs((state) => openDiagramTab(state, connection.id, database, schema))
+            }}
             onNewConnection={() => setDialog({})}
             onEditConnection={(connection) => setDialog({ connection })}
           />
@@ -154,6 +168,9 @@ export function App() {
               onClose={(id) => setTabs((state) => closeTab(state, id))}
               onNewQuery={newQuery}
               connectionOf={(id) => connections.find((c) => c.id === id)}
+              onOpenDiagram={(connectionId, database, schema) =>
+                setTabs((state) => openDiagramTab(state, connectionId, database, schema))
+              }
               onOpenQuery={(entry) =>
                 setTabs((state) =>
                   newQueryTab(state, entry.connectionId, entry.database ?? undefined, entry.sql),

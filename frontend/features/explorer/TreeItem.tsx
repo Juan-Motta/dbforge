@@ -31,6 +31,8 @@ interface TreeItemProps {
   onToggle: (node: TreeNode) => void
   onOpen: (node: TreeNode) => void
   onEdit: (node: TreeNode) => void
+  /** Present on schemas (or schemaless databases) whose ER diagram can open. */
+  onDiagram?: (node: TreeNode) => void
 }
 
 export function TreeItem({
@@ -42,6 +44,7 @@ export function TreeItem({
   onToggle,
   onOpen,
   onEdit,
+  onDiagram,
 }: TreeItemProps) {
   const isConnection = node.kind === 'connection'
   const environment = isConnection ? node.connection.environment : null
@@ -82,6 +85,19 @@ export function TreeItem({
       {isConnection && node.children && <span className={styles.liveDot} title="Connected" />}
       {node.meta && <span className={styles.meta}>{node.meta}</span>}
 
+      {onDiagram && (
+        <IconButton
+          label={`Show ${node.name} ER diagram`}
+          title="ER diagram"
+          className={styles.edit}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDiagram(node)
+          }}
+        >
+          <Icon name="diagram" size={14} />
+        </IconButton>
+      )}
       {isConnection && (
         <IconButton
           label="Edit connection"
