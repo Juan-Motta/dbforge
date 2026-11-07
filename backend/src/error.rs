@@ -35,6 +35,10 @@ fn redis_message(error: &redis::RedisError) -> String {
             "Authentication failed: wrong user name or password.".into()
         }
         _ if error.is_connection_refusal() => format!("Could not reach the server: {error}"),
+        _ if error.to_string().contains("invalid peer certificate") => format!(
+            "The server's TLS certificate isn't trusted ({error}). For a self-signed certificate, end the host \
+             with #insecure, e.g. rediss://host:6380/#insecure."
+        ),
         _ => error.to_string(),
     }
 }

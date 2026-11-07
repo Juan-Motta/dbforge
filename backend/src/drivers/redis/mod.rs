@@ -27,16 +27,19 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// A connection to database `db`, or the connection's own when `None`. The host
-/// may be a whole `redis://` URL.
+/// may be a whole `redis://` URL, or `rediss://` for TLS; ending it in
+/// `#insecure` accepts certificates no authority signed.
 pub(crate) async fn connect(
     connection: &Connection,
     password: Option<&str>,
     db: Option<i64>,
     response_timeout: Option<Duration>,
 ) -> Result<MultiplexedConnection> {
-    let mut info: ConnectionInfo = if connection.host.starts_with("rediss://") {
-        return Err(AppError::Invalid("TLS connections (rediss://) aren't supported yet.".into()));
-    } else if connection.host.starts_with("redis://") {
+    let url = is_url(&connection.host);
+    if connection.host.starts_with("rediss://") {
+        install_crypto();
+    }
+    let mut info: ConnectionInfo = if url {
         connection.host.as_str().into_connection_info()?
     } else {
         ConnectionAddr::Tcp(connection.host.clone(), connection.port).into_connection_info()?
@@ -50,7 +53,7 @@ pub(crate) async fn connect(
     }
     let db = match db {
         Some(db) => db,
-        None if connection.host.starts_with("redis://") && connection.database.is_empty() => settings.db(),
+        None if url && connection.database.is_empty() => settings.db(),
         None => database_number(&connection.database)?,
     };
     info = info.set_redis_settings(settings.set_db(db));
@@ -59,6 +62,19 @@ pub(crate) async fn connect(
         .set_connection_timeout(Some(CONNECT_TIMEOUT))
         .set_response_timeout(response_timeout);
     Ok(Client::open(info)?.get_multiplexed_async_connection_with_config(&config).await?)
+}
+
+/// rustls needs one process-wide crypto provider when several are compiled in,
+/// as here (the SQL drivers bring their own). Installing it twice is harmless.
+fn install_crypto() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+fn is_url(host: &str) -> bool {
+    host.starts_with("redis://") || host.starts_with("rediss://")
 }
 
 /// `"3"` or `"db3"` as 3; empty means 0.
@@ -236,6 +252,19 @@ pub(super) mod tests {
         let overview = overview(&connection, PASSWORD, 1).await.unwrap();
         assert_eq!(overview.keys, 2);
         assert!(overview.used_memory > 0 && overview.clients >= 1 && overview.keyspace_hits >= 1, "{overview:?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local Redis with TLS on port 56380 (self-signed certificate)"]
+    async fn connects_over_tls() {
+        // `#insecure` accepts a certificate no authority signed, as development servers have.
+        let tls = Connection { host: "rediss://127.0.0.1:56380/#insecure".into(), port: 0, ..local() };
+        assert!(server_version(&tls, PASSWORD).await.unwrap().starts_with("Redis 7."));
+
+        let verified = Connection { host: "rediss://127.0.0.1:56380".into(), ..tls };
+        let error = server_version(&verified, PASSWORD).await.unwrap_err().to_string();
+        assert!(error.starts_with("The server's TLS certificate isn't trusted"), "{error}");
+        assert!(error.contains("#insecure"), "{error}");
     }
 
     #[tokio::test]

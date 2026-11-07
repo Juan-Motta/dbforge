@@ -46,6 +46,12 @@ interface ConnectionDialogProps {
   onClose: () => void
 }
 
+/** Engines whose host field also takes a whole connection URL. */
+const HOST_HINTS: Partial<Record<Engine, string>> = {
+  mongodb: 'localhost or mongodb+srv://…',
+  redis: 'localhost or rediss://… for TLS',
+}
+
 export function ConnectionDialog({ connection, onSave, onDelete, onClose }: ConnectionDialogProps) {
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
@@ -192,8 +198,8 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 <TextField
                   label="Host"
                   mono
-                  // A whole connection string works too, as Atlas gives them.
-                  placeholder={form.engine === 'mongodb' ? 'localhost or mongodb+srv://…' : undefined}
+                  // A whole connection string works too, as managed services give them.
+                  placeholder={HOST_HINTS[form.engine]}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
                 />
