@@ -14,9 +14,19 @@ interface TitleBarProps {
   onNewQuery?: () => void
   onOpenSettings: () => void
   onSearch: () => void
+  explorerOpen: boolean
+  onToggleExplorer: () => void
 }
 
-export function TitleBar({ connection, path, onNewQuery, onOpenSettings, onSearch }: TitleBarProps) {
+export function TitleBar({
+  connection,
+  path,
+  onNewQuery,
+  onOpenSettings,
+  onSearch,
+  explorerOpen,
+  onToggleExplorer,
+}: TitleBarProps) {
   return (
     <header
       className={styles.titleBar}
@@ -29,6 +39,14 @@ export function TitleBar({ connection, path, onNewQuery, onOpenSettings, onSearc
         </span>
         DBForge
       </span>
+      <IconButton
+        label={explorerOpen ? 'Hide explorer (⌘B)' : 'Show explorer (⌘B)'}
+        title={explorerOpen ? 'Hide explorer ⌘B' : 'Show explorer ⌘B'}
+        active={explorerOpen}
+        onClick={onToggleExplorer}
+      >
+        <Icon name="sidebar" />
+      </IconButton>
 
       {connection ? (
         <Button className={styles.connection}>
@@ -71,9 +89,6 @@ export function TitleBar({ connection, path, onNewQuery, onOpenSettings, onSearc
         <Icon name="plus" />
         New query
       </Button>
-      <IconButton label="Notifications">
-        <Icon name="bell" />
-      </IconButton>
       <IconButton label="Settings" onClick={onOpenSettings}>
         <Icon name="settings" />
       </IconButton>

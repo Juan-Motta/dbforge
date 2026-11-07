@@ -4,12 +4,9 @@ import { tableRefFromPath } from '../domain/table'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
 import { Explorer } from '../features/explorer/Explorer'
-import { HistoryPanel } from '../features/history/HistoryPanel'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
 import { useTheme } from '../features/settings/useTheme'
-import { ActivityRail, type Activity } from '../features/shell/ActivityRail'
-import { StatusBar } from '../features/shell/StatusBar'
 import { TitleBar } from '../features/shell/TitleBar'
 import {
   closeConnectionTabs,
@@ -33,7 +30,8 @@ interface Selection {
 
 export function App() {
   const { connections, loadError, save, remove } = useConnections()
-  const [activity, setActivity] = useState<Activity>('explorer')
+  // Hidden with ⌘B for more room; it stays mounted so its expanded nodes survive.
+  const [explorerOpen, setExplorerOpen] = useState(true)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [tabs, setTabs] = useState(NO_TABS)
@@ -71,19 +69,16 @@ export function App() {
       ? () => setTabs((state) => openDiagramTab(state, activeConnection.id, diagramDatabase, diagramSchema!))
       : undefined
 
-  // The rail's diagram and search buttons act instead of switching the side panel.
-  const onActivity = (next: Activity) => {
-    if (next === 'diagram') openDiagram?.()
-    else if (next === 'search') setPaletteOpen(true)
-    else setActivity(next)
-  }
-
   // ⌘K / Ctrl+K toggles the palette from anywhere, the SQL editor included.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setPaletteOpen((open) => !open)
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
+        event.preventDefault()
+        setExplorerOpen((open) => !open)
       }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
@@ -125,11 +120,12 @@ export function App() {
         onNewQuery={newQuery}
         onOpenSettings={() => setSettingsOpen(true)}
         onSearch={() => setPaletteOpen(true)}
+        explorerOpen={explorerOpen}
+        onToggleExplorer={() => setExplorerOpen((open) => !open)}
       />
 
       <div className={styles.body}>
-        <ActivityRail active={activity} onChange={onActivity} />
-        {activity === 'explorer' && (
+        <div className={styles.explorerSlot} hidden={!explorerOpen}>
           <Explorer
             connections={connections}
             onSelect={({ connectionId, path }) => setSelection({ connectionId, path })}
@@ -145,17 +141,7 @@ export function App() {
             onNewConnection={() => setDialog({})}
             onEditConnection={(connection) => setDialog({ connection })}
           />
-        )}
-        {activity === 'history' && (
-          <HistoryPanel
-            canOpen={(entry) => connections.some((c) => c.id === entry.connectionId)}
-            onOpen={(entry) =>
-              setTabs((state) =>
-                newQueryTab(state, entry.connectionId, entry.database ?? undefined, entry.sql),
-              )
-            }
-          />
-        )}
+        </div>
         <main className={`island ${styles.main}`}>
           {loadError ? (
             <p className={styles.error}>Could not load connections: {loadError}</p>
@@ -171,8 +157,6 @@ export function App() {
           )}
         </main>
       </div>
-
-      <StatusBar connection={activeConnection} path={activePath} />
 
       {dialog && (
         <ConnectionDialog

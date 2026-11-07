@@ -58,36 +58,6 @@
   font: 500 10px var(--font-mono);
 }
 
-.rail {
-  width: 44px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 0;
-}
-
-.statusBar {
-  height: 24px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin: 0 var(--gap) var(--gap);
-  padding: 0 12px;
-  border-radius: 8px;
-  font-size: 11.5px;
-  color: var(--text2);
-  white-space: nowrap;
-  flex: none;
-}
-
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .dot {
   width: 7px;
   height: 7px;

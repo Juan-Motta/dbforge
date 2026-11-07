@@ -12,6 +12,15 @@
   padding: 0 var(--gap) var(--gap);
 }
 
+.explorerSlot {
+  display: flex;
+  flex: none;
+}
+
+.explorerSlot[hidden] {
+  display: none;
+}
+
 .main {
   flex: 1;
   min-width: 0;
