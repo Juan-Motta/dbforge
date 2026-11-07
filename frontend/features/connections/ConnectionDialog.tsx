@@ -192,6 +192,8 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 <TextField
                   label="Host"
                   mono
+                  // A whole connection string works too, as Atlas gives them.
+                  placeholder={form.engine === 'mongodb' ? 'localhost or mongodb+srv://…' : undefined}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
                 />

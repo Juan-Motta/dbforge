@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectionAddress, defaultSchema, sqlDialectOf, type Connection } from './connection'
+import { connectionAddress, defaultSchema, hasDiagram, sqlDialectOf, type Connection } from './connection'
 import { tableRefFromPath } from './table'
 
 describe('tableRefFromPath', () => {
@@ -26,6 +26,8 @@ describe('engines', () => {
     expect(defaultSchema('mysql', 'shop')).toBe('shop')
     expect(defaultSchema('sqlite', '/tmp/app.db')).toBe('main')
     expect(defaultSchema('sqlserver', 'shop')).toBe('dbo')
+    // A MongoDB database holds its collections directly.
+    expect(defaultSchema('mongodb', 'shop')).toBe('shop')
   })
 
   it('picks the SQL dialect', () => {
@@ -33,7 +35,16 @@ describe('engines', () => {
     expect(sqlDialectOf('postgres')).toBe('postgres')
     expect(sqlDialectOf('sqlite')).toBe('sqlite')
     expect(sqlDialectOf('sqlserver')).toBe('sqlserver')
+    expect(sqlDialectOf('mongodb')).toBe('mongodb')
     expect(sqlDialectOf(undefined)).toBe('postgres')
+  })
+})
+
+describe('hasDiagram', () => {
+  it('is false for engines that declare no relationships', () => {
+    expect(hasDiagram('postgres')).toBe(true)
+    expect(hasDiagram('sqlserver')).toBe(true)
+    expect(hasDiagram('mongodb')).toBe(false)
   })
 })
 

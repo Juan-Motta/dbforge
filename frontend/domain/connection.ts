@@ -43,8 +43,8 @@ export const ENVIRONMENT_LABELS: Record<Environment, string> = {
   production: 'Production',
 }
 
-/** Engines whose databases hold tables directly, with no schemas in between. */
-const SCHEMALESS: Engine[] = ['mysql', 'mariadb']
+/** Engines whose databases hold tables (or collections) directly, with no schemas in between. */
+const SCHEMALESS: Engine[] = ['mysql', 'mariadb', 'mongodb']
 
 /** A SQLite connection is a database file: no host, port or user. */
 export function isFileEngine(engine: Engine): boolean {
@@ -66,12 +66,18 @@ export function defaultSchema(engine: Engine, database: string): string {
   return SCHEMALESS.includes(engine) ? database : 'public'
 }
 
-export type SqlDialect = 'postgres' | 'mysql' | 'sqlite' | 'sqlserver'
+/** A query language: an SQL dialect, or mongosh for MongoDB. */
+export type SqlDialect = 'postgres' | 'mysql' | 'sqlite' | 'sqlserver' | 'mongodb'
 
-/** How SQL is highlighted and completed for an engine. */
+/** How queries are highlighted and completed for an engine. */
 export function sqlDialectOf(engine: Engine | undefined): SqlDialect {
-  if (engine === 'sqlite' || engine === 'sqlserver') return engine
+  if (engine === 'sqlite' || engine === 'sqlserver' || engine === 'mongodb') return engine
   return engine && SCHEMALESS.includes(engine) ? 'mysql' : 'postgres'
+}
+
+/** MongoDB declares no relationships between collections, so it has no ER diagram. */
+export function hasDiagram(engine: Engine): boolean {
+  return RELATIONAL_ENGINES.includes(engine)
 }
 
 /** Where a connection points: `user@host:port`, or the file for SQLite. */

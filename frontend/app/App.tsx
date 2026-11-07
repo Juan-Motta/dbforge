@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { defaultDatabase, defaultSchema, type Connection } from '../domain/connection'
+import { defaultDatabase, defaultSchema, hasDiagram, type Connection } from '../domain/connection'
 import { tableRefFromPath } from '../domain/table'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
@@ -48,7 +48,7 @@ export function App() {
       ? (activePath[1] ?? defaultSchema(activeConnection.engine, diagramDatabase))
       : undefined
   const openDiagram =
-    activeConnection && diagramDatabase
+    activeConnection && diagramDatabase && hasDiagram(activeConnection.engine)
       ? () => setTabs((state) => openDiagramTab(state, activeConnection.id, diagramDatabase, diagramSchema!))
       : undefined
 
