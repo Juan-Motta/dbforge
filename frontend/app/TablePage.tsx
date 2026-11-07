@@ -39,6 +39,8 @@ export function TablePage({
 }: TablePageProps) {
   const [view, setView] = useState<View>('data')
   const [filter, setFilter] = useState<RowFilter>(NO_FILTER)
+  // The data view puts its row actions here, next to Export.
+  const [actionsSlot, setActionsSlot] = useState<HTMLSpanElement | null>(null)
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
 
@@ -60,7 +62,8 @@ export function TablePage({
             <ViewTab label="Diagram" selected={view === 'diagram'} onSelect={() => setView('diagram')} />
           )}
         </div>
-        <span className={styles.summary}>{structure && summary(structure)}</span>
+        <span className={styles.spacer} />
+        <span ref={setActionsSlot} className={styles.actions} />
         <IconButton label="Export rows" onClick={() => onExport(filter)}>
           <Icon name="download" />
         </IconButton>
@@ -80,6 +83,9 @@ export function TablePage({
           dialect={dialect}
           filter={filter}
           onFilterChange={setFilter}
+          actionsSlot={actionsSlot}
+          active={view === 'data'}
+          summary={structure ? summary(structure) : ''}
         />
       </div>
       {view === 'diagram' && (

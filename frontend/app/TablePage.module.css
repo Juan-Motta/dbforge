@@ -50,16 +50,14 @@
   font-weight: 400;
 }
 
-.summary {
+.spacer {
   flex: 1;
-  min-width: 0;
-  align-self: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: right;
-  color: var(--text3);
-  font-size: 12px;
-  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .bar > button {

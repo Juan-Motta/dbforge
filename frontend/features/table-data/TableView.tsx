@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
 import { SqlCode } from '../../components/code/SqlCode'
@@ -26,7 +27,7 @@ import {
 } from './edits'
 import { FilterBar } from './FilterBar'
 import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
-import { useRowsPage } from './useRowsPage'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES, useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
 
 interface TableViewProps {
@@ -38,6 +39,12 @@ interface TableViewProps {
   /** What the rows are narrowed and ordered by; the page owns it so exports use it too. */
   filter: RowFilter
   onFilterChange: (filter: RowFilter) => void
+  /** Where the row actions go: the table page's top bar. */
+  actionsSlot: HTMLElement | null
+  /** The data view is the one shown, so its actions belong in the top bar. */
+  active: boolean
+  /** Size and row estimate, for the footer. */
+  summary: string
 }
 
 type Status =
@@ -54,11 +61,16 @@ export function TableView({
   dialect,
   filter,
   onFilterChange,
+  actionsSlot,
+  active,
+  summary,
 }: TableViewProps) {
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const { page, error, loading, offset, hasPrevious, hasNext, previous, next, reload } = useRowsPage(
     connectionId,
     table,
     filter,
+    pageSize,
   )
   const [edits, setEdits] = useState<Edits>(NO_EDITS)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -148,26 +160,31 @@ export function TableView({
 
   return (
     <section className={styles.view} aria-label={`${table.schema}.${table.name}`} onKeyDown={onKeyDown}>
-      <FilterBar dialect={dialect} value={filter} onApply={onFilterChange} disabled={pending}>
-        <span className={styles.divider} />
-        <IconButton
-          label={editable ? 'Add row' : noKey}
-          disabled={!editable || applying}
-          onClick={() => change(addRow)}
-        >
-          <Icon name="plus" />
-        </IconButton>
-        <IconButton
-          label={editable ? 'Delete selected rows' : noKey}
-          disabled={!editable || selected.size === 0 || applying}
-          onClick={deleteSelected}
-        >
-          <Icon name="trash" />
-        </IconButton>
-        <IconButton label="Reload" disabled={lockPaging} onClick={reload}>
-          <Icon name="refresh" />
-        </IconButton>
-      </FilterBar>
+      <FilterBar dialect={dialect} value={filter} onApply={onFilterChange} disabled={pending} />
+      {active &&
+        actionsSlot &&
+        createPortal(
+          <>
+            <IconButton
+              label={editable ? 'Add row' : noKey}
+              disabled={!editable || applying}
+              onClick={() => change(addRow)}
+            >
+              <Icon name="plus" />
+            </IconButton>
+            <IconButton
+              label={editable ? 'Delete selected rows' : noKey}
+              disabled={!editable || selected.size === 0 || applying}
+              onClick={deleteSelected}
+            >
+              <Icon name="trash" />
+            </IconButton>
+            <IconButton label="Reload rows" disabled={lockPaging} onClick={reload}>
+              <Icon name="refresh" />
+            </IconButton>
+          </>,
+          actionsSlot,
+        )}
 
       <div className={styles.content} aria-busy={loading}>
         {error ? (
@@ -224,6 +241,7 @@ export function TableView({
             {status.error}
           </span>
         )}
+        {!pending && status.state === 'idle' && <span className={styles.summary}>{summary}</span>}
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
           {loading
@@ -234,6 +252,20 @@ export function TableView({
                 : 'No rows'
               : `Rows ${offset + 1}–${offset + rowCount}${isFiltered(filter) ? ' · filtered' : ''}`}
         </span>
+        <label className={styles.pageSize}>
+          <select
+            aria-label="Rows per page"
+            value={pageSize}
+            disabled={lockPaging}
+            onChange={(event) => setPageSize(Number(event.target.value))}
+          >
+            {PAGE_SIZES.map((size) => (
+              <option key={size} value={size}>
+                {size} per page
+              </option>
+            ))}
+          </select>
+        </label>
         <IconButton label="Previous page" disabled={!hasPrevious || lockPaging} onClick={previous}>
           <Icon name="chevronLeft" />
         </IconButton>
