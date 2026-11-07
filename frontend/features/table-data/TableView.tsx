@@ -148,12 +148,7 @@ export function TableView({
 
   return (
     <section className={styles.view} aria-label={`${table.schema}.${table.name}`} onKeyDown={onKeyDown}>
-      <div className={styles.toolbar}>
-        <Icon name="table" />
-        <span className={styles.title}>
-          <span className="muted">{table.schema}.</span>
-          {table.name}
-        </span>
+      <FilterBar dialect={dialect} value={filter} onApply={onFilterChange} disabled={pending}>
         <span className={styles.divider} />
         <IconButton
           label={editable ? 'Add row' : noKey}
@@ -169,28 +164,10 @@ export function TableView({
         >
           <Icon name="trash" />
         </IconButton>
-        <span className={styles.spacer} />
-        <span className={styles.range} aria-live="polite">
-          {loading
-            ? 'Loading…'
-            : rowCount === 0
-              ? isFiltered(filter)
-                ? 'No rows match'
-                : 'No rows'
-              : `Rows ${offset + 1}–${offset + rowCount}${isFiltered(filter) ? ' · filtered' : ''}`}
-        </span>
-        <IconButton label="Previous page" disabled={!hasPrevious || lockPaging} onClick={previous}>
-          <Icon name="chevronLeft" />
-        </IconButton>
-        <IconButton label="Next page" disabled={!hasNext || lockPaging} onClick={next}>
-          <Icon name="chevronRight" />
-        </IconButton>
         <IconButton label="Reload" disabled={lockPaging} onClick={reload}>
           <Icon name="refresh" />
         </IconButton>
-      </div>
-
-      <FilterBar dialect={dialect} value={filter} onApply={onFilterChange} disabled={pending} />
+      </FilterBar>
 
       <div className={styles.content} aria-busy={loading}>
         {error ? (
@@ -221,46 +198,61 @@ export function TableView({
         )}
       </div>
 
-      {(pending || status.state !== 'idle') && (
-        <div className={styles.pending} data-state={status.state}>
-          {pending && (
-            <>
-              <Badge tone="warn">
-                {total} pending {total === 1 ? 'change' : 'changes'}
-              </Badge>
-              <span className={styles.detail}>
-                {updated} updated · {inserted} inserted · {deleted} deleted
-              </span>
-              <Button variant="ghost" disabled={applying} onClick={showPreview}>
-                Preview SQL
-              </Button>
-            </>
-          )}
-          {status.state === 'applied' && (
-            <span className={styles.applied}>
-              <Icon name="check" /> Applied: {status.summary.updated} updated · {status.summary.inserted}{' '}
-              inserted · {status.summary.deleted} deleted
+      {/* Rows and paging, and in their place while editing, the pending changes. */}
+      <div className={styles.footer} data-state={pending ? 'pending' : status.state}>
+        {pending && (
+          <>
+            <Badge tone="warn">
+              {total} pending {total === 1 ? 'change' : 'changes'}
+            </Badge>
+            <span className={styles.detail}>
+              {updated} updated · {inserted} inserted · {deleted} deleted
             </span>
-          )}
-          {status.state === 'failed' && (
-            <span className={styles.failed} title={status.error}>
-              {status.error}
-            </span>
-          )}
-          <span className={styles.spacer} />
-          {pending && (
-            <>
-              <Button disabled={applying} onClick={discard}>
-                Discard
-              </Button>
-              <Button variant="primary" disabled={applying} onClick={requestApply}>
-                {applying ? 'Applying…' : 'Apply'}
-                <span className={styles.shortcut}>⌘S</span>
-              </Button>
-            </>
-          )}
-        </div>
-      )}
+            <Button variant="ghost" disabled={applying} onClick={showPreview}>
+              Preview SQL
+            </Button>
+          </>
+        )}
+        {!pending && status.state === 'applied' && (
+          <span className={styles.applied}>
+            <Icon name="check" /> Applied: {status.summary.updated} updated · {status.summary.inserted}{' '}
+            inserted · {status.summary.deleted} deleted
+          </span>
+        )}
+        {status.state === 'failed' && (
+          <span className={styles.failed} title={status.error}>
+            {status.error}
+          </span>
+        )}
+        <span className={styles.spacer} />
+        <span className={styles.range} aria-live="polite">
+          {loading
+            ? 'Loading…'
+            : rowCount === 0
+              ? isFiltered(filter)
+                ? 'No rows match'
+                : 'No rows'
+              : `Rows ${offset + 1}–${offset + rowCount}${isFiltered(filter) ? ' · filtered' : ''}`}
+        </span>
+        <IconButton label="Previous page" disabled={!hasPrevious || lockPaging} onClick={previous}>
+          <Icon name="chevronLeft" />
+        </IconButton>
+        <IconButton label="Next page" disabled={!hasNext || lockPaging} onClick={next}>
+          <Icon name="chevronRight" />
+        </IconButton>
+        {pending && (
+          <>
+            <span className={styles.divider} />
+            <Button disabled={applying} onClick={discard}>
+              Discard
+            </Button>
+            <Button variant="primary" disabled={applying} onClick={requestApply}>
+              {applying ? 'Applying…' : 'Apply'}
+              <span className={styles.shortcut}>⌘S</span>
+            </Button>
+          </>
+        )}
+      </div>
 
       {preview && (
         <Modal

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { SqlDialect } from '../../domain/connection'
@@ -12,10 +12,12 @@ interface FilterBarProps {
   onApply: (filter: RowFilter) => void
   /** Pending edits would be hidden by another filter: apply or discard them first. */
   disabled: boolean
+  /** The table's row actions, at the bar's right end. */
+  children?: ReactNode
 }
 
 /** A `WHERE` and an `ORDER BY` (or a MongoDB filter and sort), applied with Enter. */
-export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps) {
+export function FilterBar({ dialect, value, onApply, disabled, children }: FilterBarProps) {
   const [draft, setDraft] = useState(value)
   const labels = filterLabels(dialect)
   // A header click changes the order from outside; the field follows it.
@@ -57,6 +59,7 @@ export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps)
           <Icon name="close" />
         </IconButton>
       )}
+      {children}
     </div>
   )
 }
