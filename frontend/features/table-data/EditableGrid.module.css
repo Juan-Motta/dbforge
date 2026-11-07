@@ -37,7 +37,9 @@
 }
 
 .header {
-  display: inline-flex;
+  /* The whole width of the column, so the sort mark sits at its right end. */
+  width: 100%;
+  display: flex;
   align-items: center;
   gap: 6px;
   padding: 0;
@@ -50,6 +52,14 @@
 
 .header:disabled {
   cursor: default;
+}
+
+.sorted,
+.sortable {
+  margin-left: auto;
+  padding-left: 6px;
+  flex: none;
+  box-sizing: content-box;
 }
 
 .sorted {
