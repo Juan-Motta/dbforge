@@ -85,6 +85,8 @@ export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
     ...rest,
     id,
     port: srv && !isValidPort(port) ? DEFAULT_PORTS.mongodb : Number(port),
+    // Redis databases are numbered and all listed in the explorer; there is none to pick here.
+    database: form.engine === 'redis' ? '' : form.database,
     password: password === '' ? undefined : password,
     tls,
     allowSelfSigned: tls && form.allowSelfSigned,

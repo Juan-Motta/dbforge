@@ -156,6 +156,11 @@ describe('TLS options', () => {
     expect(toInput({ ...redis, tls: true })).toMatchObject({ tls: true, allowSelfSigned: true })
   })
 
+  it('sends no database for Redis: the explorer opens any of them', () => {
+    const redis = { ...withEngine(emptyForm(), 'redis'), name: 'r', database: '3' }
+    expect(toInput(redis).database).toBe('')
+  })
+
   it('needs no port for a MongoDB seed list', () => {
     const atlas = { ...withEngine(emptyForm(), 'mongodb'), name: 'atlas', srv: true, port: '' }
     expect(canSubmit(atlas)).toBe(true)

@@ -241,16 +241,20 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 </p>
               )}
 
-              <TextField
-                label="Database"
-                mono
-                value={form.database}
-                onChange={(e) => update({ database: e.target.value })}
-              />
+              {form.engine !== 'redis' && (
+                <TextField
+                  label="Database"
+                  mono
+                  value={form.database}
+                  onChange={(e) => update({ database: e.target.value })}
+                />
+              )}
 
               <div className={styles.pair}>
                 <TextField
-                  label="User"
+                  // Redis 6+ has ACL users; without ACLs the password alone is enough.
+                  label={form.engine === 'redis' ? 'User (ACL, optional)' : 'User'}
+                  placeholder={form.engine === 'redis' ? 'default' : undefined}
                   mono
                   autoComplete="off"
                   value={form.username}

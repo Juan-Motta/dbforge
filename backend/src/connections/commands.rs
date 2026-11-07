@@ -32,7 +32,7 @@ pub fn delete_connection(store: State<'_, ConnectionStore>, id: String) -> Resul
 #[tauri::command]
 pub async fn test_connection(input: ConnectionInput) -> Result<String> {
     let existing_id = input.id.clone();
-    let (connection, password) = input.into_parts()?;
+    let (connection, password) = input.for_test().into_parts()?;
     let password = match (password, existing_id) {
         (Some(password), _) => Some(password),
         (None, Some(id)) => secrets::get_password(&id)?,

@@ -84,6 +84,11 @@ pub struct ConnectionInput {
 }
 
 impl ConnectionInput {
+    /// The input for a connection test, which saves nothing: a name isn't needed yet.
+    pub fn for_test(self) -> Self {
+        if self.name.trim().is_empty() { Self { name: "Untitled".into(), ..self } } else { self }
+    }
+
     /// Validates the input and splits it into the connection to save and the password.
     pub fn into_parts(self) -> Result<(Connection, Option<String>)> {
         let name = self.name.trim().to_string();
@@ -181,6 +186,13 @@ mod tests {
     fn sqlite_needs_its_file() {
         let sqlite = ConnectionInput { engine: Engine::Sqlite, database: "  ".into(), ..input("local", None) };
         assert!(sqlite.into_parts().unwrap_err().to_string().contains("SQLite database file"));
+    }
+
+    #[test]
+    fn a_test_needs_no_name_but_saving_does() {
+        assert!(input("  ", None).for_test().into_parts().is_ok());
+        assert_eq!(input("local", None).for_test().name, "local");
+        assert_eq!(input("  ", None).into_parts().unwrap_err().to_string(), "Name is required");
     }
 
     #[test]
