@@ -162,16 +162,7 @@ impl Call<'_> {
             }
             "aggregate" => {
                 args.at_most(1)?;
-                let pipeline = match args.values.first() {
-                    Some(Bson::Array(stages)) => stages
-                        .iter()
-                        .map(|stage| match stage {
-                            Bson::Document(stage) => Ok(stage.clone()),
-                            _ => Err(AppError::Invalid("Each aggregate stage must be a document.".into())),
-                        })
-                        .collect::<Result<Vec<_>>>()?,
-                    _ => return Err(AppError::Invalid("aggregate takes an array of stages.".into())),
-                };
+                let pipeline = args.stages()?;
                 for modifier in &chain {
                     if !matches!(modifier.name.as_str(), "toArray" | "pretty") {
                         return Err(unsupported_after(&modifier.name, name));
@@ -331,13 +322,13 @@ fn no_chain(method: &str, chain: &[Method]) -> Result<()> {
     }
 }
 
-fn unsupported_after(modifier: &str, method: &str) -> AppError {
+pub(super) fn unsupported_after(modifier: &str, method: &str) -> AppError {
     AppError::Invalid(format!("`.{modifier}()` isn't supported after {method}()."))
 }
 
 /// `{upsert: true}`, the only update option read; any other is refused rather
 /// than ignored.
-fn upsert(args: &Args) -> Result<bool> {
+pub(super) fn upsert(args: &Args) -> Result<bool> {
     let Some(options) = args.optional_document(2)? else { return Ok(false) };
     let mut upsert = false;
     for (key, value) in options {
@@ -352,13 +343,13 @@ fn upsert(args: &Args) -> Result<bool> {
 }
 
 /// A method's arguments, read with errors that name the method.
-struct Args<'a> {
-    method: &'a str,
-    values: &'a [Bson],
+pub(super) struct Args<'a> {
+    pub method: &'a str,
+    pub values: &'a [Bson],
 }
 
 impl Args<'_> {
-    fn at_most(&self, count: usize) -> Result<()> {
+    pub fn at_most(&self, count: usize) -> Result<()> {
         if self.values.len() > count {
             return Err(AppError::Invalid(format!(
                 "{} takes at most {count} argument{}.",
@@ -369,7 +360,7 @@ impl Args<'_> {
         Ok(())
     }
 
-    fn optional_document(&self, index: usize) -> Result<Option<Document>> {
+    pub fn optional_document(&self, index: usize) -> Result<Option<Document>> {
         match self.values.get(index) {
             None => Ok(None),
             Some(Bson::Document(document)) => Ok(Some(document.clone())),
@@ -378,16 +369,30 @@ impl Args<'_> {
     }
 
     /// A document, `{}` when it is left out.
-    fn document(&self, index: usize) -> Result<Document> {
+    pub fn document(&self, index: usize) -> Result<Document> {
         Ok(self.optional_document(index)?.unwrap_or_default())
     }
 
-    fn required_document(&self, index: usize) -> Result<Document> {
+    pub fn required_document(&self, index: usize) -> Result<Document> {
         self.optional_document(index)?
             .ok_or_else(|| AppError::Invalid(format!("{} takes a document as argument {}.", self.method, index + 1)))
     }
 
-    fn count(&self, index: usize) -> Result<i64> {
+    /// The pipeline of `aggregate([...])`.
+    pub fn stages(&self) -> Result<Vec<Document>> {
+        let Some(Bson::Array(stages)) = self.values.first() else {
+            return Err(AppError::Invalid(format!("{} takes an array of stages.", self.method)));
+        };
+        stages
+            .iter()
+            .map(|stage| match stage {
+                Bson::Document(stage) => Ok(stage.clone()),
+                _ => Err(AppError::Invalid("Each aggregate stage must be a document.".into())),
+            })
+            .collect()
+    }
+
+    pub fn count(&self, index: usize) -> Result<i64> {
         match self.values.get(index) {
             Some(Bson::Int32(n)) => Ok(i64::from(*n)),
             Some(Bson::Int64(n)) => Ok(*n),

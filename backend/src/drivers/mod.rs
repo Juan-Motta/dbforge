@@ -390,6 +390,7 @@ pub async fn table_structure(
             Engine::Sqlite => sqlite::table_structure(connection, table).await,
             Engine::Mysql | Engine::Mariadb => mysql::table_structure(connection, password, table).await,
             Engine::Sqlserver => sqlserver::table_structure(connection, password, table).await,
+            Engine::Mongodb => mongodb::table_structure(connection, password, table).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -494,6 +495,7 @@ pub async fn explain(
         Engine::Sqlite => sqlite::explain(connection, sql, analyze).await,
         Engine::Mysql | Engine::Mariadb => mysql::explain(connection, password, database, sql, analyze).await,
         Engine::Sqlserver => sqlserver::explain(connection, password, database, sql, analyze).await,
+        Engine::Mongodb => mongodb::explain(connection, password, database, sql, analyze).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
