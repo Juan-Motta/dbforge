@@ -63,3 +63,85 @@
   height: 7px;
   border-radius: 50%;
 }
+
+.chip {
+  position: relative;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  background: var(--elev);
+  box-shadow: var(--shadow);
+}
+
+.popoverHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.popoverTitle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.facts {
+  margin: 0;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.facts div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 28px;
+}
+
+.facts dt {
+  color: var(--text3);
+  font-size: 12.5px;
+}
+
+.facts dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px var(--font-mono);
+  user-select: text;
+}
+
+.popoverError {
+  margin: 0;
+  color: var(--err);
+  font-size: 12px;
+}
+
+.popoverActions {
+  display: flex;
+  gap: 8px;
+}

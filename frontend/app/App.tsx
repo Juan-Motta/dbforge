@@ -122,6 +122,7 @@ export function App() {
         onSearch={() => setPaletteOpen(true)}
         explorerOpen={explorerOpen}
         onToggleExplorer={() => setExplorerOpen((open) => !open)}
+        onEditConnection={(connection) => setDialog({ connection })}
       />
 
       <div className={styles.body}>

@@ -1,8 +1,7 @@
-import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
-import { EngineLogo } from '../../components/EngineLogo'
 import { Icon } from '../../components/Icon'
 import type { Connection } from '../../domain/connection'
+import { ConnectionDetails } from './ConnectionDetails'
 import { hasOverlayTitleBar } from './platform'
 import styles from './Shell.module.css'
 
@@ -16,6 +15,7 @@ interface TitleBarProps {
   onSearch: () => void
   explorerOpen: boolean
   onToggleExplorer: () => void
+  onEditConnection: (connection: Connection) => void
 }
 
 export function TitleBar({
@@ -26,6 +26,7 @@ export function TitleBar({
   onSearch,
   explorerOpen,
   onToggleExplorer,
+  onEditConnection,
 }: TitleBarProps) {
   return (
     <header
@@ -49,13 +50,7 @@ export function TitleBar({
       </IconButton>
 
       {connection ? (
-        <Button className={styles.connection}>
-          <EngineLogo engine={connection.engine} />
-          {connection.name}
-          {connection.environment === 'production' && <Badge tone="err">PROD</Badge>}
-          {connection.environment === 'staging' && <Badge tone="warn">STAGE</Badge>}
-          <Icon name="chevronDown" size={12} className="muted" />
-        </Button>
+        <ConnectionDetails connection={connection} onEdit={() => onEditConnection(connection)} />
       ) : (
         <span className="muted">No connection selected</span>
       )}
