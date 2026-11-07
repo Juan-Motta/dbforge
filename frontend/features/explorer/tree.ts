@@ -47,6 +47,8 @@ const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
  * grouped into "Tables" and "Views" folders, which arrive already loaded.
  */
 export function toChildNodes(parent: TreeNode, objects: DbObject[]): TreeNode[] {
+  // A Redis database holds keys, not schemas: it opens in the key browser.
+  const keyspaces = parent.kind === 'connection' && parent.connection.engine === 'redis'
   const toNode = (object: DbObject): TreeNode => ({
     id: parent.id + SEP + object.name,
     name: object.name,
@@ -54,7 +56,7 @@ export function toChildNodes(parent: TreeNode, objects: DbObject[]): TreeNode[] 
     meta: object.rowEstimate === null ? undefined : compact.format(object.rowEstimate).toLowerCase(),
     connectionId: parent.connectionId,
     path: [...parent.path, object.name],
-    expandable: object.kind === 'database' || object.kind === 'schema',
+    expandable: (object.kind === 'database' && !keyspaces) || object.kind === 'schema',
   })
 
   const folder = (name: string, kind: DbObject['kind']): TreeNode[] => {

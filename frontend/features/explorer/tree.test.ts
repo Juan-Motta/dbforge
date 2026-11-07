@@ -62,6 +62,16 @@ describe('toChildNodes', () => {
   })
 })
 
+describe('Redis databases', () => {
+  it('open in the key browser instead of expanding', () => {
+    const redis = connectionNode({ ...connection, id: 'cache', engine: 'redis', port: 6379 })
+    const [db0] = toChildNodes(redis, [object('db0', 'database', 12)])
+    expect([db0.expandable, db0.meta, db0.path]).toEqual([false, '12', ['db0']])
+    const [shop] = toChildNodes(connectionNode(connection), [object('shop', 'database')])
+    expect(shop.expandable).toBe(true)
+  })
+})
+
 describe('visibleRows', () => {
   it('shows only roots when nothing is expanded', () => {
     expect(labels(visibleRows(sampleTree(), () => false))).toEqual(['0:local'])

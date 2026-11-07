@@ -4,6 +4,7 @@ export type Tab = { id: string; title: string; connectionId: string } & (
   | { kind: 'query'; database?: string; initialSql?: string }
   | { kind: 'table'; table: TableRef }
   | { kind: 'diagram'; database: string; schema: string }
+  | { kind: 'keyspace'; database: string }
 )
 
 export interface TabsState {
@@ -49,6 +50,23 @@ export function openDiagramTab(
 ): TabsState {
   const id = `diagram:${connectionId}:${database}.${schema}`
   return openTab(state, { id, kind: 'diagram', title: `${schema} diagram`, connectionId, database, schema })
+}
+
+/** Opens a Redis database in the key browser, or switches to it when it is already open. */
+export function openKeyspaceTab(
+  state: TabsState,
+  connectionId: string,
+  connectionName: string,
+  database: string,
+): TabsState {
+  const id = `keyspace:${connectionId}:${database}`
+  return openTab(state, {
+    id,
+    kind: 'keyspace',
+    title: `${connectionName} · ${database}`,
+    connectionId,
+    database,
+  })
 }
 
 function openTab(state: TabsState, tab: Tab): TabsState {

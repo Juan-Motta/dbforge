@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon'
 import { TabStrip } from '../components/TabStrip'
 import { DiagramView } from '../features/diagram/DiagramView'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
+import { KeyBrowser } from '../features/keyspace/KeyBrowser'
 import { QueryConsole } from '../features/query/QueryConsole'
 import { TablePage } from './TablePage'
 import type { Tab } from './tabs'
@@ -20,7 +21,7 @@ interface WorkspaceProps {
   connectionOf: (connectionId: string) => Connection | undefined
 }
 
-const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram' } as const
+const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram', keyspace: 'database' } as const
 
 /** The main island: open query consoles, tables and diagrams, one visible at a time. */
 export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, connectionOf }: WorkspaceProps) {
@@ -68,6 +69,13 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, conne
             />
           ) : tab.kind === 'diagram' ? (
             <DiagramView connectionId={tab.connectionId} database={tab.database} schema={tab.schema} />
+          ) : tab.kind === 'keyspace' ? (
+            <KeyBrowser
+              tabId={tab.id}
+              connectionId={tab.connectionId}
+              database={tab.database}
+              address={addressOf(connectionOf(tab.connectionId))}
+            />
           ) : (
             <TablePage
               connectionId={tab.connectionId}
@@ -85,4 +93,12 @@ export function Workspace({ tabs, activeId, onSelect, onClose, onNewQuery, conne
       {exporting && <ExportDialog source={exporting} onClose={() => setExporting(null)} />}
     </div>
   )
+}
+
+/** `host:port`, or the URL's host for a connection given as a URL. */
+function addressOf(connection: Connection | undefined): string {
+  if (!connection) return ''
+  if (connection.host.includes('://'))
+    return connection.host.replace(/^[a-z]+:\/\/([^@]*@)?/, '').replace(/\/.*$/, '')
+  return `${connection.host}:${connection.port}`
 }

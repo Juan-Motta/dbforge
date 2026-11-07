@@ -4,6 +4,7 @@ import { mockIPC } from '@tauri-apps/api/mocks'
 import type { Connection } from '../domain/connection'
 import type { ConnectionInput } from '../features/connections/api'
 import type { DbObject } from '../features/explorer/api'
+import * as redis from './mockRedis'
 
 const connections: Connection[] = [
   {
@@ -35,6 +36,16 @@ const connections: Connection[] = [
     port: 3306,
     database: 'app',
     username: 'app',
+  },
+  {
+    id: 'demo-redis',
+    name: 'cache-redis',
+    engine: 'redis',
+    environment: 'staging',
+    host: 'cache.staging.internal',
+    port: 6379,
+    database: '0',
+    username: '',
   },
 ]
 
@@ -101,6 +112,14 @@ export function installMockBackend() {
         return delay('PostgreSQL 17.0 (mock)')
       case 'list_objects': {
         const path = (payload.path as string[]).join('/')
+        if (payload.connectionId === 'demo-redis') {
+          const dbs = Array.from({ length: 16 }, (_, n): DbObject => ({
+            name: `db${n}`,
+            kind: 'database',
+            rowEstimate: n === 0 ? redis.overview().keys : 0,
+          }))
+          return delay(path === '' ? dbs : [])
+        }
         const source =
           payload.connectionId === 'demo-mysql'
             ? mysqlObjects
@@ -134,8 +153,33 @@ export function installMockBackend() {
           hasMore: offset + count < total,
         })
       }
+      case 'redis_overview':
+        return delay(redis.overview())
+      case 'redis_scan':
+        return delay(
+          redis.scan(
+            String(payload.pattern),
+            payload.kind as string | null,
+            String(payload.cursor),
+            Number(payload.limit),
+          ),
+        )
+      case 'redis_read_key':
+        return delay(redis.readKey(String(payload.key), String(payload.filter)))
+      case 'redis_edit_key':
+        return delay(redis.editKey(String(payload.key), String(payload.kind), payload.edit as never))
+      case 'redis_create_key':
+        return delay(redis.createKey(payload.key as never))
       case 'run_query': {
         const sql = String(payload.sql)
+        if (String(payload.sessionId).endsWith(':cli')) {
+          const column = { name: 'reply', dataType: 'redis' }
+          const rows = redis.cli(sql).map((line) => [line])
+          return delay({
+            elapsedMs: 1,
+            results: [{ columns: [column], rows, truncated: false, rowsAffected: 1 }],
+          })
+        }
         if (/error/i.test(sql)) throw 'syntax error at or near "error"'
         if (/pg_sleep/i.test(sql)) {
           await new Promise<void>((resolve) => sleeping.set(String(payload.sessionId), resolve))

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { closeConnectionTabs, closeTab, newQueryTab, NO_TABS, openDiagramTab, openTableTab } from './tabs'
+import {
+  closeConnectionTabs,
+  closeTab,
+  newQueryTab,
+  NO_TABS,
+  openDiagramTab,
+  openKeyspaceTab,
+  openTableTab,
+} from './tabs'
 
 const orders = { database: 'shop', schema: 'public', name: 'orders' }
 const users = { database: 'shop', schema: 'public', name: 'users' }
@@ -11,6 +19,14 @@ describe('tabs', () => {
     const state = newQueryTab(newQueryTab(NO_TABS, 'pg', 'shop'), 'pg')
     expect(titles(state)).toEqual(['Query 1', 'Query 2'])
     expect(state.activeId).toBe('query:2')
+  })
+
+  it('opens one key browser per Redis database', () => {
+    let state = openKeyspaceTab(NO_TABS, 'cache', 'cache-redis', 'db0')
+    state = openKeyspaceTab(state, 'cache', 'cache-redis', 'db1')
+    state = openKeyspaceTab(state, 'cache', 'cache-redis', 'db0')
+    expect(titles(state)).toEqual(['cache-redis · db0', 'cache-redis · db1'])
+    expect(state.activeId).toBe('keyspace:cache:db0')
   })
 
   it('opens one diagram tab per schema', () => {

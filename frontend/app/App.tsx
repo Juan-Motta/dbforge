@@ -11,7 +11,15 @@ import { useTheme } from '../features/settings/useTheme'
 import { ActivityRail, type Activity } from '../features/shell/ActivityRail'
 import { StatusBar } from '../features/shell/StatusBar'
 import { TitleBar } from '../features/shell/TitleBar'
-import { closeConnectionTabs, closeTab, newQueryTab, NO_TABS, openDiagramTab, openTableTab } from './tabs'
+import {
+  closeConnectionTabs,
+  closeTab,
+  newQueryTab,
+  NO_TABS,
+  openDiagramTab,
+  openKeyspaceTab,
+  openTableTab,
+} from './tabs'
 import { Workspace } from './Workspace'
 import styles from './App.module.css'
 
@@ -36,9 +44,20 @@ export function App() {
   const activeConnection = connections.find((c) => c.id === selection?.connectionId)
   const activePath = activeConnection ? (selection?.path ?? []) : []
 
-  // A new query runs against the selected connection and database.
+  // A new query runs against the selected connection and database. Redis has
+  // no query consoles: its key browser holds the CLI.
   const newQuery = activeConnection
-    ? () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
+    ? activeConnection.engine === 'redis'
+      ? () =>
+          setTabs((state) =>
+            openKeyspaceTab(
+              state,
+              activeConnection.id,
+              activeConnection.name,
+              activePath[0] ?? `db${activeConnection.database || 0}`,
+            ),
+          )
+      : () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
     : undefined
 
   // The diagram of the selected schema, or the default one when only a connection or database is selected.
@@ -117,6 +136,10 @@ export function App() {
             onOpen={(node) => {
               if (node.kind === 'table' || node.kind === 'view') {
                 setTabs((state) => openTableTab(state, node.connectionId, tableRefFromPath(node.path)))
+              }
+              const connection = connections.find((c) => c.id === node.connectionId)
+              if (node.kind === 'database' && connection?.engine === 'redis') {
+                setTabs((state) => openKeyspaceTab(state, connection.id, connection.name, node.name))
               }
             }}
             onNewConnection={() => setDialog({})}
