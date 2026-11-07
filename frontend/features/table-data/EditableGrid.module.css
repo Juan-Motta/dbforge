@@ -40,6 +40,21 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.header:disabled {
+  cursor: default;
+}
+
+.sorted {
+  color: var(--accent-text);
+  font-weight: 700;
 }
 
 .key {

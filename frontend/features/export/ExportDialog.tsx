@@ -4,13 +4,15 @@ import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import type { TableRef } from '../../domain/table'
 import { errorMessage } from '../../lib/errors'
+import { isFiltered, type RowFilter } from '../table-data/rowFilter'
 import { chooseFile, exportApi, type RowsSource } from './api'
 import { FORMATS, type ExportFormat } from './formats'
 import styles from './ExportDialog.module.css'
 
 /** A whole table, streamed from the server, or rows the UI already holds. */
 export type ExportSource =
-  { kind: 'table'; connectionId: string; table: TableRef } | ({ kind: 'rows' } & RowsSource)
+  | { kind: 'table'; connectionId: string; table: TableRef; filter: RowFilter }
+  | ({ kind: 'rows' } & RowsSource)
 
 type Status =
   | { state: 'idle' }
@@ -45,7 +47,7 @@ export function ExportDialog({ source, onClose }: ExportDialogProps) {
       if (!path) return null
       const rows =
         source.kind === 'table'
-          ? await exportApi.exportTable(source.connectionId, source.table, format, path)
+          ? await exportApi.exportTable(source.connectionId, source.table, source.filter, format, path)
           : await exportApi.exportRows(path, format, source)
       return { state: 'saved', rows, path }
     })
@@ -70,7 +72,9 @@ export function ExportDialog({ source, onClose }: ExportDialogProps) {
             {source.kind === 'table' ? (
               <>
                 {source.table.schema}.{source.table.name}
-                <span className="muted">· every row</span>
+                <span className="muted">
+                  · {isFiltered(source.filter) ? 'rows the filter keeps, in its order' : 'every row'}
+                </span>
               </>
             ) : (
               <>
@@ -108,7 +112,7 @@ export function ExportDialog({ source, onClose }: ExportDialogProps) {
         </div>
 
         <p className={styles.status} role="status">
-          {status.state === 'working' && (source.kind === 'table' ? 'Exporting every row…' : 'Working…')}
+          {status.state === 'working' && (source.kind === 'table' ? 'Exporting…' : 'Working…')}
           {status.state === 'saved' && (
             <>
               Exported {status.rows.toLocaleString('en-US')} rows to <code>{status.path}</code>

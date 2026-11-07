@@ -25,6 +25,10 @@ interface EditableGridProps {
   onEditNewCell: (id: number, column: number, value: Value) => void
   /** Puts a column of a new row back to its DEFAULT. */
   onUnsetNewCell: (id: number, column: number) => void
+  /** Which way a column is sorted, for its header's arrow. */
+  sortOf?: (column: string) => 'asc' | 'desc' | null
+  /** A header click: sorts by that column, then the other way, then not at all. */
+  onSort?: (column: string) => void
 }
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
@@ -126,13 +130,30 @@ export function EditableGrid(props: EditableGridProps) {
               <th
                 key={column.name}
                 title={column.generated ? `${column.dataType} · ${COMPUTED}` : column.dataType}
+                aria-sort={
+                  props.sortOf?.(column.name) === 'asc'
+                    ? 'ascending'
+                    : props.sortOf?.(column.name) === 'desc'
+                      ? 'descending'
+                      : undefined
+                }
               >
-                <span className={styles.header}>
+                <button
+                  type="button"
+                  className={styles.header}
+                  disabled={!props.onSort}
+                  onClick={() => props.onSort?.(column.name)}
+                >
                   {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
                   {column.name}
                   {column.generated && <span className={styles.computed}>auto</span>}
                   <span className={styles.type}>{shortTypeName(column.dataType)}</span>
-                </span>
+                  {props.sortOf?.(column.name) && (
+                    <span className={styles.sorted} aria-hidden="true">
+                      {props.sortOf(column.name) === 'asc' ? '↑' : '↓'}
+                    </span>
+                  )}
+                </button>
               </th>
             ))}
           </tr>

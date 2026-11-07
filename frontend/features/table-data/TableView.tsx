@@ -4,6 +4,7 @@ import { Button, IconButton } from '../../components/Button'
 import { SqlCode } from '../../components/code/SqlCode'
 import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
+import type { SqlDialect } from '../../domain/connection'
 import type { TableRef } from '../../domain/table'
 import { errorMessage } from '../../lib/errors'
 import { tableDataApi, type ApplySummary } from './api'
@@ -23,6 +24,8 @@ import {
   unsetNewCell,
   type Edits,
 } from './edits'
+import { FilterBar } from './FilterBar'
+import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
 import { useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
 
@@ -31,6 +34,10 @@ interface TableViewProps {
   table: TableRef
   /** Applying changes on a production connection asks for confirmation first. */
   production: boolean
+  dialect: SqlDialect
+  /** What the rows are narrowed and ordered by; the page owns it so exports use it too. */
+  filter: RowFilter
+  onFilterChange: (filter: RowFilter) => void
 }
 
 type Status =
@@ -40,10 +47,18 @@ type Status =
   | { state: 'failed'; error: string }
 
 /** A table's rows, one page at a time, editable when the table has a primary key. */
-export function TableView({ connectionId, table, production }: TableViewProps) {
+export function TableView({
+  connectionId,
+  table,
+  production,
+  dialect,
+  filter,
+  onFilterChange,
+}: TableViewProps) {
   const { page, error, loading, offset, hasPrevious, hasNext, previous, next, reload } = useRowsPage(
     connectionId,
     table,
+    filter,
   )
   const [edits, setEdits] = useState<Edits>(NO_EDITS)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -156,7 +171,13 @@ export function TableView({ connectionId, table, production }: TableViewProps) {
         </IconButton>
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
-          {loading ? 'Loading…' : rowCount === 0 ? 'No rows' : `Rows ${offset + 1}–${offset + rowCount}`}
+          {loading
+            ? 'Loading…'
+            : rowCount === 0
+              ? isFiltered(filter)
+                ? 'No rows match'
+                : 'No rows'
+              : `Rows ${offset + 1}–${offset + rowCount}${isFiltered(filter) ? ' · filtered' : ''}`}
         </span>
         <IconButton label="Previous page" disabled={!hasPrevious || lockPaging} onClick={previous}>
           <Icon name="chevronLeft" />
@@ -168,6 +189,8 @@ export function TableView({ connectionId, table, production }: TableViewProps) {
           <Icon name="refresh" />
         </IconButton>
       </div>
+
+      <FilterBar dialect={dialect} value={filter} onApply={onFilterChange} disabled={pending} />
 
       <div className={styles.content} aria-busy={loading}>
         {error ? (
@@ -191,6 +214,8 @@ export function TableView({ connectionId, table, production }: TableViewProps) {
               onEditNewCell={(id, c, value) =>
                 change((current) => editNewCell(current, id, columns[c].name, value))
               }
+              sortOf={(column) => sortOf(dialect, column, filter.order)}
+              onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
             />
           )
         )}

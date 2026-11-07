@@ -2,31 +2,37 @@ import { useEffect, useState } from 'react'
 import { errorMessage } from '../../lib/errors'
 import type { TableRef } from '../../domain/table'
 import { tableDataApi, type RowsPage } from './api'
+import type { RowFilter } from './rowFilter'
 
 export const PAGE_SIZE = 200
 
 type Result = { key: string } & ({ page: RowsPage } | { error: string })
 
-/** Loads one page of rows at a time. Mount it per table so paging starts at 0. */
-export function useRowsPage(connectionId: string, table: TableRef) {
-  const [offset, setOffset] = useState(0)
+/** Loads one page of rows at a time; a new filter starts again at the first page. */
+export function useRowsPage(connectionId: string, table: TableRef, filter: RowFilter) {
+  const filterKey = JSON.stringify(filter)
+  const [paging, setPaging] = useState({ filterKey, offset: 0 })
+  const offset = paging.filterKey === filterKey ? paging.offset : 0
+  const setOffset = (next: (current: number) => number) => setPaging({ filterKey, offset: next(offset) })
   const [reloads, setReloads] = useState(0)
   const [result, setResult] = useState<Result | null>(null)
 
   // Identifies the request; a result for any other key is stale.
-  const key = JSON.stringify([connectionId, table, offset, reloads])
+  const key = JSON.stringify([connectionId, table, filter, offset, reloads])
 
   useEffect(() => {
     // Ignore the response if the request changed before it arrived.
     const request = { cancelled: false }
     tableDataApi
-      .fetchRows(connectionId, table, offset, PAGE_SIZE)
+      .fetchRows(connectionId, table, filter, offset, PAGE_SIZE)
       .then((page) => !request.cancelled && setResult({ key, page }))
       .catch((error) => !request.cancelled && setResult({ key, error: errorMessage(error) }))
     return () => {
       request.cancelled = true
     }
-  }, [connectionId, table, offset, reloads, key])
+    // `key` covers the filter by value; the object itself may be new each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 
   const loading = result?.key !== key
   // Keep showing the previous page while the next one loads.

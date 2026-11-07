@@ -101,8 +101,8 @@ export function Workspace({
               onOpenSchemaDiagram={() =>
                 onOpenDiagram(tab.connectionId, tab.table.database, tab.table.schema)
               }
-              onExport={() =>
-                setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table })
+              onExport={(filter) =>
+                setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table, filter })
               }
             />
           )}

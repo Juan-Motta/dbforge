@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon'
 import type { SqlDialect } from '../domain/connection'
 import type { TableRef } from '../domain/table'
 import { DiagramView } from '../features/diagram/DiagramView'
+import { NO_FILTER, type RowFilter } from '../features/table-data/rowFilter'
 import { TableView } from '../features/table-data/TableView'
 import { StructureSection } from '../features/table-structure/StructureSection'
 import { SECTIONS, sectionCount, type Section } from '../features/table-structure/sections'
@@ -22,7 +23,8 @@ interface TablePageProps {
   /** Relational engines draw the table with its relations. */
   diagram: boolean
   onOpenSchemaDiagram: () => void
-  onExport: () => void
+  /** Exports the rows the filter keeps. */
+  onExport: (filter: RowFilter) => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
@@ -36,6 +38,7 @@ export function TablePage({
   onExport,
 }: TablePageProps) {
   const [view, setView] = useState<View>('data')
+  const [filter, setFilter] = useState<RowFilter>(NO_FILTER)
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
 
@@ -58,7 +61,7 @@ export function TablePage({
           )}
         </div>
         <span className={styles.summary}>{structure && summary(structure)}</span>
-        <IconButton label="Export rows" onClick={onExport}>
+        <IconButton label="Export rows" onClick={() => onExport(filter)}>
           <Icon name="download" />
         </IconButton>
         {view !== 'data' && view !== 'diagram' && (
@@ -70,7 +73,14 @@ export function TablePage({
 
       {/* Data stays mounted so its page and scroll survive a look at the structure. */}
       <div className={styles.content} hidden={view !== 'data'}>
-        <TableView connectionId={connectionId} table={table} production={production} />
+        <TableView
+          connectionId={connectionId}
+          table={table}
+          production={production}
+          dialect={dialect}
+          filter={filter}
+          onFilterChange={setFilter}
+        />
       </div>
       {view === 'diagram' && (
         <div className={styles.content}>

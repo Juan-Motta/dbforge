@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { TableRef } from '../../domain/table'
 import type { RowChange } from './edits'
+import type { RowFilter } from './rowFilter'
 
 export interface Column {
   name: string
@@ -25,8 +26,9 @@ export interface ApplySummary {
 }
 
 export const tableDataApi = {
-  fetchRows: (connectionId: string, table: TableRef, offset: number, limit: number) =>
-    invoke<RowsPage>('fetch_rows', { connectionId, table, offset, limit }),
+  /** One page of rows, narrowed and ordered by `filter`. */
+  fetchRows: (connectionId: string, table: TableRef, filter: RowFilter, offset: number, limit: number) =>
+    invoke<RowsPage>('fetch_rows', { connectionId, table, filter, offset, limit }),
   /** Applies every change in one transaction, or none if any row changed since it was loaded. */
   applyChanges: (connectionId: string, table: TableRef, changes: RowChange[]) =>
     invoke<ApplySummary>('apply_changes', { connectionId, table, changes }),
