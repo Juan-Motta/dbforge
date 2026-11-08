@@ -1,4 +1,11 @@
-import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from 'react'
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { isNumericType, shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
@@ -37,11 +44,23 @@ type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
 const COMPUTED = 'Computed by the database, so it cannot be edited'
 const MIN_WIDTH = 48
+const MOVES: Record<string, [number, number]> = {
+  ArrowUp: [-1, 0],
+  ArrowDown: [1, 0],
+  ArrowLeft: [0, -1],
+  ArrowRight: [0, 1],
+}
 
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
   const { columns, rows, firstRowNumber, edits, editable, selected, onSelect } = props
   const [editing, setEditing] = useState<{ at: Editing; column: number } | null>(null)
+  const table = useRef<HTMLTableElement>(null)
+  /** Closes the editor and gives the keys back to the grid, so ⌘C still copies. */
+  const stopEditing = () => {
+    setEditing(null)
+    table.current?.focus()
+  }
   const [menu, setMenu] = useState<{
     x: number
     y: number
@@ -49,6 +68,45 @@ export function EditableGrid(props: EditableGridProps) {
     column: number
     state: CellState
   } | null>(null)
+  // The cell a click picked out, as `row:<index>` or `new:<id>` and a column.
+  const [active, setActive] = useState<{ id: string; column: number } | null>(null)
+  // Another page or table: the picked cell is gone.
+  const [shown, setShown] = useState(rows)
+  if (shown !== rows) {
+    setShown(rows)
+    setActive(null)
+  }
+
+  /** Arrow keys move the picked cell, new rows first as they are shown. */
+  const move = ([down, right]: [number, number]) => {
+    if (!active) return
+    const order = [...edits.inserts.map((r) => `new:${r.id}`), ...rows.map((_, r) => `row:${r}`)]
+    const at = order.indexOf(active.id)
+    const id = order[Math.min(order.length - 1, Math.max(0, at + down))]
+    const column = Math.min(columns.length - 1, Math.max(0, active.column + right))
+    setActive({ id, column })
+    // Once drawn, bring it into view past the sticky header and row numbers.
+    requestAnimationFrame(() =>
+      table.current
+        ?.querySelector('td[data-active]')
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' }),
+    )
+  }
+
+  /** The picked cell's value as shown, edits included; `undefined` when none is picked. */
+  const activeValue = (): Value | undefined => {
+    if (!active) return undefined
+    const name = columns[active.column]?.name
+    if (name === undefined) return undefined
+    if (active.id.startsWith('new:')) {
+      const row = edits.inserts.find((r) => `new:${r.id}` === active.id)
+      return row ? (row.values[name] ?? null) : undefined
+    }
+    const row = rows[Number(active.id.slice(4))]
+    if (!row) return undefined
+    const changed = edits.updates.get(rowKey(keyOf(row, columns)))?.values ?? {}
+    return name in changed ? changed[name] : row[active.column]
+  }
   const numeric = columns.map((c) => isNumericType(c.dataType))
   // Widths the user dragged a column to; the others fit their content.
   const [widths, setWidths] = useState<Record<string, number>>({})
@@ -97,7 +155,7 @@ export function EditableGrid(props: EditableGridProps) {
   const commit = (value: Value) => {
     if (!editing) return
     setValue(editing.at, editing.column, value)
-    setEditing(null)
+    stopEditing()
   }
 
   const menuItems = (at: Editing, column: number, state: CellState): MenuItem[] => [
@@ -127,6 +185,8 @@ export function EditableGrid(props: EditableGridProps) {
       ('row' in at
         ? 'row' in editing.at && editing.at.row === at.row
         : 'newRow' in editing.at && editing.at.newRow === at.newRow)
+    const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
+    const isActive = active?.id === id && active.column === column
     // Edited or new values may not exist yet in the referenced table: only loaded ones link.
     const link = 'row' in at && !state.edited ? (props.linkOf?.(at.row, column) ?? null) : null
     const classes = [
@@ -168,7 +228,7 @@ export function EditableGrid(props: EditableGridProps) {
           <span className={styles.hidden} aria-hidden="true">
             {content}
           </span>
-          <CellEditor initial={value} onCommit={commit} onCancel={() => setEditing(null)} />
+          <CellEditor initial={value} onCommit={commit} onCancel={stopEditing} />
         </td>
       )
     }
@@ -178,6 +238,7 @@ export function EditableGrid(props: EditableGridProps) {
         className={classes.filter(Boolean).join(' ') || undefined}
         style={sized[column]}
         title={value ?? undefined}
+        onClick={() => setActive({ id, column })}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
         onContextMenu={
           editable && !state.locked
@@ -188,6 +249,7 @@ export function EditableGrid(props: EditableGridProps) {
             : undefined
         }
         data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
+        data-active={isActive || undefined}
       >
         {content}
       </td>
@@ -196,7 +258,25 @@ export function EditableGrid(props: EditableGridProps) {
 
   return (
     <>
-      <table className={styles.grid}>
+      <table
+        ref={table}
+        className={styles.grid}
+        // Focusable, so ⌘C copies the picked cell.
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          // Keys typed into the cell editor are its own.
+          if (event.target instanceof HTMLInputElement) return
+          const value = activeValue()
+          if ((event.metaKey || event.ctrlKey) && event.key === 'c' && value !== undefined) {
+            event.preventDefault()
+            void navigator.clipboard.writeText(value ?? 'NULL')
+          } else if (event.key === 'Escape') setActive(null)
+          else if (active && event.key in MOVES) {
+            event.preventDefault()
+            move(MOVES[event.key])
+          }
+        }}
+      >
         <thead>
           <tr>
             <th className={styles.rowNumber}>#</th>
