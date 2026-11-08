@@ -24,8 +24,6 @@ export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps)
     setSeen(value)
     setDraft(value)
   }
-  const changed = draft.filter !== value.filter || draft.order !== value.order
-
   const field = (key: keyof RowFilter, label: string, hint: string, grow: string) => (
     <label className={styles.filterField} style={{ flex: grow }}>
       <span className={styles.filterLabel}>{label}</span>
@@ -51,12 +49,15 @@ export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps)
     >
       {field('filter', labels.filter, labels.filterHint, '1 1 0')}
       {field('order', labels.order, labels.orderHint, '0 1 280px')}
-      {changed && <span className={styles.filterHint}>Enter to apply</span>}
-      {isFiltered(value) && (
-        <IconButton label="Clear filter and order" disabled={disabled} onClick={() => onApply(NO_FILTER)}>
-          <Icon name="close" />
-        </IconButton>
-      )}
+      {/* Always there, so the fields keep their width; only shown while a filter applies. */}
+      <IconButton
+        label="Clear filter and order"
+        className={isFiltered(value) ? undefined : styles.reserved}
+        disabled={disabled || !isFiltered(value)}
+        onClick={() => onApply(NO_FILTER)}
+      >
+        <Icon name="close" />
+      </IconButton>
     </div>
   )
 }
