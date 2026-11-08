@@ -984,6 +984,7 @@ dependencies = [
  "futures-util",
  "keyring",
  "mongodb",
+ "objc2",
  "redis",
  "roxmltree",
  "rustls",

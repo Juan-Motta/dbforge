@@ -275,6 +275,8 @@ export function installMockBackend() {
         sleeping.get(String(payload.sessionId))?.()
         sleeping.delete(String(payload.sessionId))
         return null
+      case 'keep_cursor':
+        return null
       default:
         throw new Error(`Mock backend: unknown command ${cmd}`)
     }

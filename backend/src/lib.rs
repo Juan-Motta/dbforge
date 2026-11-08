@@ -1,4 +1,5 @@
 mod connections;
+mod cursor;
 mod drivers;
 mod edit;
 mod error;
@@ -18,6 +19,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            cursor::install();
             let path = app.path().app_config_dir()?.join("connections.json");
             app.manage(ConnectionStore::load(path)?);
             app.manage(query::QuerySessions::default());
@@ -50,6 +52,7 @@ pub fn run() {
             export::format_rows,
             export::export_rows,
             export::export_table,
+            cursor::keep_cursor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");

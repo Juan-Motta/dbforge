@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -9,6 +10,7 @@ import {
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { isNumericType, shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
+import { keepCursor } from '../../lib/cursor'
 import type { Column } from './api'
 import { keyOf, rowKey, type Edits } from './edits'
 import styles from './EditableGrid.module.css'
@@ -56,6 +58,8 @@ export function EditableGrid(props: EditableGridProps) {
   const { columns, rows, firstRowNumber, edits, editable, selected, onSelect } = props
   const [editing, setEditing] = useState<{ at: Editing; column: number } | null>(null)
   const table = useRef<HTMLTableElement>(null)
+  // A grid closed while it had focus gives the pointer back to the usual rules.
+  useEffect(() => () => keepCursor(false), [])
   /** Closes the editor and gives the keys back to the grid, so ⌘C still copies. */
   const stopEditing = () => {
     setEditing(null)
@@ -263,6 +267,9 @@ export function EditableGrid(props: EditableGridProps) {
         className={styles.grid}
         // Focusable, so ⌘C copies the picked cell.
         tabIndex={-1}
+        // While the grid has the keys, moving with the arrows keeps the pointer in sight.
+        onFocus={(event) => event.target === event.currentTarget && keepCursor(true)}
+        onBlur={(event) => event.target === event.currentTarget && keepCursor(false)}
         onKeyDown={(event) => {
           // Keys typed into the cell editor are its own.
           if (event.target instanceof HTMLInputElement) return
