@@ -33,7 +33,8 @@ export function filterLabels(dialect: SqlDialect) {
       }
 }
 
-function quote(dialect: SqlDialect, column: string): string {
+/** A column name as the dialect writes it in SQL (or a key in a MongoDB document). */
+export function quote(dialect: SqlDialect, column: string): string {
   switch (dialect) {
     case 'mysql':
       return '`' + column.replaceAll('`', '``') + '`'

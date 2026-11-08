@@ -7,6 +7,8 @@ import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import type { SqlDialect } from '../../domain/connection'
 import type { TableRef } from '../../domain/table'
+import type { ForeignKey } from '../table-structure/api'
+import { linkFilter, referencedTable } from './foreignLinks'
 import { errorMessage } from '../../lib/errors'
 import { tableDataApi, type ApplySummary } from './api'
 import { EditableGrid } from './EditableGrid'
@@ -45,6 +47,10 @@ interface TableViewProps {
   active: boolean
   /** Size and row estimate, for the footer. */
   summary: string
+  /** The table's foreign keys: their columns link to the rows they point to. */
+  foreignKeys: ForeignKey[]
+  /** Opens a table filtered to the rows a foreign key points to. */
+  onOpenTable: (table: TableRef, filter: RowFilter) => void
 }
 
 type Status =
@@ -64,6 +70,8 @@ export function TableView({
   actionsSlot,
   active,
   summary,
+  foreignKeys,
+  onOpenTable,
 }: TableViewProps) {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const { page, error, loading, offset, hasPrevious, hasNext, previous, next, reload } = useRowsPage(
@@ -208,6 +216,13 @@ export function TableView({
               onEditNewCell={(id, c, value) =>
                 change((current) => editNewCell(current, id, columns[c].name, value))
               }
+              linkOf={(r, c) => {
+                const key = foreignKeys.find((k) => k.columns.includes(columns[c].name))
+                if (!key) return null
+                const values = Object.fromEntries(columns.map((column, i) => [column.name, rows[r][i]]))
+                const target = linkFilter(dialect, key, values)
+                return target && (() => onOpenTable(referencedTable(table, key.referencedTable), target))
+              }}
               sortOf={(column) => sortOf(dialect, column, filter.order)}
               onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
             />

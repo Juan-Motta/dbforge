@@ -88,6 +88,7 @@ const PATHS = {
   check: <path d="M3.5 8.5l3 3 6-7" />,
   chevronDown: <path d="M4 6l4 4 4-4" />,
   chevronUp: <path d="M4 10l4-4 4 4" />,
+  external: <path d="M6.5 4h5.5v5.5M12 4l-7.5 7.5" />,
   sortable: <path d="M5 6.5 8 3.5l3 3M5 9.5l3 3 3-3" />,
   play: <path d="M5 3.5v9l7-4.5z" fill="currentColor" />,
   stop: <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />,

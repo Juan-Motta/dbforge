@@ -25,6 +25,10 @@ interface TablePageProps {
   onOpenSchemaDiagram: () => void
   /** Exports the rows the filter keeps. */
   onExport: (filter: RowFilter) => void
+  /** The filter the tab opened with, e.g. from a foreign key link. */
+  initialFilter?: RowFilter
+  /** Opens another table of the connection, filtered. */
+  onOpenTable: (table: TableRef, filter: RowFilter) => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
@@ -36,9 +40,11 @@ export function TablePage({
   diagram,
   onOpenSchemaDiagram,
   onExport,
+  initialFilter,
+  onOpenTable,
 }: TablePageProps) {
   const [view, setView] = useState<View>('data')
-  const [filter, setFilter] = useState<RowFilter>(NO_FILTER)
+  const [filter, setFilter] = useState<RowFilter>(initialFilter ?? NO_FILTER)
   // The data view puts its row actions here, next to Export.
   const [actionsSlot, setActionsSlot] = useState<HTMLSpanElement | null>(null)
   // Loaded up front: the section counts and the size summary come from it.
@@ -87,6 +93,8 @@ export function TablePage({
           actionsSlot={actionsSlot}
           active={view === 'data'}
           summary={structure ? summary(structure) : ''}
+          foreignKeys={structure?.foreignKeys ?? []}
+          onOpenTable={onOpenTable}
         />
       </div>
       {view === 'diagram' && (

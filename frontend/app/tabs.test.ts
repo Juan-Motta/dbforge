@@ -56,6 +56,16 @@ describe('tabs', () => {
     expect(state.activeId).toBe(state.tabs[0].id)
   })
 
+  it('opens a filtered table in its own tab, reused for the same filter', () => {
+    const one = { filter: `"id" = '877'`, order: '' }
+    let state = openTableTab(NO_TABS, 'pg', orders)
+    state = openTableTab(state, 'pg', orders, one)
+    state = openTableTab(state, 'pg', orders, one)
+    expect(titles(state)).toEqual(['orders', `orders · "id" = '877'`])
+    const tab = state.tabs[1]
+    expect(tab.kind === 'table' && tab.filter).toEqual(one)
+  })
+
   it('treats the same table on another connection as a different tab', () => {
     const state = openTableTab(openTableTab(NO_TABS, 'pg', orders), 'other', orders)
     expect(state.tabs).toHaveLength(2)

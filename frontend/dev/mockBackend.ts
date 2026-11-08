@@ -152,6 +152,7 @@ export function installMockBackend() {
             `Customer ${id}`,
             id % 7 === 0 ? null : (id * 13.37).toFixed(2),
             '2026-11-05 10:00:00+00',
+            id % 5 === 0 ? null : String(1000 + (id % 9)),
           ]
         })
         return delay({
@@ -160,6 +161,7 @@ export function installMockBackend() {
             { name: 'name', dataType: 'character varying(80)', primaryKey: false },
             { name: 'revenue', dataType: 'numeric(10,2)', primaryKey: false },
             { name: 'created_at', dataType: 'timestamp with time zone', primaryKey: false, generated: true },
+            { name: 'customer_id', dataType: 'bigint', primaryKey: false },
           ],
           rows,
           hasMore: offset + count < total,
@@ -347,6 +349,14 @@ const mockStructure = {
     },
   ],
   foreignKeys: [
+    {
+      name: 'orders_customer_id_fkey',
+      columns: ['customer_id'],
+      referencedTable: 'customers',
+      referencedColumns: ['id'],
+      onUpdate: 'NO ACTION',
+      onDelete: 'RESTRICT',
+    },
     {
       name: 'customers_referrer_id_fkey',
       columns: ['referrer_id'],

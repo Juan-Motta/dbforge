@@ -29,6 +29,8 @@ interface EditableGridProps {
   sortOf?: (column: string) => 'asc' | 'desc' | null
   /** A header click: sorts by that column, then the other way, then not at all. */
   onSort?: (column: string) => void
+  /** Opens the row a foreign key column points to; `null` for other columns or NULL keys. */
+  linkOf?: (row: number, column: number) => (() => void) | null
 }
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
@@ -93,6 +95,8 @@ export function EditableGrid(props: EditableGridProps) {
         </td>
       )
     }
+    // Edited or new values may not exist yet in the referenced table: only loaded ones link.
+    const link = 'row' in at && !state.edited ? (props.linkOf?.(at.row, column) ?? null) : null
     const classes = [
       numeric[column] && styles.numeric,
       value === null && !state.unset && styles.null,
@@ -115,7 +119,28 @@ export function EditableGrid(props: EditableGridProps) {
         }
         data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
       >
-        {state.unset ? 'DEFAULT' : (value ?? 'NULL')}
+        {link ? (
+          <span className={styles.linked}>
+            <span className={styles.linkedText}>{value}</span>
+            <button
+              type="button"
+              className={styles.link}
+              aria-label={`Open the row ${value} points to`}
+              title="Open the referenced row"
+              onClick={(event) => {
+                event.stopPropagation()
+                link()
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              <Icon name="external" size={12} />
+            </button>
+          </span>
+        ) : state.unset ? (
+          'DEFAULT'
+        ) : (
+          (value ?? 'NULL')
+        )}
       </td>
     )
   }

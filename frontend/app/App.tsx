@@ -168,6 +168,9 @@ export function App() {
               onClose={(id) => setTabs((state) => closeTab(state, id))}
               onNewQuery={newQuery}
               connectionOf={(id) => connections.find((c) => c.id === id)}
+              onOpenTable={(connectionId, table, filter) =>
+                setTabs((state) => openTableTab(state, connectionId, table, filter))
+              }
               onOpenDiagram={(connectionId, database, schema) =>
                 setTabs((state) => openDiagramTab(state, connectionId, database, schema))
               }

@@ -1,8 +1,9 @@
 import type { TableRef } from '../domain/table'
+import type { RowFilter } from '../features/table-data/rowFilter'
 
 export type Tab = { id: string; title: string; connectionId: string } & (
   | { kind: 'query'; database?: string; initialSql?: string }
-  | { kind: 'table'; table: TableRef }
+  | { kind: 'table'; table: TableRef; filter?: RowFilter }
   | { kind: 'diagram'; database: string; schema: string }
   | { kind: 'keyspace'; database: string }
 )
@@ -36,9 +37,17 @@ export function newQueryTab(
 }
 
 /** Opens a table, or switches to it when it is already open. */
-export function openTableTab(state: TabsState, connectionId: string, table: TableRef): TabsState {
-  const id = `table:${connectionId}:${table.database}.${table.schema}.${table.name}`
-  return openTab(state, { id, kind: 'table', title: table.name, connectionId, table })
+export function openTableTab(
+  state: TabsState,
+  connectionId: string,
+  table: TableRef,
+  /** Opens the table already filtered, in a tab of its own (e.g. following a foreign key). */
+  filter?: RowFilter,
+): TabsState {
+  const base = `table:${connectionId}:${table.database}.${table.schema}.${table.name}`
+  if (!filter) return openTab(state, { id: base, kind: 'table', title: table.name, connectionId, table })
+  const title = `${table.name} · ${filter.filter}`
+  return openTab(state, { id: `${base}?${filter.filter}`, kind: 'table', title, connectionId, table, filter })
 }
 
 /** Opens a schema's ER diagram, or switches to it when it is already open. */

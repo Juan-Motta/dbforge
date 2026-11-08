@@ -183,3 +183,42 @@ td[data-menu-open] {
   font: 600 9.5px var(--font-sans);
   text-transform: uppercase;
 }
+
+.linked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.linkedText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Always there (no shift on hover), faint until the row is hovered. */
+.link {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text3);
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.grid tr:hover .link {
+  opacity: 1;
+}
+
+.link:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}

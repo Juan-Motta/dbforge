@@ -6,6 +6,8 @@ import { TabStrip } from '../components/TabStrip'
 import { DiagramView } from '../features/diagram/DiagramView'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
 import type { HistoryEntry } from '../features/history/api'
+import type { RowFilter } from '../features/table-data/rowFilter'
+import type { TableRef } from '../domain/table'
 import { KeyBrowser } from '../features/keyspace/KeyBrowser'
 import { QueryConsole } from '../features/query/QueryConsole'
 import { TablePage } from './TablePage'
@@ -23,6 +25,7 @@ interface WorkspaceProps {
   /** Opens a query from the history in a new console. */
   onOpenQuery: (entry: HistoryEntry) => void
   onOpenDiagram: (connectionId: string, database: string, schema: string) => void
+  onOpenTable: (connectionId: string, table: TableRef, filter: RowFilter) => void
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram', keyspace: 'database' } as const
@@ -37,6 +40,7 @@ export function Workspace({
   connectionOf,
   onOpenQuery,
   onOpenDiagram,
+  onOpenTable,
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
 
@@ -101,6 +105,8 @@ export function Workspace({
               onOpenSchemaDiagram={() =>
                 onOpenDiagram(tab.connectionId, tab.table.database, tab.table.schema)
               }
+              initialFilter={tab.filter}
+              onOpenTable={(table, filter) => onOpenTable(tab.connectionId, table, filter)}
               onExport={(filter) =>
                 setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table, filter })
               }
