@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addRow,
+  cellAt,
   counts,
   editCell,
   editNewCell,
@@ -85,5 +86,47 @@ describe('toChanges', () => {
       { kind: 'insert', values: { name: 'first' } },
       { kind: 'insert', values: { name: 'second' } },
     ])
+  })
+})
+
+describe('cellAt', () => {
+  const rows = [
+    ['1', 'Ann', null],
+    ['2', 'Bob', 'hi'],
+  ]
+
+  it('reads a loaded cell, with its pending edit', () => {
+    const edits = editCell(NO_EDITS, one, 'name', 'Anna', 'Ann')
+    expect(cellAt(edits, rows, columns, { row: 'row:0', column: 1 })).toEqual({
+      value: 'Anna',
+      unset: false,
+      deleted: false,
+    })
+    expect(cellAt(edits, rows, columns, { row: 'row:1', column: 2 })?.value).toBe('hi')
+  })
+
+  it('says when the row is marked for deletion', () => {
+    const edits = toggleDelete(NO_EDITS, one)
+    expect(cellAt(edits, rows, columns, { row: 'row:0', column: 1 })?.deleted).toBe(true)
+  })
+
+  it('reads a new row, with columns left to their DEFAULT', () => {
+    const edits = editNewCell(addRow(NO_EDITS), 1, 'name', 'Cy')
+    expect(cellAt(edits, rows, columns, { row: 'new:1', column: 1 })).toEqual({
+      value: 'Cy',
+      unset: false,
+      deleted: false,
+    })
+    expect(cellAt(edits, rows, columns, { row: 'new:1', column: 2 })).toEqual({
+      value: null,
+      unset: true,
+      deleted: false,
+    })
+  })
+
+  it('is null for a cell that is gone', () => {
+    expect(cellAt(NO_EDITS, rows, columns, { row: 'row:5', column: 1 })).toBeNull()
+    expect(cellAt(NO_EDITS, rows, columns, { row: 'new:9', column: 1 })).toBeNull()
+    expect(cellAt(NO_EDITS, rows, columns, { row: 'row:0', column: 7 })).toBeNull()
   })
 })

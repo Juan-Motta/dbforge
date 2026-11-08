@@ -14,6 +14,7 @@ import { tableDataApi, type ApplySummary } from './api'
 import { EditableGrid } from './EditableGrid'
 import {
   addRow,
+  cellAt,
   counts,
   editCell,
   editNewCell,
@@ -25,8 +26,10 @@ import {
   toChanges,
   toggleDelete,
   unsetNewCell,
+  type Cell,
   type Edits,
 } from './edits'
+import { CellInspector, type InspectedCell } from './CellInspector'
 import { FilterBar } from './FilterBar'
 import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, useRowsPage } from './useRowsPage'
@@ -85,6 +88,15 @@ export function TableView({
   const [status, setStatus] = useState<Status>({ state: 'idle' })
   const [preview, setPreview] = useState<string[] | null>(null)
   const [confirming, setConfirming] = useState(false)
+  // The cell a click picked, and whether the side panel shows its value.
+  const [picked, setPicked] = useState<Cell | null>(null)
+  const [inspecting, setInspecting] = useState(false)
+  // Another page, order or table: the picked cell is gone.
+  const [shownRows, setShownRows] = useState(page?.rows)
+  if (shownRows !== page?.rows) {
+    setShownRows(page?.rows)
+    setPicked(null)
+  }
 
   const columns = page?.columns ?? []
   const rows = page?.rows ?? []
@@ -161,72 +173,126 @@ export function TableView({
     }
   }
 
+  const noKey = 'This table has no primary key, so its rows cannot be identified safely to edit them'
+  const inspected = ((): InspectedCell | null => {
+    const cell = picked && cellAt(edits, rows, columns, picked)
+    if (!picked || !cell) return null
+    const column = columns[picked.column]
+    return {
+      column,
+      value: cell.value,
+      unset: cell.unset,
+      locked: !editable
+        ? noKey
+        : applying
+          ? 'Applying the changes'
+          : column.generated
+            ? 'Computed by the database, so it cannot be edited'
+            : cell.deleted
+              ? 'This row is marked for deletion'
+              : null,
+    }
+  })()
+
+  /** The inspector's text, as a pending edit of the picked cell. */
+  const saveInspected = (value: string) => {
+    if (!picked) return
+    const name = columns[picked.column].name
+    if (picked.row.startsWith('new:')) {
+      const id = Number(picked.row.slice(4))
+      change((current) => editNewCell(current, id, name, value))
+    } else {
+      const row = rows[Number(picked.row.slice(4))]
+      change((current) => editCell(current, keyOf(row, columns), name, value, row[picked.column]))
+    }
+  }
+
   const rowCount = rows.length
   // Moving to another page would hide pending rows; apply or discard first.
   const lockPaging = loading || pending
-  const noKey = 'This table has no primary key, so its rows cannot be identified safely to edit them'
 
   return (
     <section className={styles.view} aria-label={`${table.schema}.${table.name}`} onKeyDown={onKeyDown}>
       <FilterBar dialect={dialect} value={filter} onApply={onFilterChange} disabled={pending} />
-      {active &&
-        actionsSlot &&
-        createPortal(
-          <>
-            <IconButton
-              label={editable ? 'Add row' : noKey}
-              disabled={!editable || applying}
-              onClick={() => change(addRow)}
-            >
-              <Icon name="plus" />
-            </IconButton>
-            <IconButton
-              label={editable ? 'Delete selected rows' : noKey}
-              disabled={!editable || selected.size === 0 || applying}
-              onClick={deleteSelected}
-            >
-              <Icon name="trash" />
-            </IconButton>
-            <IconButton label="Reload rows" disabled={lockPaging} onClick={reload}>
-              <Icon name="refresh" />
-            </IconButton>
-          </>,
-          actionsSlot,
-        )}
+      <div className={styles.body}>
+        {active &&
+          actionsSlot &&
+          createPortal(
+            <>
+              <IconButton
+                label={editable ? 'Add row' : noKey}
+                disabled={!editable || applying}
+                onClick={() => change(addRow)}
+              >
+                <Icon name="plus" />
+              </IconButton>
+              <IconButton
+                label={editable ? 'Delete selected rows' : noKey}
+                disabled={!editable || selected.size === 0 || applying}
+                onClick={deleteSelected}
+              >
+                <Icon name="trash" />
+              </IconButton>
+              <IconButton label="Reload rows" disabled={lockPaging} onClick={reload}>
+                <Icon name="refresh" />
+              </IconButton>
+              <IconButton
+                label="Inspect the cell's value (⇧↵)"
+                active={inspecting}
+                onClick={() => setInspecting(!inspecting)}
+              >
+                <Icon name="eye" />
+              </IconButton>
+            </>,
+            actionsSlot,
+          )}
 
-      <div className={styles.content} aria-busy={loading}>
-        {error ? (
-          <p className={styles.error}>{error}</p>
-        ) : (
-          page && (
-            <EditableGrid
-              columns={columns}
-              rows={rows}
-              firstRowNumber={offset + 1}
-              edits={edits}
-              editable={editable && !applying}
-              selected={selected}
-              onSelect={select}
-              onEditCell={(r, c, value) =>
-                change((current) =>
-                  editCell(current, keyOf(rows[r], columns), columns[c].name, value, rows[r][c]),
-                )
-              }
-              onUnsetNewCell={(id, c) => change((current) => unsetNewCell(current, id, columns[c].name))}
-              onEditNewCell={(id, c, value) =>
-                change((current) => editNewCell(current, id, columns[c].name, value))
-              }
-              linkOf={(r, c) => {
-                const key = foreignKeys.find((k) => k.columns.includes(columns[c].name))
-                if (!key) return null
-                const values = Object.fromEntries(columns.map((column, i) => [column.name, rows[r][i]]))
-                const target = linkFilter(dialect, key, values)
-                return target && (() => onOpenTable(referencedTable(table, key.referencedTable), target))
-              }}
-              sortOf={(column) => sortOf(dialect, column, filter.order)}
-              onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
-            />
-          )
+        <div className={styles.content} aria-busy={loading}>
+          {error ? (
+            <p className={styles.error}>{error}</p>
+          ) : (
+            page && (
+              <EditableGrid
+                columns={columns}
+                rows={rows}
+                firstRowNumber={offset + 1}
+                edits={edits}
+                editable={editable && !applying}
+                selected={selected}
+                onSelect={select}
+                onEditCell={(r, c, value) =>
+                  change((current) =>
+                    editCell(current, keyOf(rows[r], columns), columns[c].name, value, rows[r][c]),
+                  )
+                }
+                onUnsetNewCell={(id, c) => change((current) => unsetNewCell(current, id, columns[c].name))}
+                onEditNewCell={(id, c, value) =>
+                  change((current) => editNewCell(current, id, columns[c].name, value))
+                }
+                linkOf={(r, c) => {
+                  const key = foreignKeys.find((k) => k.columns.includes(columns[c].name))
+                  if (!key) return null
+                  const values = Object.fromEntries(columns.map((column, i) => [column.name, rows[r][i]]))
+                  const target = linkFilter(dialect, key, values)
+                  return target && (() => onOpenTable(referencedTable(table, key.referencedTable), target))
+                }}
+                active={picked}
+                onActivate={setPicked}
+                onInspect={() => setInspecting(!inspecting)}
+                sortOf={(column) => sortOf(dialect, column, filter.order)}
+                onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
+              />
+            )
+          )}
+        </div>
+        {inspecting && (
+          <CellInspector
+            // Another cell, or a value just saved or reverted, starts a fresh draft.
+            key={picked ? `${picked.row}:${picked.column}:${inspected?.value}` : 'none'}
+            cell={inspected}
+            onSave={saveInspected}
+            onClose={() => setInspecting(false)}
+          />
         )}
       </div>
 

@@ -12,7 +12,7 @@ import { isNumericType, shortTypeName } from '../../components/data-grid/columns
 import { Icon } from '../../components/Icon'
 import { keepCursor } from '../../lib/cursor'
 import type { Column } from './api'
-import { keyOf, rowKey, type Edits } from './edits'
+import { cellAt, keyOf, rowKey, type Cell, type Edits } from './edits'
 import styles from './EditableGrid.module.css'
 
 type Value = string | null
@@ -38,6 +38,11 @@ interface EditableGridProps {
   sortOf?: (column: string) => 'asc' | 'desc' | null
   /** A header click: sorts by that column, then the other way, then not at all. */
   onSort?: (column: string) => void
+  /** The picked cell; a click picks one, the arrow keys move it, Escape lets go. */
+  active: Cell | null
+  onActivate: (cell: Cell | null) => void
+  /** Shift+Enter: shows the picked cell in the inspector. */
+  onInspect?: () => void
   /** Opens the row a foreign key column points to; `null` for other columns or NULL keys. */
   linkOf?: (row: number, column: number) => (() => void) | null
 }
@@ -55,7 +60,7 @@ const MOVES: Record<string, [number, number]> = {
 
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
-  const { columns, rows, firstRowNumber, edits, editable, selected, onSelect } = props
+  const { columns, rows, firstRowNumber, edits, editable, selected, onSelect, active, onActivate } = props
   const [editing, setEditing] = useState<{ at: Editing; column: number } | null>(null)
   const table = useRef<HTMLTableElement>(null)
   // A grid closed while it had focus gives the pointer back to the usual rules.
@@ -72,23 +77,15 @@ export function EditableGrid(props: EditableGridProps) {
     column: number
     state: CellState
   } | null>(null)
-  // The cell a click picked out, as `row:<index>` or `new:<id>` and a column.
-  const [active, setActive] = useState<{ id: string; column: number } | null>(null)
-  // Another page or table: the picked cell is gone.
-  const [shown, setShown] = useState(rows)
-  if (shown !== rows) {
-    setShown(rows)
-    setActive(null)
-  }
 
   /** Arrow keys move the picked cell, new rows first as they are shown. */
   const move = ([down, right]: [number, number]) => {
     if (!active) return
     const order = [...edits.inserts.map((r) => `new:${r.id}`), ...rows.map((_, r) => `row:${r}`)]
-    const at = order.indexOf(active.id)
-    const id = order[Math.min(order.length - 1, Math.max(0, at + down))]
+    const at = order.indexOf(active.row)
+    const row = order[Math.min(order.length - 1, Math.max(0, at + down))]
     const column = Math.min(columns.length - 1, Math.max(0, active.column + right))
-    setActive({ id, column })
+    onActivate({ row, column })
     // Once drawn, bring it into view past the sticky header and row numbers.
     requestAnimationFrame(() =>
       table.current
@@ -97,20 +94,6 @@ export function EditableGrid(props: EditableGridProps) {
     )
   }
 
-  /** The picked cell's value as shown, edits included; `undefined` when none is picked. */
-  const activeValue = (): Value | undefined => {
-    if (!active) return undefined
-    const name = columns[active.column]?.name
-    if (name === undefined) return undefined
-    if (active.id.startsWith('new:')) {
-      const row = edits.inserts.find((r) => `new:${r.id}` === active.id)
-      return row ? (row.values[name] ?? null) : undefined
-    }
-    const row = rows[Number(active.id.slice(4))]
-    if (!row) return undefined
-    const changed = edits.updates.get(rowKey(keyOf(row, columns)))?.values ?? {}
-    return name in changed ? changed[name] : row[active.column]
-  }
   const numeric = columns.map((c) => isNumericType(c.dataType))
   // Widths the user dragged a column to; the others fit their content.
   const [widths, setWidths] = useState<Record<string, number>>({})
@@ -190,7 +173,7 @@ export function EditableGrid(props: EditableGridProps) {
         ? 'row' in editing.at && editing.at.row === at.row
         : 'newRow' in editing.at && editing.at.newRow === at.newRow)
     const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
-    const isActive = active?.id === id && active.column === column
+    const isActive = active?.row === id && active.column === column
     // Edited or new values may not exist yet in the referenced table: only loaded ones link.
     const link = 'row' in at && !state.edited ? (props.linkOf?.(at.row, column) ?? null) : null
     const classes = [
@@ -242,7 +225,7 @@ export function EditableGrid(props: EditableGridProps) {
         className={classes.filter(Boolean).join(' ') || undefined}
         style={sized[column]}
         title={value ?? undefined}
-        onClick={() => setActive({ id, column })}
+        onClick={() => onActivate({ row: id, column })}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
         onContextMenu={
           editable && !state.locked
@@ -273,11 +256,14 @@ export function EditableGrid(props: EditableGridProps) {
         onKeyDown={(event) => {
           // Keys typed into the cell editor are its own.
           if (event.target instanceof HTMLInputElement) return
-          const value = activeValue()
-          if ((event.metaKey || event.ctrlKey) && event.key === 'c' && value !== undefined) {
+          const value = active && cellAt(edits, rows, columns, active)
+          if ((event.metaKey || event.ctrlKey) && event.key === 'c' && value) {
             event.preventDefault()
-            void navigator.clipboard.writeText(value ?? 'NULL')
-          } else if (event.key === 'Escape') setActive(null)
+            void navigator.clipboard.writeText(value.unset ? 'DEFAULT' : (value.value ?? 'NULL'))
+          } else if (event.key === 'Enter' && event.shiftKey && props.onInspect) {
+            event.preventDefault()
+            props.onInspect()
+          } else if (event.key === 'Escape') onActivate(null)
           else if (active && event.key in MOVES) {
             event.preventDefault()
             move(MOVES[event.key])

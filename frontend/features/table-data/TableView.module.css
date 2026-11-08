@@ -17,8 +17,16 @@
   white-space: nowrap;
 }
 
+/* The rows, and beside them the cell inspector. */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .content {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
 }

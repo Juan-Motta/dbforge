@@ -108,3 +108,35 @@ export function unsetNewCell(edits: Edits, id: number, column: string): Edits {
     }),
   }
 }
+
+/** A picked cell: of a loaded row (`row:<index>`) or a new one (`new:<id>`), and a column index. */
+export interface Cell {
+  row: string
+  column: number
+}
+
+/** A cell as the grid shows it, pending edits included; `null` when it is no longer there. */
+export function cellAt(
+  edits: Edits,
+  rows: Value[][],
+  columns: { name: string; primaryKey: boolean }[],
+  cell: Cell,
+): { value: Value; unset: boolean; deleted: boolean } | null {
+  const name = columns[cell.column]?.name
+  if (name === undefined) return null
+  if (cell.row.startsWith('new:')) {
+    const row = edits.inserts.find((r) => `new:${r.id}` === cell.row)
+    if (!row) return null
+    const unset = !(name in row.values)
+    return { value: unset ? null : row.values[name], unset, deleted: false }
+  }
+  const row = rows[Number(cell.row.slice(4))]
+  if (!row) return null
+  const id = rowKey(keyOf(row, columns))
+  const changed = edits.updates.get(id)?.values ?? {}
+  return {
+    value: name in changed ? changed[name] : row[cell.column],
+    unset: false,
+    deleted: edits.deletes.has(id),
+  }
+}
