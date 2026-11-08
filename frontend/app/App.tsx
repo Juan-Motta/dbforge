@@ -3,6 +3,8 @@ import { defaultDatabase, defaultSchema, hasDiagram, type Connection } from '../
 import { tableRefFromPath } from '../domain/table'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { useConnections } from '../features/connections/useConnections'
+import { ResizeHandle } from '../components/ResizeHandle'
+import { usePanelWidth } from '../components/usePanelWidth'
 import { Explorer } from '../features/explorer/Explorer'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
@@ -32,6 +34,12 @@ export function App() {
   const { connections, loadError, save, remove } = useConnections()
   // Hidden with ⌘B for more room; it stays mounted so its expanded nodes survive.
   const [explorerOpen, setExplorerOpen] = useState(true)
+  const [explorerWidth, setExplorerWidth, resetExplorerWidth] = usePanelWidth(
+    'dbforge.explorerWidth',
+    280,
+    200,
+    560,
+  )
   const [selection, setSelection] = useState<Selection | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [tabs, setTabs] = useState(NO_TABS)
@@ -126,7 +134,13 @@ export function App() {
       />
 
       <div className={styles.body}>
-        <div className={styles.explorerSlot} hidden={!explorerOpen}>
+        <div className={styles.explorerSlot} hidden={!explorerOpen} style={{ width: explorerWidth }}>
+          <ResizeHandle
+            edge="right"
+            label="Resize the explorer"
+            onResize={setExplorerWidth}
+            onReset={resetExplorerWidth}
+          />
           <Explorer
             connections={connections}
             onSelect={({ connectionId, path }) => setSelection({ connectionId, path })}

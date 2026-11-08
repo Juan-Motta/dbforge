@@ -1,6 +1,8 @@
 import { useState, type KeyboardEvent } from 'react'
 import Markdown from 'react-markdown'
 import { Button, IconButton } from '../../components/Button'
+import { ResizeHandle } from '../../components/ResizeHandle'
+import { usePanelWidth } from '../../components/usePanelWidth'
 import { CodeEditor } from '../../components/code/CodeEditor'
 import { Icon } from '../../components/Icon'
 import type { Column } from './api'
@@ -29,8 +31,10 @@ interface CellInspectorProps {
 /** A side panel with a cell's whole value: as text, as indented JSON, or as rendered Markdown. */
 export function CellInspector({ cell, onSave, onClose }: CellInspectorProps) {
   const [wrap, setWrap] = useState(true)
+  const [width, setWidth, resetWidth] = usePanelWidth('dbforge.inspectorWidth', 380, 260, 900)
   return (
-    <aside className={styles.panel} aria-label="Cell value">
+    <aside className={styles.panel} style={{ width }} aria-label="Cell value">
+      <ResizeHandle edge="left" label="Resize the panel" onResize={setWidth} onReset={resetWidth} />
       {cell ? (
         <Value cell={cell} wrap={wrap} onWrap={() => setWrap(!wrap)} onSave={onSave} onClose={onClose} />
       ) : (

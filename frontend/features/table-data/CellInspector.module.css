@@ -1,5 +1,5 @@
 .panel {
-  width: 380px;
+  position: relative;
   flex: none;
   min-height: 0;
   display: flex;

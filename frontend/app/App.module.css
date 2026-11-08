@@ -13,6 +13,7 @@
 }
 
 .explorerSlot {
+  position: relative;
   display: flex;
   flex: none;
 }

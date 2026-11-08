@@ -1,0 +1,23 @@
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.right {
+  right: -3px;
+}
+
+.left {
+  left: -3px;
+}
+
+/* A thin accent line shows where the edge is while pointing at or dragging it. */
+.handle:hover,
+.handle:active {
+  background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
+}
