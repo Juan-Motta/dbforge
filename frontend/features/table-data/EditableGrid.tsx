@@ -88,13 +88,6 @@ export function EditableGrid(props: EditableGridProps) {
       ('row' in at
         ? 'row' in editing.at && editing.at.row === at.row
         : 'newRow' in editing.at && editing.at.newRow === at.newRow)
-    if (isEditing) {
-      return (
-        <td key={column} className={styles.editingCell}>
-          <CellEditor initial={value} onCommit={commit} onCancel={() => setEditing(null)} />
-        </td>
-      )
-    }
     // Edited or new values may not exist yet in the referenced table: only loaded ones link.
     const link = 'row' in at && !state.edited ? (props.linkOf?.(at.row, column) ?? null) : null
     const classes = [
@@ -103,6 +96,39 @@ export function EditableGrid(props: EditableGridProps) {
       state.unset && styles.unset,
       state.edited && styles.edited,
     ]
+    const content = link ? (
+      <span className={styles.linked}>
+        <span className={styles.linkedText}>{value}</span>
+        <button
+          type="button"
+          className={styles.link}
+          aria-label={`Open the row ${value} points to`}
+          title="Open the referenced row"
+          onClick={(event) => {
+            event.stopPropagation()
+            link()
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <Icon name="external" size={12} />
+        </button>
+      </span>
+    ) : state.unset ? (
+      'DEFAULT'
+    ) : (
+      (value ?? 'NULL')
+    )
+    if (isEditing) {
+      // The editor lies over the cell, which keeps its content (unseen) and so its size.
+      return (
+        <td key={column} className={[...classes, styles.editingCell].filter(Boolean).join(' ')}>
+          <span className={styles.hidden} aria-hidden="true">
+            {content}
+          </span>
+          <CellEditor initial={value} onCommit={commit} onCancel={() => setEditing(null)} />
+        </td>
+      )
+    }
     return (
       <td
         key={column}
@@ -119,28 +145,7 @@ export function EditableGrid(props: EditableGridProps) {
         }
         data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
       >
-        {link ? (
-          <span className={styles.linked}>
-            <span className={styles.linkedText}>{value}</span>
-            <button
-              type="button"
-              className={styles.link}
-              aria-label={`Open the row ${value} points to`}
-              title="Open the referenced row"
-              onClick={(event) => {
-                event.stopPropagation()
-                link()
-              }}
-              onDoubleClick={(event) => event.stopPropagation()}
-            >
-              <Icon name="external" size={12} />
-            </button>
-          </span>
-        ) : state.unset ? (
-          'DEFAULT'
-        ) : (
-          (value ?? 'NULL')
-        )}
+        {content}
       </td>
     )
   }
