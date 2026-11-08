@@ -191,8 +191,3 @@
   color: var(--text2);
   font-size: 12px;
 }
-
-/* Holds its place without showing, so nothing around it moves. */
-.reserved {
-  visibility: hidden;
-}

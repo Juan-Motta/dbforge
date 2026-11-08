@@ -49,10 +49,9 @@ export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps)
     >
       {field('filter', labels.filter, labels.filterHint, '1 1 0')}
       {field('order', labels.order, labels.orderHint, '0 1 280px')}
-      {/* Always there, so the fields keep their width; only shown while a filter applies. */}
+      {/* Always there, so the fields keep their width; usable only while a filter applies. */}
       <IconButton
         label="Clear filter and order"
-        className={isFiltered(value) ? undefined : styles.reserved}
         disabled={disabled || !isFiltered(value)}
         onClick={() => onApply(NO_FILTER)}
       >
