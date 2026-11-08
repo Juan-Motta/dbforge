@@ -47,6 +47,17 @@ export function TablePage({
   return (
     <section className={styles.page}>
       <div className={styles.bar}>
+        {/* The table's actions on the left, its views on the right. */}
+        <span ref={setActionsSlot} className={styles.actions} />
+        <IconButton label="Export rows" onClick={() => onExport(filter)}>
+          <Icon name="download" />
+        </IconButton>
+        {view !== 'data' && view !== 'diagram' && (
+          <IconButton label="Reload structure" disabled={loading} onClick={reload}>
+            <Icon name="refresh" />
+          </IconButton>
+        )}
+        <span className={styles.spacer} />
         <div role="tablist" aria-label="Table views" className={styles.views}>
           <ViewTab label="Data" selected={view === 'data'} onSelect={() => setView('data')} />
           {SECTIONS.map(({ id, label }) => (
@@ -62,16 +73,6 @@ export function TablePage({
             <ViewTab label="Diagram" selected={view === 'diagram'} onSelect={() => setView('diagram')} />
           )}
         </div>
-        <span className={styles.spacer} />
-        <span ref={setActionsSlot} className={styles.actions} />
-        <IconButton label="Export rows" onClick={() => onExport(filter)}>
-          <Icon name="download" />
-        </IconButton>
-        {view !== 'data' && view !== 'diagram' && (
-          <IconButton label="Reload structure" disabled={loading} onClick={reload}>
-            <Icon name="refresh" />
-          </IconButton>
-        )}
       </div>
 
       {/* Data stays mounted so its page and scroll survive a look at the structure. */}
