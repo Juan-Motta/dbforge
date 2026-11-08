@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { isNumericType, shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
@@ -36,6 +36,7 @@ interface EditableGridProps {
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
 const COMPUTED = 'Computed by the database, so it cannot be edited'
+const MIN_WIDTH = 48
 
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
@@ -49,6 +50,44 @@ export function EditableGrid(props: EditableGridProps) {
     state: CellState
   } | null>(null)
   const numeric = columns.map((c) => isNumericType(c.dataType))
+  // Widths the user dragged a column to; the others fit their content.
+  const [widths, setWidths] = useState<Record<string, number>>({})
+  const sized = columns.map((c): CSSProperties | undefined => {
+    const width = widths[c.name]
+    return width === undefined
+      ? undefined
+      : { width, minWidth: width, maxWidth: width, boxSizing: 'border-box' }
+  })
+
+  /** Dragging a header's right edge sets that column's width. */
+  const startResize = (name: string) => (event: PointerEvent<HTMLElement>) => {
+    event.preventDefault()
+    const handle = event.currentTarget
+    const start = event.clientX
+    const initial = handle.parentElement!.getBoundingClientRect().width
+    handle.setPointerCapture(event.pointerId)
+    const move = (e: globalThis.PointerEvent) =>
+      setWidths((current) => ({
+        ...current,
+        [name]: Math.max(MIN_WIDTH, Math.round(initial + e.clientX - start)),
+      }))
+    const stop = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', stop)
+      handle.removeEventListener('pointercancel', stop)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', stop)
+    handle.addEventListener('pointercancel', stop)
+  }
+
+  /** A double click on the edge fits the column to its content again. */
+  const resetWidth = (name: string) =>
+    setWidths((current) => {
+      const next = { ...current }
+      delete next[name]
+      return next
+    })
 
   const setValue = (at: Editing, column: number, value: Value) => {
     if ('row' in at) props.onEditCell(at.row, column, value)
@@ -121,7 +160,11 @@ export function EditableGrid(props: EditableGridProps) {
     if (isEditing) {
       // The editor lies over the cell, which keeps its content (unseen) and so its size.
       return (
-        <td key={column} className={[...classes, styles.editingCell].filter(Boolean).join(' ')}>
+        <td
+          key={column}
+          className={[...classes, styles.editingCell].filter(Boolean).join(' ')}
+          style={sized[column]}
+        >
           <span className={styles.hidden} aria-hidden="true">
             {content}
           </span>
@@ -133,6 +176,7 @@ export function EditableGrid(props: EditableGridProps) {
       <td
         key={column}
         className={classes.filter(Boolean).join(' ') || undefined}
+        style={sized[column]}
         title={value ?? undefined}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
         onContextMenu={
@@ -156,11 +200,12 @@ export function EditableGrid(props: EditableGridProps) {
         <thead>
           <tr>
             <th className={styles.rowNumber}>#</th>
-            {columns.map((column) => {
+            {columns.map((column, c) => {
               const sorted = props.sortOf?.(column.name) ?? null
               return (
                 <th
                   key={column.name}
+                  style={sized[c]}
                   title={column.generated ? `${column.dataType} · ${COMPUTED}` : column.dataType}
                   aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
                 >
@@ -171,7 +216,7 @@ export function EditableGrid(props: EditableGridProps) {
                     onClick={() => props.onSort?.(column.name)}
                   >
                     {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
-                    {column.name}
+                    <span className={styles.name}>{column.name}</span>
                     {column.generated && <span className={styles.computed}>auto</span>}
                     <span className={styles.type}>{shortTypeName(column.dataType)}</span>
                     {props.onSort && (
@@ -184,6 +229,12 @@ export function EditableGrid(props: EditableGridProps) {
                       />
                     )}
                   </button>
+                  <span
+                    className={styles.resize}
+                    aria-hidden="true"
+                    onPointerDown={startResize(column.name)}
+                    onDoubleClick={() => resetWidth(column.name)}
+                  />
                 </th>
               )
             })}

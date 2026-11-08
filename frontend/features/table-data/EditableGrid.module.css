@@ -50,6 +50,35 @@
   cursor: pointer;
 }
 
+.name,
+.type {
+  /* A narrowed column cuts its name and type, never the sort mark. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header svg {
+  flex: none;
+}
+
+/* The header's right edge: drag it to size the column, double-click to fit it again. */
+.resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize:hover,
+.resize:active {
+  background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
+}
+
 .header:disabled {
   cursor: default;
 }
