@@ -301,8 +301,13 @@ impl Call<'_> {
 }
 
 fn count_result(count: u64) -> StatementResult {
-    let column =
-        crate::drivers::Column { name: "count".into(), data_type: "long".into(), primary_key: false, generated: false };
+    let column = crate::drivers::Column {
+        name: "count".into(),
+        data_type: "long".into(),
+        primary_key: false,
+        generated: false,
+        default: None,
+    };
     StatementResult {
         columns: vec![column],
         rows: vec![vec![text(&Bson::Int64(count as i64))]],

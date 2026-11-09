@@ -63,18 +63,57 @@ pub struct RelationList {
     pub relations: Vec<Relation>,
 }
 
-/// One edit to a table row. Keys and values are the server's text form; `None` is NULL.
+/// A value written to a cell: the server's text form, NULL, or the column's DEFAULT.
+/// On the wire it is a string, `null`, or `{"kind": "default"}`, so a cell holding
+/// the text `DEFAULT` stays text.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(from = "WireValue")]
+pub enum CellValue {
+    Text(String),
+    Null,
+    Default,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WireValue {
+    Value(Option<String>),
+    Keyword { kind: Keyword },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum Keyword {
+    Default,
+}
+
+impl From<WireValue> for CellValue {
+    fn from(wire: WireValue) -> Self {
+        match wire {
+            WireValue::Value(value) => value.into(),
+            WireValue::Keyword { kind: Keyword::Default } => CellValue::Default,
+        }
+    }
+}
+
+impl From<Option<String>> for CellValue {
+    fn from(value: Option<String>) -> Self {
+        value.map_or(CellValue::Null, CellValue::Text)
+    }
+}
+
+/// One edit to a table row. Keys are the server's text form; `None` is NULL.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum RowChange {
     /// `key` holds every primary key column with the value the row was loaded with.
     Update {
         key: BTreeMap<String, Option<String>>,
-        values: BTreeMap<String, Option<String>>,
+        values: BTreeMap<String, CellValue>,
     },
     /// Columns left out take their DEFAULT.
     Insert {
-        values: BTreeMap<String, Option<String>>,
+        values: BTreeMap<String, CellValue>,
     },
     Delete {
         key: BTreeMap<String, Option<String>>,
@@ -108,6 +147,10 @@ pub struct Column {
     /// GENERATED ALWAYS), so it can't be given a value.
     #[serde(default)]
     pub generated: bool,
+    /// The column's DEFAULT expression, where an engine needs it written out to
+    /// put a value back to its default. Not sent to the UI.
+    #[serde(skip)]
+    pub default: Option<String>,
 }
 
 /// Receives a result one row at a time, so it never has to fit in memory.

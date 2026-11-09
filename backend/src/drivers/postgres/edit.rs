@@ -8,7 +8,7 @@ use sqlx::{AssertSqlSafe, Connection as _};
 
 use super::{connect, with_timeout};
 use crate::connections::model::Connection;
-use crate::drivers::edit_sql::{self, Dialect};
+use crate::drivers::edit_sql::{self, Dialect, default_keyword};
 use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
 use crate::error::Result;
 
@@ -20,6 +20,7 @@ const POSTGRES: Dialect = Dialect {
     default_row: "DEFAULT VALUES",
     backslash_escapes: false,
     string_prefix: "",
+    default_value: default_keyword,
 };
 
 pub async fn apply_changes(
@@ -88,7 +89,13 @@ async fn editable_columns(conn: &mut PgConnection, table: &TableRef) -> Result<V
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(name, data_type, primary_key, generated)| Column { name, data_type, primary_key, generated })
+        .map(|(name, data_type, primary_key, generated)| Column {
+            name,
+            data_type,
+            primary_key,
+            generated,
+            default: None,
+        })
         .collect())
 }
 
@@ -100,9 +107,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::drivers::CellValue;
 
-    fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from))).collect()
+    /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
+    fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from).into())).collect()
     }
 
     fn items() -> TableRef {
@@ -134,6 +143,21 @@ mod tests {
         );
         INSERT INTO dbforge_edit.items VALUES (1, 'one', 1, 'new'), (2, 'two', 2, NULL), (3, 'three', 3, NULL);
         CREATE TABLE dbforge_edit.loose (name text);";
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn puts_a_column_back_to_its_default() {
+        let mut conn = run(&SETUP.replace("dbforge_edit", "dbforge_edit6")).await;
+        let changes = [RowChange::Update {
+            key: map(&[("id", Some("1"))]),
+            values: [("qty".to_string(), CellValue::Default)].into(),
+        }];
+        let table = TableRef { schema: "dbforge_edit6".into(), ..items() };
+        apply_changes(&local(), PASSWORD, &table, &changes).await.unwrap();
+        let qty: i32 =
+            sqlx::query_scalar("SELECT qty FROM dbforge_edit6.items WHERE id = 1").fetch_one(&mut conn).await.unwrap();
+        assert_eq!(qty, 5);
+    }
 
     #[tokio::test]
     #[ignore = "needs a local PostgreSQL on port 55432"]

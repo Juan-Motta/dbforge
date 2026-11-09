@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{ApplySummary, Column, RowChange, TableRef};
+use super::{ApplySummary, CellValue, Column, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
 pub struct Dialect {
@@ -24,6 +24,14 @@ pub struct Dialect {
     pub backslash_escapes: bool,
     /// Written before a string literal, like SQL Server's `N` for Unicode text.
     pub string_prefix: &'static str,
+    /// How a column takes its DEFAULT, given its default expression: the `DEFAULT`
+    /// keyword, or the expression itself where `SET c = DEFAULT` doesn't exist (SQLite).
+    pub default_value: fn(expression: Option<&str>) -> String,
+}
+
+/// The `DEFAULT` keyword, for engines that accept it in UPDATE and INSERT.
+pub fn default_keyword(_: Option<&str>) -> String {
+    "DEFAULT".to_string()
 }
 
 /// One statement with its parameters, in marker order.
@@ -43,7 +51,7 @@ pub fn changed_elsewhere(key: &str) -> AppError {
 }
 
 pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &[RowChange]) -> Result<Vec<Statement>> {
-    let types: BTreeMap<&str, &str> = columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str())).collect();
+    let known: BTreeMap<&str, &Column> = columns.iter().map(|c| (c.name.as_str(), c)).collect();
     let primary_key: BTreeSet<&str> = columns.iter().filter(|c| c.primary_key).map(|c| c.name.as_str()).collect();
     if primary_key.is_empty() {
         return Err(AppError::Invalid(format!(
@@ -63,7 +71,7 @@ pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &
             return Err(AppError::Invalid(format!("{name} is computed by the database and can't be set.")));
         }
     }
-    let builder = Builder { dialect, types };
+    let builder = Builder { dialect, columns: known };
     let relation = format!("{}.{}", builder.quote(&table.schema), builder.quote(&table.name));
 
     changes
@@ -113,7 +121,7 @@ pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &
 
 struct Builder<'a> {
     dialect: &'a Dialect,
-    types: BTreeMap<&'a str, &'a str>,
+    columns: BTreeMap<&'a str, &'a Column>,
 }
 
 impl Builder<'_> {
@@ -125,7 +133,7 @@ impl Builder<'_> {
     /// `"name" = <value>, …`
     fn assignments(
         &self,
-        values: &BTreeMap<String, Option<String>>,
+        values: &BTreeMap<String, CellValue>,
         params: &mut Vec<Option<String>>,
         separator: &str,
     ) -> Result<String> {
@@ -147,13 +155,20 @@ impl Builder<'_> {
         if &given != primary_key || key.values().any(Option::is_none) {
             return Err(AppError::Invalid("A row must be identified by its full primary key.".into()));
         }
-        self.assignments(key, params, " AND ")
+        let key: BTreeMap<String, CellValue> =
+            key.iter().map(|(name, value)| (name.clone(), value.clone().into())).collect();
+        self.assignments(&key, params, " AND ")
     }
 
-    /// Adds the value as a parameter of a known column.
-    fn value(&self, name: &str, value: &Option<String>, params: &mut Vec<Option<String>>) -> Result<String> {
-        let data_type = self.types.get(name).ok_or_else(|| AppError::Invalid(format!("Unknown column: {name}")))?;
-        params.push(value.clone());
+    /// Adds the value as a parameter of a known column; DEFAULT is written out instead.
+    fn value(&self, name: &str, value: &CellValue, params: &mut Vec<Option<String>>) -> Result<String> {
+        let column = self.columns.get(name).ok_or_else(|| AppError::Invalid(format!("Unknown column: {name}")))?;
+        params.push(match value {
+            CellValue::Text(text) => Some(text.clone()),
+            CellValue::Null => None,
+            CellValue::Default => return Ok((self.dialect.default_value)(column.default.as_deref())),
+        });
+        let data_type = column.data_type.as_str();
         let marker = match self.dialect.numbered {
             Some(prefix) => format!("{prefix}{}", params.len()),
             None => "?".to_string(),
@@ -246,6 +261,7 @@ mod tests {
         default_row: "DEFAULT VALUES",
         backslash_escapes: false,
         string_prefix: "",
+        default_value: default_keyword,
     };
     const QUESTION: Dialect = Dialect {
         quote: ['`', '`'],
@@ -254,6 +270,7 @@ mod tests {
         default_row: "() VALUES ()",
         backslash_escapes: true,
         string_prefix: "",
+        default_value: default_keyword,
     };
     const BRACKETS: Dialect = Dialect {
         quote: ['[', ']'],
@@ -262,6 +279,7 @@ mod tests {
         default_row: "DEFAULT VALUES",
         backslash_escapes: false,
         string_prefix: "N",
+        default_value: default_keyword,
     };
 
     fn statement(sql: &str, params: &[Option<&str>]) -> Statement {
@@ -286,7 +304,8 @@ mod tests {
 
     #[test]
     fn quoting_doubles_the_closing_character() {
-        let column = Column { name: "a]b".into(), data_type: "int".into(), primary_key: true, generated: false };
+        let column =
+            Column { name: "a]b".into(), data_type: "int".into(), primary_key: true, generated: false, default: None };
         let table = TableRef { database: "db".into(), schema: "dbo".into(), name: "t".into() };
         let key: BTreeMap<String, Option<String>> = [("a]b".to_string(), Some("1".to_string()))].into();
         let [delete] = build(&BRACKETS, &[column], &table, &[RowChange::Delete { key }]).unwrap().try_into().unwrap();
@@ -307,10 +326,11 @@ mod tests {
             data_type: "int".into(),
             primary_key,
             generated,
+            default: None,
         };
         let columns = [column("id", true, false), column("doubled", false, true)];
         let table = TableRef { database: "db".into(), schema: "s".into(), name: "t".into() };
-        let values: BTreeMap<String, Option<String>> = [("doubled".to_string(), Some("2".to_string()))].into();
+        let values: BTreeMap<String, CellValue> = [("doubled".to_string(), CellValue::Text("2".into()))].into();
 
         let error = build(&QUESTION, &columns, &table, &[RowChange::Insert { values }]).unwrap_err();
         assert!(error.to_string().contains("doubled is computed"), "{error}");
@@ -318,6 +338,42 @@ mod tests {
         // Its key may still identify a row, and a delete never sets values.
         let key: BTreeMap<String, Option<String>> = [("id".to_string(), Some("1".to_string()))].into();
         assert!(build(&QUESTION, &columns, &table, &[RowChange::Delete { key }]).is_ok());
+    }
+
+    #[test]
+    fn default_is_written_out_never_sent_as_a_parameter() {
+        let column = |name: &str, primary_key| Column {
+            name: name.into(),
+            data_type: "int".into(),
+            primary_key,
+            generated: false,
+            default: Some("7".into()),
+        };
+        let columns = [column("id", true), column("qty", false)];
+        let table = TableRef { database: "db".into(), schema: "s".into(), name: "t".into() };
+        let key: BTreeMap<String, Option<String>> = [("id".to_string(), Some("1".to_string()))].into();
+        let values: BTreeMap<String, CellValue> = [("qty".to_string(), CellValue::Default)].into();
+        let changes = [RowChange::Update { key, values: values.clone() }, RowChange::Insert { values }];
+
+        let [update, insert] = build(&DOLLAR, &columns, &table, &changes).unwrap().try_into().unwrap();
+        assert_eq!(update.sql, r#"UPDATE "s"."t" SET "qty" = DEFAULT WHERE "id" = $1"#);
+        assert_eq!(update.params, [Some("1".to_string())]);
+        assert_eq!(insert.sql, r#"INSERT INTO "s"."t" ("qty") VALUES (DEFAULT)"#);
+
+        // An engine without the keyword writes the column's expression.
+        let written_out = Dialect { default_value: |e| format!("({})", e.unwrap()), ..DOLLAR };
+        let [update, _] = build(&written_out, &columns, &table, &changes).unwrap().try_into().unwrap();
+        assert_eq!(update.sql, r#"UPDATE "s"."t" SET "qty" = (7) WHERE "id" = $1"#);
+    }
+
+    #[test]
+    fn a_cell_value_reads_text_null_or_default() {
+        let read = |json: &str| serde_json::from_str::<CellValue>(json).unwrap();
+        assert_eq!(read(r#""x""#), CellValue::Text("x".into()));
+        assert_eq!(read("null"), CellValue::Null);
+        assert_eq!(read(r#"{"kind":"default"}"#), CellValue::Default);
+        // The text DEFAULT is a value like any other.
+        assert_eq!(read(r#""DEFAULT""#), CellValue::Text("DEFAULT".into()));
     }
 
     #[test]

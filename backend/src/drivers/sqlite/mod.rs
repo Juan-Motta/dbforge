@@ -129,23 +129,26 @@ pub async fn stream_table(
 
 /// Columns from `table_xinfo`, which also lists generated columns. Its `hidden`
 /// is 2 or 3 for those, and 1 for virtual-table internals, which are left out.
+/// `dflt_value` is the DEFAULT as SQL text, which edits write out to restore it.
 async fn table_columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<Column>> {
-    let rows: Vec<(String, String, i64, i64)> =
-        sqlx::query_as("SELECT name, type, pk, hidden FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid")
-            .bind(table)
-            .fetch_all(conn)
-            .await?;
+    let rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
+        "SELECT name, type, pk, hidden, dflt_value FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid",
+    )
+    .bind(table)
+    .fetch_all(conn)
+    .await?;
     if rows.is_empty() {
         return Err(AppError::Invalid(format!("Table {table} not found")));
     }
     Ok(rows
         .into_iter()
-        .map(|(name, data_type, pk, hidden)| Column {
+        .map(|(name, data_type, pk, hidden, default)| Column {
             name,
             // Columns may have no declared type at all.
             data_type: if data_type.is_empty() { "any".into() } else { data_type.to_lowercase() },
             primary_key: pk > 0,
             generated: hidden >= 2,
+            default,
         })
         .collect())
 }
@@ -297,6 +300,7 @@ fn columns_of(row: &SqliteRow) -> Vec<Column> {
             data_type: c.type_info().name().to_lowercase(),
             primary_key: false,
             generated: false,
+            default: None,
         })
         .collect()
 }

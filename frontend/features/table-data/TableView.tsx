@@ -7,7 +7,7 @@ import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import type { SqlDialect } from '../../domain/connection'
 import type { TableRef } from '../../domain/table'
-import type { ForeignKey } from '../table-structure/api'
+import type { ColumnInfo, ForeignKey } from '../table-structure/api'
 import { linkFilter, referencedTable } from './foreignLinks'
 import { errorMessage } from '../../lib/errors'
 import { tableDataApi, type ApplySummary } from './api'
@@ -52,6 +52,8 @@ interface TableViewProps {
   summary: string
   /** The table's foreign keys: their columns link to the rows they point to. */
   foreignKeys: ForeignKey[]
+  /** The table's columns as its structure describes them, once loaded: which take NULL or have a DEFAULT. */
+  columnInfo?: ColumnInfo[]
   /** Opens a table filtered to the rows a foreign key points to. */
   onOpenTable: (table: TableRef, filter: RowFilter) => void
 }
@@ -74,6 +76,7 @@ export function TableView({
   active,
   summary,
   foreignKeys,
+  columnInfo,
   onOpenTable,
 }: TableViewProps) {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
@@ -276,6 +279,7 @@ export function TableView({
                   const target = linkFilter(dialect, key, values)
                   return target && (() => onOpenTable(referencedTable(table, key.referencedTable), target))
                 }}
+                columnInfo={columnInfo && Object.fromEntries(columnInfo.map((c) => [c.name, c]))}
                 active={picked}
                 onActivate={setPicked}
                 onInspect={() => setInspecting(!inspecting)}

@@ -3,6 +3,7 @@ import {
   addRow,
   cellAt,
   counts,
+  DEFAULT,
   editCell,
   editNewCell,
   hasEdits,
@@ -128,5 +129,21 @@ describe('cellAt', () => {
     expect(cellAt(NO_EDITS, rows, columns, { row: 'row:5', column: 1 })).toBeNull()
     expect(cellAt(NO_EDITS, rows, columns, { row: 'new:9', column: 1 })).toBeNull()
     expect(cellAt(NO_EDITS, rows, columns, { row: 'row:0', column: 7 })).toBeNull()
+  })
+})
+
+describe('DEFAULT', () => {
+  it('is a pending change of a loaded row, read back as a DEFAULT cell', () => {
+    const edits = editCell(NO_EDITS, one, 'note', DEFAULT, null)
+    expect(toChanges(edits)).toEqual([{ kind: 'update', key: one, values: { note: DEFAULT } }])
+    expect(cellAt(edits, [['1', 'Ann', null]], columns, { row: 'row:0', column: 2 })).toEqual({
+      value: null,
+      unset: true,
+      deleted: false,
+    })
+  })
+
+  it('goes over the wire as a marker, not as the text DEFAULT', () => {
+    expect(JSON.stringify({ a: DEFAULT, b: 'DEFAULT' })).toBe('{"a":{"kind":"default"},"b":"DEFAULT"}')
   })
 })

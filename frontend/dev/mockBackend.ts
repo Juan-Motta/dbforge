@@ -153,6 +153,7 @@ export function installMockBackend() {
             id % 7 === 0 ? null : (id * 13.37).toFixed(2),
             '2026-11-05 10:00:00+00',
             id % 5 === 0 ? null : String(1000 + (id % 9)),
+            `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
           ]
         })
         return delay({
@@ -162,6 +163,7 @@ export function installMockBackend() {
             { name: 'revenue', dataType: 'numeric(10,2)', primaryKey: false },
             { name: 'created_at', dataType: 'timestamp with time zone', primaryKey: false, generated: true },
             { name: 'customer_id', dataType: 'bigint', primaryKey: false },
+            { name: 'external_id', dataType: 'uuid', primaryKey: false },
           ],
           rows,
           hasMore: offset + count < total,
@@ -313,6 +315,15 @@ const mockStructure = {
       comment: 'ISO 3166-1',
     },
     { name: 'referrer_id', dataType: 'bigint', nullable: true, default: null, comment: null },
+    { name: 'revenue', dataType: 'numeric(10,2)', nullable: true, default: '0', comment: null },
+    { name: 'customer_id', dataType: 'bigint', nullable: true, default: null, comment: null },
+    {
+      name: 'external_id',
+      dataType: 'uuid',
+      nullable: false,
+      default: 'gen_random_uuid()',
+      comment: null,
+    },
     {
       name: 'created_at',
       dataType: 'timestamp with time zone',

@@ -11,7 +11,7 @@ use sqlx::{AssertSqlSafe, Connection as _};
 
 use super::{connect, is_generated, with_timeout};
 use crate::connections::model::Connection;
-use crate::drivers::edit_sql::{self, Dialect};
+use crate::drivers::edit_sql::{self, Dialect, default_keyword};
 use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
@@ -22,6 +22,7 @@ const MYSQL: Dialect = Dialect {
     default_row: "() VALUES ()",
     backslash_escapes: true,
     string_prefix: "",
+    default_value: default_keyword,
 };
 
 pub async fn apply_changes(
@@ -113,6 +114,7 @@ async fn editable_columns(conn: &mut MySqlConnection, table: &TableRef) -> Resul
             data_type,
             primary_key: primary != 0,
             generated: is_generated(&extra),
+            default: None,
         })
         .collect())
 }
@@ -124,8 +126,9 @@ mod tests {
     use super::super::tests::{PASSWORD, run, servers, table};
     use super::*;
 
-    fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from))).collect()
+    /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
+    fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from).into())).collect()
     }
 
     fn setup(database: &str) -> String {

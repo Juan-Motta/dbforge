@@ -189,6 +189,7 @@ async fn table_columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<V
             data_type,
             primary_key: key == "PRI",
             generated: is_generated(&extra),
+            default: None,
         })
         .collect())
 }
@@ -289,6 +290,7 @@ fn columns_of(row: &MySqlRow) -> Vec<Column> {
             data_type: c.type_info().name().to_lowercase(),
             primary_key: false,
             generated: false,
+            default: None,
         })
         .collect()
 }

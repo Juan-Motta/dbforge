@@ -273,6 +273,7 @@ async fn table_columns(client: &mut Client, table: &TableRef) -> Result<Vec<Colu
                 data_type: type_name(&text(1), &text(2), &text(3), &text(4)),
                 primary_key: text(5) == "1",
                 generated: text(6) == "1",
+                default: None,
             }
         })
         .collect())
@@ -414,6 +415,7 @@ async fn read_results(client: &mut Client, sql: &str, row_limit: usize) -> Resul
                         data_type: column_type(c.column_type()).into(),
                         primary_key: false,
                         generated: false,
+                        default: None,
                     })
                     .collect(),
                 ..Default::default()

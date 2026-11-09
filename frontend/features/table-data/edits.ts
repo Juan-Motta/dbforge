@@ -6,9 +6,19 @@
 type Value = string | null
 type Values = Record<string, Value>
 
+/** Puts a cell back to its column's DEFAULT; sent as `{"kind": "default"}`, so the text DEFAULT stays text. */
+export const DEFAULT = { kind: 'default' } as const
+
+/** What a cell of a loaded row can be set to: text, NULL, or its DEFAULT. */
+export type CellValue = Value | typeof DEFAULT
+
+export function isDefault(value: CellValue): value is typeof DEFAULT {
+  return value === DEFAULT
+}
+
 export interface Edits {
   /** Changed cells of loaded rows, by row key. */
-  updates: Map<string, { key: Values; values: Values }>
+  updates: Map<string, { key: Values; values: Record<string, CellValue> }>
   /** Rows marked for deletion, by row key. */
   deletes: Map<string, Values>
   /** New rows, newest first; only the columns the user set (the rest take their DEFAULT). */
@@ -19,7 +29,7 @@ export const NO_EDITS: Edits = { updates: new Map(), deletes: new Map(), inserts
 
 /** What the backend's `apply_changes` expects. */
 export type RowChange =
-  | { kind: 'update'; key: Values; values: Values }
+  | { kind: 'update'; key: Values; values: Record<string, CellValue> }
   | { kind: 'insert'; values: Values }
   | { kind: 'delete'; key: Values }
 
@@ -33,7 +43,13 @@ export function rowKey(key: Values): string {
 }
 
 /** Sets a cell of a loaded row; setting it back to what was loaded drops the change. */
-export function editCell(edits: Edits, key: Values, column: string, value: Value, original: Value): Edits {
+export function editCell(
+  edits: Edits,
+  key: Values,
+  column: string,
+  value: CellValue,
+  original: Value,
+): Edits {
   const id = rowKey(key)
   const current = edits.updates.get(id)?.values ?? {}
   const values = { ...current }
@@ -115,7 +131,7 @@ export interface Cell {
   column: number
 }
 
-/** A cell as the grid shows it, pending edits included; `null` when it is no longer there. */
+/** A cell as the grid shows it, pending edits included; `null` when it is no longer there. `unset` cells take their DEFAULT. */
 export function cellAt(
   edits: Edits,
   rows: Value[][],
@@ -134,9 +150,8 @@ export function cellAt(
   if (!row) return null
   const id = rowKey(keyOf(row, columns))
   const changed = edits.updates.get(id)?.values ?? {}
-  return {
-    value: name in changed ? changed[name] : row[cell.column],
-    unset: false,
-    deleted: edits.deletes.has(id),
-  }
+  const value = name in changed ? changed[name] : row[cell.column]
+  return isDefault(value)
+    ? { value: null, unset: true, deleted: edits.deletes.has(id) }
+    : { value, unset: false, deleted: edits.deletes.has(id) }
 }

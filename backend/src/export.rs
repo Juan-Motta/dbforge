@@ -247,6 +247,7 @@ mod tests {
                 data_type: data_type.into(),
                 primary_key: false,
                 generated: false,
+                default: None,
             })
             .to_vec()
     }
@@ -310,8 +311,13 @@ mod tests {
     #[test]
     fn markdown_escapes_pipes_and_line_breaks() {
         let mut out = Vec::new();
-        let columns =
-            vec![Column { name: "note".into(), data_type: "text".into(), primary_key: false, generated: false }];
+        let columns = vec![Column {
+            name: "note".into(),
+            data_type: "text".into(),
+            primary_key: false,
+            generated: false,
+            default: None,
+        }];
         write_rows(&mut out, Format::Markdown, "t", &columns, &[vec![Some("a|b\nc".into())], vec![None]]).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "| note |\n| --- |\n| a\\|b c |\n| NULL |\n");
     }

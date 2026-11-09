@@ -8,7 +8,7 @@ use tiberius::Query;
 
 use super::{Client, connect, table_columns, with_timeout};
 use crate::connections::model::Connection;
-use crate::drivers::edit_sql::{self, Dialect};
+use crate::drivers::edit_sql::{self, Dialect, default_keyword};
 use crate::drivers::{ApplySummary, RowChange, TableRef};
 use crate::error::Result;
 
@@ -19,6 +19,7 @@ const SQLSERVER: Dialect = Dialect {
     default_row: "DEFAULT VALUES",
     backslash_escapes: false,
     string_prefix: "N",
+    default_value: default_keyword,
 };
 
 /// Text converts implicitly to every type but these: binary takes the `0x…`
@@ -88,8 +89,9 @@ mod tests {
     use super::super::tests::{PASSWORD, database, table};
     use super::*;
 
-    fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from))).collect()
+    /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
+    fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from).into())).collect()
     }
 
     const ITEMS: &str = "

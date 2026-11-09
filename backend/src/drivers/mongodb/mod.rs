@@ -297,7 +297,13 @@ fn ordered_columns<'a>(documents: impl Iterator<Item = &'a Document>, extra: BTr
     }
     names
         .into_iter()
-        .map(|name| Column { primary_key: name == "_id", name, data_type: String::new(), generated: false })
+        .map(|name| Column {
+            primary_key: name == "_id",
+            name,
+            data_type: String::new(),
+            generated: false,
+            default: None,
+        })
         .collect()
 }
 

@@ -192,7 +192,7 @@ async fn table_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<
     .fetch_all(conn)
     .await?
     .into_iter()
-    .map(|(name, data_type, primary_key, generated)| Column { name, data_type, primary_key, generated })
+    .map(|(name, data_type, primary_key, generated)| Column { name, data_type, primary_key, generated, default: None })
     .collect();
 
     if columns.is_empty() {
@@ -314,6 +314,7 @@ fn columns_of(row: &PgRow) -> Vec<Column> {
             data_type: c.type_info().name().to_lowercase(),
             primary_key: false,
             generated: false,
+            default: None,
         })
         .collect()
 }

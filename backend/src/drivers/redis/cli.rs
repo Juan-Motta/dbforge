@@ -64,8 +64,13 @@ impl Session {
                     Err(error) => return Err(error.into()),
                 }
             };
-            let column =
-                Column { name: "reply".into(), data_type: "redis".into(), primary_key: false, generated: false };
+            let column = Column {
+                name: "reply".into(),
+                data_type: "redis".into(),
+                primary_key: false,
+                generated: false,
+                default: None,
+            };
             results.push(StatementResult {
                 columns: vec![column],
                 rows: lines.into_iter().map(|line| vec![Some(line)]).collect(),

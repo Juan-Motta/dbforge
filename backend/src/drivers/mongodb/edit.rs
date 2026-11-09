@@ -21,7 +21,7 @@ use super::shell::{date, parse_value};
 use super::{columns_of, connect, literal, type_name};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{changed_elsewhere, summarize};
-use crate::drivers::{ApplySummary, RowChange, TableRef};
+use crate::drivers::{ApplySummary, CellValue, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
 /// Documents read to learn the type of a field a document doesn't have.
@@ -168,10 +168,11 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                         ));
                     }
                     match text {
-                        None => {
+                        // A document has no column defaults: a field at its default is a field it lacks.
+                        CellValue::Null | CellValue::Default => {
                             unset.insert(field, "");
                         }
-                        Some(text) => {
+                        CellValue::Text(text) => {
                             let current = document.get(field).filter(|v| !matches!(v, Bson::Null | Bson::Undefined));
                             let kind = current.map(type_name).or_else(|| known.get(field).map(String::as_str));
                             set.insert(field, convert(field, text, kind)?);
@@ -186,7 +187,7 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                 let mut fields: Vec<_> = values.iter().collect();
                 fields.sort_by_key(|(field, _)| field.as_str() != "_id");
                 for (field, text) in fields {
-                    if let Some(text) = text {
+                    if let CellValue::Text(text) = text {
                         document.insert(field, convert(field, text, known.get(field).map(String::as_str))?);
                     }
                 }
@@ -272,8 +273,9 @@ mod tests {
     use super::super::tests::{PASSWORD, database, table};
     use super::*;
 
-    fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from))).collect()
+    /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
+    fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from).into())).collect()
     }
 
     const ID: &str = "65a0f0f0f0f0f0f0f0f0f0f0";

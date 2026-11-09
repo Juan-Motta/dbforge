@@ -8,11 +8,11 @@ import {
   type PointerEvent,
 } from 'react'
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
-import { isNumericType, shortTypeName } from '../../components/data-grid/columns'
+import { isNumericType, isUuidType, shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
 import { keepCursor } from '../../lib/cursor'
 import type { Column } from './api'
-import { cellAt, keyOf, rowKey, type Cell, type Edits } from './edits'
+import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
 import styles from './EditableGrid.module.css'
 
 type Value = string | null
@@ -30,7 +30,7 @@ interface EditableGridProps {
   selected: Set<string>
   /** Click selects a row; ⌘/Ctrl-click adds or removes it. Keys are `rowKey()`s, or `new:<id>`. */
   onSelect: (id: string, additive: boolean) => void
-  onEditCell: (row: number, column: number, value: Value) => void
+  onEditCell: (row: number, column: number, value: CellValue) => void
   onEditNewCell: (id: number, column: number, value: Value) => void
   /** Puts a column of a new row back to its DEFAULT. */
   onUnsetNewCell: (id: number, column: number) => void
@@ -43,6 +43,8 @@ interface EditableGridProps {
   onActivate: (cell: Cell | null) => void
   /** Shift+Enter: shows the picked cell in the inspector. */
   onInspect?: () => void
+  /** What the table's structure says of each column, by name, once it has loaded. */
+  columnInfo?: Record<string, { nullable: boolean; default: string | null }>
   /** Opens the row a foreign key column points to; `null` for other columns or NULL keys. */
   linkOf?: (row: number, column: number) => (() => void) | null
 }
@@ -134,10 +136,25 @@ export function EditableGrid(props: EditableGridProps) {
       return next
     })
 
-  const setValue = (at: Editing, column: number, value: Value) => {
+  const setValue = (at: Editing, column: number, value: CellValue) => {
     if ('row' in at) props.onEditCell(at.row, column, value)
+    // A new row's column at its DEFAULT is one the INSERT leaves out.
+    else if (isDefault(value)) props.onUnsetNewCell(at.newRow, column)
     else props.onEditNewCell(at.newRow, column, value)
   }
+
+  /** A cell's text for the clipboard: its value, or NULL or DEFAULT spelled out. */
+  const cellText = (cell: Cell) => {
+    const value = cellAt(edits, rows, columns, cell)
+    return value && (value.unset ? 'DEFAULT' : (value.value ?? 'NULL'))
+  }
+
+  /** Puts the clipboard's text in a cell; WebKit may ask first with its own Paste button. */
+  const paste = (at: Editing, column: number) =>
+    void navigator.clipboard
+      .readText()
+      .then((text) => setValue(at, column, text))
+      .catch(() => {})
 
   const commit = (value: Value) => {
     if (!editing) return
@@ -145,26 +162,49 @@ export function EditableGrid(props: EditableGridProps) {
     stopEditing()
   }
 
-  const menuItems = (at: Editing, column: number, state: CellState): MenuItem[] => [
-    { label: 'Edit', onSelect: () => setEditing({ at, column }) },
-    { label: 'Set NULL', onSelect: () => setValue(at, column, null) },
-    ...('newRow' in at
-      ? [
-          {
-            label: 'Use DEFAULT',
-            disabled: state.unset,
-            onSelect: () => props.onUnsetNewCell(at.newRow, column),
-          },
-        ]
-      : [
-          {
-            label: 'Revert',
-            disabled: !state.edited,
-            // Setting the loaded value back drops the change.
-            onSelect: () => props.onEditCell(at.row, column, rows[at.row][column]),
-          },
-        ]),
-  ]
+  /** Whether the cell takes a pasted value: a table that can be edited, and a column and row that can change. */
+  const pasteable = (cell: Cell) =>
+    editable && !columns[cell.column]?.generated && cellAt(edits, rows, columns, cell)?.deleted === false
+
+  /** The cell's menu: copying always, and the changes its column allows. */
+  const menuItems = (at: Editing, column: number, state: CellState): MenuItem[] => {
+    const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
+    const copy: MenuItem = {
+      label: 'Copy',
+      onSelect: () => {
+        const text = cellText({ row: id, column })
+        if (text !== null) void navigator.clipboard.writeText(text)
+      },
+    }
+    if (!editable || state.locked) return [copy]
+    const { name, dataType } = columns[column]
+    // Until the structure loads, nothing is assumed about NULL; the server has the last word.
+    const info = props.columnInfo?.[name]
+    return [
+      copy,
+      { label: 'Paste', onSelect: () => paste(at, column) },
+      { label: 'Edit', onSelect: () => setEditing({ at, column }) },
+      ...((info?.nullable ?? true)
+        ? [{ label: 'Set NULL', onSelect: () => setValue(at, column, null) }]
+        : []),
+      ...(info?.default
+        ? [{ label: 'Set DEFAULT', disabled: state.unset, onSelect: () => setValue(at, column, DEFAULT) }]
+        : []),
+      ...(isUuidType(dataType)
+        ? [{ label: 'Generate UUID', onSelect: () => setValue(at, column, crypto.randomUUID()) }]
+        : []),
+      ...('row' in at
+        ? [
+            {
+              label: 'Revert',
+              disabled: !state.edited,
+              // Setting the loaded value back drops the change.
+              onSelect: () => props.onEditCell(at.row, column, rows[at.row][column]),
+            },
+          ]
+        : []),
+    ]
+  }
 
   const cell = (at: Editing, column: number, value: Value, state: CellState) => {
     const isEditing =
@@ -227,14 +267,11 @@ export function EditableGrid(props: EditableGridProps) {
         title={value ?? undefined}
         onClick={() => onActivate({ row: id, column })}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
-        onContextMenu={
-          editable && !state.locked
-            ? (event: MouseEvent) => {
-                event.preventDefault()
-                setMenu({ x: event.clientX, y: event.clientY, at, column, state })
-              }
-            : undefined
-        }
+        onContextMenu={(event: MouseEvent) => {
+          event.preventDefault()
+          onActivate({ row: id, column })
+          setMenu({ x: event.clientX, y: event.clientY, at, column, state })
+        }}
         data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
         data-active={isActive || undefined}
       >
@@ -256,10 +293,15 @@ export function EditableGrid(props: EditableGridProps) {
         onKeyDown={(event) => {
           // Keys typed into the cell editor are its own.
           if (event.target instanceof HTMLInputElement) return
-          const value = active && cellAt(edits, rows, columns, active)
-          if ((event.metaKey || event.ctrlKey) && event.key === 'c' && value) {
+          const text = active && cellText(active)
+          const command = event.metaKey || event.ctrlKey
+          if (command && event.key === 'c' && text !== null) {
             event.preventDefault()
-            void navigator.clipboard.writeText(value.unset ? 'DEFAULT' : (value.value ?? 'NULL'))
+            void navigator.clipboard.writeText(text)
+          } else if (command && event.key === 'v' && active && pasteable(active)) {
+            event.preventDefault()
+            const [kind, index] = active.row.split(':')
+            paste(kind === 'new' ? { newRow: Number(index) } : { row: Number(index) }, active.column)
           } else if (event.key === 'Enter' && event.shiftKey && props.onInspect) {
             event.preventDefault()
             props.onInspect()
@@ -353,8 +395,9 @@ export function EditableGrid(props: EditableGridProps) {
                 {columns.map((column, c) =>
                   deleted
                     ? cell({ row: r }, c, row[c], { locked: true })
-                    : cell({ row: r }, c, column.name in changed ? changed[column.name] : row[c], {
+                    : cell({ row: r }, c, column.name in changed ? textOf(changed[column.name]) : row[c], {
                         edited: column.name in changed,
+                        unset: column.name in changed && isDefault(changed[column.name]),
                         locked: column.generated,
                       }),
                 )}
@@ -373,6 +416,11 @@ export function EditableGrid(props: EditableGridProps) {
       )}
     </>
   )
+}
+
+/** A DEFAULT shows as an empty cell marked DEFAULT; other values as they are. */
+function textOf(value: CellValue): Value {
+  return isDefault(value) ? null : value
 }
 
 function sameCell(menu: { at: Editing; column: number }, at: Editing, column: number): boolean {

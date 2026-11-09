@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNumericType, shortTypeName } from './columns'
+import { isNumericType, isUuidType, shortTypeName } from './columns'
 
 describe('isNumericType', () => {
   it.each([
@@ -31,4 +31,14 @@ describe('shortTypeName', () => {
     ['character(2)', 'char(2)'],
     ['integer', 'integer'],
   ])('%s → %s', (type, short) => expect(shortTypeName(type)).toBe(short))
+})
+
+describe('isUuidType', () => {
+  it('knows the native UUID types only', () => {
+    expect(isUuidType('uuid')).toBe(true)
+    expect(isUuidType('uniqueidentifier')).toBe(true)
+    expect(isUuidType('UUID')).toBe(true)
+    expect(isUuidType('char(36)')).toBe(false)
+    expect(isUuidType('text')).toBe(false)
+  })
 })

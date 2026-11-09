@@ -18,6 +18,9 @@ const SQLITE: Dialect = Dialect {
     default_row: "DEFAULT VALUES",
     backslash_escapes: false,
     string_prefix: "",
+    // SQLite has no `SET c = DEFAULT`: the column's own DEFAULT expression, as the
+    // schema stores it, is written out instead; a column without one defaults to NULL.
+    default_value: |expression| expression.map_or_else(|| "NULL".to_string(), |e| format!("({e})")),
 };
 
 pub async fn apply_changes(connection: &Connection, table: &TableRef, changes: &[RowChange]) -> Result<ApplySummary> {
@@ -58,9 +61,11 @@ mod tests {
 
     use super::super::tests::{database, table};
     use super::*;
+    use crate::drivers::CellValue;
 
-    fn map(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, Option<String>> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from))).collect()
+    /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
+    fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.map(String::from).into())).collect()
     }
 
     const ITEMS: &str = "
@@ -122,6 +127,22 @@ mod tests {
         let insert = [RowChange::Insert { values: map(&[("name", Some("x"))]) }];
         let error = apply_changes(&connection, &table("loose"), &insert).await.unwrap_err();
         assert!(error.to_string().contains("has no primary key"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn puts_a_column_back_to_its_default() {
+        let (_dir, connection) = database(ITEMS).await;
+        let changes = vec![RowChange::Update {
+            key: map(&[("id", Some("1"))]),
+            values: [("qty".to_string(), CellValue::Default), ("name".to_string(), CellValue::Text("uno".into()))]
+                .into(),
+        }];
+        apply_changes(&connection, &table("items"), &changes).await.unwrap();
+        let first = &rows(&connection).await[0];
+        assert_eq!((first[1].as_deref(), first[2].as_deref()), (Some("uno"), Some("5")));
+
+        let preview = preview_changes(&connection, &table("items"), &changes).await.unwrap();
+        assert_eq!(preview, ["UPDATE \"main\".\"items\" SET \"name\" = 'uno', \"qty\" = (5) WHERE \"id\" = '1'"]);
     }
 
     #[tokio::test]

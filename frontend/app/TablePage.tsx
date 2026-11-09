@@ -94,6 +94,7 @@ export function TablePage({
           active={view === 'data'}
           summary={structure ? summary(structure) : ''}
           foreignKeys={structure?.foreignKeys ?? []}
+          columnInfo={structure?.columns}
           onOpenTable={onOpenTable}
         />
       </div>

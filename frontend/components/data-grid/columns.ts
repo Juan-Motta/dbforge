@@ -17,3 +17,8 @@ export function shortTypeName(dataType: string): string {
     .replace(/^double precision/, 'float8')
     .replace(/^character\b/, 'char')
 }
+
+/** Whether the column holds UUIDs natively (PostgreSQL `uuid`, SQL Server `uniqueidentifier`). */
+export function isUuidType(dataType: string): boolean {
+  return /^(uuid|uniqueidentifier)$/i.test(dataType.trim())
+}
