@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { basicSetup } from 'codemirror'
+import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
@@ -8,11 +9,14 @@ import { sqlTheme } from './sqlTheme'
 interface CodeEditorProps {
   value: string
   onChange: (value: string) => void
-  /** Highlights JSON; plain text otherwise. */
-  language: 'json' | 'text'
+  /** Highlights JSON, or JavaScript (mongosh's documents); plain text otherwise. */
+  language: 'json' | 'javascript' | 'text'
   readOnly?: boolean
   /** Long lines wrap instead of scrolling sideways. */
   wrap?: boolean
+  /** Takes the keyboard when it opens, with the cursor at `cursor` (the start by default). */
+  autoFocus?: boolean
+  cursor?: number
   label: string
 }
 
@@ -23,6 +27,8 @@ export function CodeEditor({
   language,
   readOnly = false,
   wrap = false,
+  autoFocus = false,
+  cursor = 0,
   label,
 }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null)
@@ -41,7 +47,7 @@ export function CodeEditor({
         extensions: [
           basicSetup,
           sqlTheme,
-          language === 'json' ? json() : [],
+          language === 'json' ? json() : language === 'javascript' ? javascript() : [],
           wrap ? EditorView.lineWrapping : [],
           EditorState.readOnly.of(readOnly),
           EditorView.contentAttributes.of({ 'aria-label': label }),
@@ -52,11 +58,15 @@ export function CodeEditor({
       }),
     })
     view.current = editor
+    if (autoFocus) {
+      editor.dispatch({ selection: { anchor: Math.min(cursor, editor.state.doc.length) } })
+      editor.focus()
+    }
     return () => {
       editor.destroy()
       view.current = null
     }
-  }, [language, readOnly, wrap, label])
+  }, [language, readOnly, wrap, autoFocus, cursor, label])
 
   // Text set from outside (a reformat, a revert) replaces what the editor holds.
   useEffect(() => {

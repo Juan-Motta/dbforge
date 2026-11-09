@@ -17,6 +17,8 @@ export interface RowsPage {
   /** Values in the server's text form; `null` is SQL NULL. */
   rows: (string | null)[][]
   hasMore: boolean
+  /** Document databases: each row's whole document, in the engine's own syntax (JSON, or mongosh's). */
+  documents?: string[]
 }
 
 export interface ApplySummary {

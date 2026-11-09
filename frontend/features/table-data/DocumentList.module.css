@@ -1,0 +1,124 @@
+/* Documents, one after another, each in a card that edits on a double click. */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.document {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  cursor: default;
+}
+
+.document[aria-selected='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+
+.document[data-state='edited'] {
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--border));
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+}
+
+.document[data-state='new'] {
+  border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
+  background: color-mix(in srgb, var(--ok) 6%, var(--surface));
+}
+
+.document[data-state='deleted'] {
+  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  background: color-mix(in srgb, var(--err) 6%, var(--surface));
+}
+
+.document[data-state='deleted'] .code {
+  color: var(--text3);
+  text-decoration: line-through;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text3);
+  font: 11px var(--font-mono);
+}
+
+.state {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.document[data-state='edited'] .state {
+  color: var(--warn);
+}
+
+.document[data-state='new'] .state {
+  color: var(--ok);
+}
+
+.document[data-state='deleted'] .state {
+  color: var(--err);
+}
+
+.code {
+  margin: 0;
+  padding: 8px 12px;
+  font: 12px/18px var(--font-mono);
+  color: var(--text2);
+  white-space: pre;
+  overflow-x: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.key {
+  color: var(--kw);
+}
+
+.string {
+  color: var(--str);
+}
+
+.number,
+.literal {
+  color: var(--num);
+}
+
+.call {
+  color: var(--fn);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+}
+
+.editorBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.problem {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--err);
+  font-size: 12px;
+}
+
+.shortcut {
+  opacity: 0.7;
+  font-weight: 500;
+}

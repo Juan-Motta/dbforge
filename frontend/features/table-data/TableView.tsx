@@ -13,22 +13,28 @@ import { errorMessage } from '../../lib/errors'
 import { tableDataApi, type ApplySummary } from './api'
 import { EditableGrid } from './EditableGrid'
 import {
+  addDocument,
   addRow,
   cellAt,
   counts,
   editCell,
   editNewCell,
+  editNewDocument,
   hasEdits,
   keyOf,
   NO_EDITS,
+  removeNewDocument,
   removeNewRow,
+  replaceDocument,
   rowKey,
   toChanges,
   toggleDelete,
   unsetNewCell,
   type Cell,
   type Edits,
+  type RowChange,
 } from './edits'
+import { DocumentList, NEW_DOCUMENT, type LoadedDocument } from './DocumentList'
 import { CellInspector, type InspectedCell } from './CellInspector'
 import { FilterBar } from './FilterBar'
 import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
@@ -56,6 +62,15 @@ interface TableViewProps {
   columnInfo?: ColumnInfo[]
   /** Opens a table filtered to the rows a foreign key points to. */
   onOpenTable: (table: TableRef, filter: RowFilter) => void
+}
+
+/** How the changes run, where it isn't one transaction that applies all or nothing. */
+const PREVIEW_NOTE = 'Runs in one transaction. If any row changed since it was loaded, none of it applies.'
+const PREVIEW_NOTES: Partial<Record<SqlDialect, string>> = {
+  mongodb:
+    'Runs in one transaction on replica sets and sharded clusters; a standalone server writes one change at a time, and a change it refuses leaves the ones before it written.',
+  cosmosdb:
+    'Writes one change at a time: Cosmos DB has no transaction across partitions. An item changed since it was read is left as it is, and the changes before it stay written.',
 }
 
 type Status =
@@ -94,15 +109,22 @@ export function TableView({
   // The cell a click picked, and whether the side panel shows its value.
   const [picked, setPicked] = useState<Cell | null>(null)
   const [inspecting, setInspecting] = useState(false)
-  // Another page, order or table: the picked cell is gone.
+  // Document databases show their rows as a grid or as whole documents.
+  const [asDocuments, setAsDocuments] = useState(false)
+  // The document open in an editor: a loaded row's key, or `doc:<n>` for a new one.
+  const [editingDocument, setEditingDocument] = useState<string | null>(null)
+  // Another page, order or table: the picked cell and the open document are gone.
   const [shownRows, setShownRows] = useState(page?.rows)
   if (shownRows !== page?.rows) {
     setShownRows(page?.rows)
     setPicked(null)
+    setEditingDocument(null)
   }
 
   const columns = page?.columns ?? []
   const rows = page?.rows ?? []
+  const documents = page?.documents
+  const showingDocuments = asDocuments && documents !== undefined
   const editable = columns.some((c) => c.primaryKey)
   const pending = hasEdits(edits)
   const applying = status.state === 'applying'
@@ -128,6 +150,7 @@ export function TableView({
     change((current) =>
       [...selected].reduce((acc, id) => {
         if (id.startsWith('new:')) return removeNewRow(acc, Number(id.slice(4)))
+        if (id.startsWith('doc:')) return removeNewDocument(acc, Number(id.slice(4)))
         const row = rows.find((r) => rowKey(keyOf(r, columns)) === id)
         return row ? toggleDelete(acc, keyOf(row, columns)) : acc
       }, current),
@@ -142,6 +165,7 @@ export function TableView({
       const summary = await tableDataApi.applyChanges(connectionId, table, toChanges(edits))
       setEdits(NO_EDITS)
       setSelected(new Set())
+      setEditingDocument(null)
       setStatus({ state: 'applied', summary })
       reload()
     } catch (failure) {
@@ -166,6 +190,7 @@ export function TableView({
   const discard = () => {
     setEdits(NO_EDITS)
     setSelected(new Set())
+    setEditingDocument(null)
     setStatus({ state: 'idle' })
   }
 
@@ -210,6 +235,28 @@ export function TableView({
     }
   }
 
+  /** A new document, open in its editor. */
+  const newDocument = () => {
+    const next = addDocument(edits, NEW_DOCUMENT)
+    change(() => next)
+    setEditingDocument(`doc:${next.newDocuments[0].id}`)
+  }
+
+  /** What the database would say about a change, without making it: `null` when it can be made. */
+  const check = async (one: RowChange) => {
+    try {
+      await tableDataApi.previewChanges(connectionId, table, [one])
+      return null
+    } catch (failure) {
+      return errorMessage(failure)
+    }
+  }
+
+  const loadedDocuments: LoadedDocument[] = (documents ?? []).map((text, i) => {
+    const key = keyOf(rows[i], columns)
+    return { id: rowKey(key), key, text }
+  })
+
   const rowCount = rows.length
   // Moving to another page would hide pending rows; apply or discard first.
   const lockPaging = loading || pending
@@ -222,10 +269,26 @@ export function TableView({
           actionsSlot &&
           createPortal(
             <>
+              {documents !== undefined && (
+                <IconButton
+                  label={
+                    pending
+                      ? 'Apply or discard the changes to switch views'
+                      : showingDocuments
+                        ? 'Show as a table'
+                        : 'Show as JSON documents'
+                  }
+                  active={showingDocuments}
+                  disabled={pending}
+                  onClick={() => setAsDocuments(!asDocuments)}
+                >
+                  <Icon name="code" />
+                </IconButton>
+              )}
               <IconButton
-                label={editable ? 'Add row' : noKey}
+                label={editable ? (showingDocuments ? 'Add document' : 'Add row') : noKey}
                 disabled={!editable || applying}
-                onClick={() => change(addRow)}
+                onClick={showingDocuments ? newDocument : () => change(addRow)}
               >
                 <Icon name="plus" />
               </IconButton>
@@ -240,8 +303,11 @@ export function TableView({
                 <Icon name="refresh" />
               </IconButton>
               <IconButton
-                label="Inspect the cell's value (⇧↵)"
-                active={inspecting}
+                label={
+                  showingDocuments ? 'Cells are inspected in the table' : "Inspect the cell's value (⇧↵)"
+                }
+                active={inspecting && !showingDocuments}
+                disabled={showingDocuments}
                 onClick={() => setInspecting(!inspecting)}
               >
                 <Icon name="eye" />
@@ -253,6 +319,24 @@ export function TableView({
         <div className={styles.content} aria-busy={loading}>
           {error ? (
             <p className={styles.error}>{error}</p>
+          ) : showingDocuments ? (
+            <DocumentList
+              documents={loadedDocuments}
+              edits={edits}
+              language={dialect === 'mongodb' ? 'javascript' : 'json'}
+              firstNumber={offset + 1}
+              locked={!editable ? noKey : applying ? 'Applying the changes' : null}
+              selected={selected}
+              onSelect={select}
+              editing={editingDocument}
+              onEdit={setEditingDocument}
+              check={check}
+              onReplace={(key, text, original) =>
+                change((current) => replaceDocument(current, key, text, original))
+              }
+              onEditNew={(id, text) => change((current) => editNewDocument(current, id, text))}
+              onRemoveNew={(id) => change((current) => removeNewDocument(current, id))}
+            />
           ) : (
             page && (
               <EditableGrid
@@ -289,7 +373,7 @@ export function TableView({
             )
           )}
         </div>
-        {inspecting && (
+        {inspecting && !showingDocuments && (
           <CellInspector
             // Another cell, or a value just saved or reverted, starts a fresh draft.
             key={picked ? `${picked.row}:${picked.column}:${inspected?.value}` : 'none'}
@@ -377,11 +461,12 @@ export function TableView({
           onClose={() => setPreview(null)}
           className={styles.previewDialog}
         >
-          <p className={styles.previewNote}>
-            Runs in one transaction. If any row changed since it was loaded, none of it applies.
-          </p>
+          <p className={styles.previewNote}>{PREVIEW_NOTES[dialect] ?? PREVIEW_NOTE}</p>
           <div className={styles.previewCode}>
-            <SqlCode value={preview.map((statement) => `${statement};`).join('\n')} />
+            <SqlCode
+              value={preview.map((line) => (line.endsWith(';') ? line : `${line};`)).join('\n')}
+              dialect={dialect}
+            />
           </div>
         </Modal>
       )}

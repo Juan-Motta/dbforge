@@ -47,6 +47,19 @@ const connections: Connection[] = [
     srv: false,
   },
   {
+    id: 'demo-cosmos',
+    name: 'orders-cosmos',
+    engine: 'cosmosdb',
+    environment: 'development',
+    host: 'demo.documents.azure.com',
+    port: 443,
+    database: '',
+    username: '',
+    tls: true,
+    allowSelfSigned: false,
+    srv: false,
+  },
+  {
     id: 'demo-redis',
     name: 'cache-redis',
     engine: 'redis',
@@ -132,6 +145,13 @@ export function installMockBackend() {
           }))
           return delay(path === '' ? dbs : [])
         }
+        if (payload.connectionId === 'demo-cosmos') {
+          const tree: Record<string, DbObject[]> = {
+            '': [{ name: 'shop', kind: 'database', rowEstimate: null }],
+            shop: [table('order-items', 120)],
+          }
+          return delay(tree[path] ?? [])
+        }
         const source =
           payload.connectionId === 'demo-mysql'
             ? mysqlObjects
@@ -141,6 +161,7 @@ export function installMockBackend() {
         return delay(source[path] ?? [])
       }
       case 'fetch_rows': {
+        if (payload.connectionId === 'demo-cosmos') return delay(cosmosPage(payload.offset as number))
         const offset = payload.offset as number
         const limit = payload.limit as number
         const total = 450
@@ -253,17 +274,23 @@ export function installMockBackend() {
         const changes = payload.changes as { kind: string; key?: Record<string, string> }[]
         if (changes.some((c) => c.key?.id === '13'))
           throw 'The row with id = 13 was changed or deleted since it was loaded. Nothing was applied; reload and try again.'
-        const count = (kind: string) => changes.filter((c) => c.kind === kind).length
-        return delay({ updated: count('update'), inserted: count('insert'), deleted: count('delete') })
+        const count = (...kinds: string[]) => changes.filter((c) => kinds.includes(c.kind)).length
+        return delay({
+          updated: count('update', 'replace'),
+          inserted: count('insert', 'insertDocument'),
+          deleted: count('delete'),
+        })
       }
       case 'preview_changes':
         return delay(
-          (payload.changes as { kind: string }[]).map((c) =>
-            c.kind === 'delete'
-              ? `DELETE FROM "public"."orders" WHERE "id" = CAST('3'::text AS integer)`
-              : c.kind === 'insert'
-                ? `INSERT INTO "public"."orders" ("name") VALUES (CAST('New'::text AS character varying(80)))`
-                : `UPDATE "public"."orders" SET "name" = CAST('Renamed'::text AS character varying(80)) WHERE "id" = CAST('1'::text AS integer)`,
+          (payload.changes as { kind: string; document?: string }[]).map((c) =>
+            c.document !== undefined
+              ? cosmosWrite(c.kind, c.document)
+              : c.kind === 'delete'
+                ? `DELETE FROM "public"."orders" WHERE "id" = CAST('3'::text AS integer)`
+                : c.kind === 'insert'
+                  ? `INSERT INTO "public"."orders" ("name") VALUES (CAST('New'::text AS character varying(80)))`
+                  : `UPDATE "public"."orders" SET "name" = CAST('Renamed'::text AS character varying(80)) WHERE "id" = CAST('1'::text AS integer)`,
           ),
         )
       case 'schema_diagram':
@@ -596,4 +623,53 @@ const mockDiagram = {
     fk('orders', 'store_id', 'stores'),
     fk('payments', 'order_id', 'orders'),
   ],
+}
+
+/** Items of the demo Cosmos DB container, as the driver sends them: rows and their documents. */
+function cosmosPage(offset: number) {
+  const total = 120
+  const items = Array.from({ length: Math.max(0, Math.min(50, total - offset)) }, (_, i) => {
+    const n = offset + i + 1
+    return {
+      id: `order-${n}`,
+      customer: `c${n % 4}`,
+      total: n * 10,
+      paid: n % 3 !== 0,
+      items: [{ sku: `sku-${n}`, qty: (n % 3) + 1 }],
+    }
+  })
+  return {
+    columns: [
+      { name: 'id', dataType: 'string', primaryKey: true },
+      { name: 'customer', dataType: 'string', primaryKey: true },
+      { name: 'total', dataType: 'number', primaryKey: false },
+      { name: 'paid', dataType: 'boolean', primaryKey: false },
+      { name: 'items', dataType: 'array', primaryKey: false },
+    ],
+    rows: items.map((item) => [
+      item.id,
+      item.customer,
+      String(item.total),
+      String(item.paid),
+      JSON.stringify(item.items),
+    ]),
+    documents: items.map((item) => JSON.stringify(item, null, 2)),
+    hasMore: offset + items.length < total,
+  }
+}
+
+/** A whole-document write as the Cosmos DB driver previews it, refusing what isn't JSON. */
+function cosmosWrite(kind: string, document: string) {
+  let item: unknown
+  try {
+    item = JSON.parse(document)
+  } catch (error) {
+    throw `The document isn't valid JSON: ${error instanceof Error ? error.message : error}.`
+  }
+  if (typeof item !== 'object' || item === null || Array.isArray(item))
+    throw 'A document is a JSON object, in braces.'
+  const text = JSON.stringify(item)
+  return kind === 'replace'
+    ? `REPLACE order-items PARTITION ["c1"] ${text}`
+    : `CREATE order-items PARTITION ["c1"] ${text}`
 }

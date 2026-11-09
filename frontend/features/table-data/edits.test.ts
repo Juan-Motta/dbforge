@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addDocument,
   addRow,
   cellAt,
   counts,
   DEFAULT,
   editCell,
   editNewCell,
+  editNewDocument,
   hasEdits,
   keyOf,
   NO_EDITS,
+  removeNewDocument,
   removeNewRow,
+  replaceDocument,
   rowKey,
   toChanges,
   toggleDelete,
@@ -87,6 +91,30 @@ describe('toChanges', () => {
       { kind: 'insert', values: { name: 'first' } },
       { kind: 'insert', values: { name: 'second' } },
     ])
+  })
+})
+
+describe('whole documents', () => {
+  it('replaces a document until it is written back as loaded', () => {
+    const edited = replaceDocument(NO_EDITS, one, '{"id": "1", "n": 2}', '{"id": "1", "n": 1}')
+    expect(counts(edited)).toEqual({ updated: 1, inserted: 0, deleted: 0 })
+    expect(toChanges(edited)).toEqual([{ kind: 'replace', key: one, document: '{"id": "1", "n": 2}' }])
+    expect(hasEdits(replaceDocument(edited, one, '{"id": "1", "n": 1}', '{"id": "1", "n": 1}'))).toBe(false)
+  })
+
+  it('drops a replacement when the row is marked for deletion', () => {
+    const edited = toggleDelete(replaceDocument(NO_EDITS, one, '{}', '{"id": "1"}'), one)
+    expect(toChanges(edited)).toEqual([{ kind: 'delete', key: one }])
+  })
+
+  it('adds new documents, sent oldest first after everything else', () => {
+    let edits = addDocument(NO_EDITS, '{}')
+    edits = addDocument(edits, '{}')
+    edits = editNewDocument(edits, 1, '{"first": true}')
+    edits = replaceDocument(edits, one, '{"id": "1"}', '{"id": "1", "old": true}')
+    expect(toChanges(edits).map((c) => c.kind)).toEqual(['replace', 'insertDocument', 'insertDocument'])
+    expect(toChanges(edits)[1]).toEqual({ kind: 'insertDocument', document: '{"first": true}' })
+    expect(counts(removeNewDocument(edits, 2))).toEqual({ updated: 1, inserted: 1, deleted: 0 })
   })
 })
 

@@ -23,15 +23,27 @@ export interface Edits {
   deletes: Map<string, Values>
   /** New rows, newest first; only the columns the user set (the rest take their DEFAULT). */
   inserts: { id: number; values: Values }[]
+  /** Document databases: loaded rows whose whole document was rewritten, by row key. */
+  replacements: Map<string, { key: Values; document: string }>
+  /** Document databases: new documents, newest first. */
+  newDocuments: { id: number; document: string }[]
 }
 
-export const NO_EDITS: Edits = { updates: new Map(), deletes: new Map(), inserts: [] }
+export const NO_EDITS: Edits = {
+  updates: new Map(),
+  deletes: new Map(),
+  inserts: [],
+  replacements: new Map(),
+  newDocuments: [],
+}
 
 /** What the backend's `apply_changes` expects. */
 export type RowChange =
   | { kind: 'update'; key: Values; values: Record<string, CellValue> }
   | { kind: 'insert'; values: Values }
   | { kind: 'delete'; key: Values }
+  | { kind: 'replace'; key: Values; document: string }
+  | { kind: 'insertDocument'; document: string }
 
 /** The primary key values of a row, by column name. */
 export function keyOf(row: Value[], columns: { name: string; primaryKey: boolean }[]): Values {
@@ -62,15 +74,43 @@ export function editCell(
   return { ...edits, updates }
 }
 
-/** Marks a loaded row for deletion, or unmarks it. Its cell edits are dropped either way. */
+/** Marks a loaded row for deletion, or unmarks it. Its cell edits and new document are dropped either way. */
 export function toggleDelete(edits: Edits, key: Values): Edits {
   const id = rowKey(key)
   const deletes = new Map(edits.deletes)
   const updates = new Map(edits.updates)
+  const replacements = new Map(edits.replacements)
   if (deletes.has(id)) deletes.delete(id)
   else deletes.set(id, key)
   updates.delete(id)
-  return { ...edits, deletes, updates }
+  replacements.delete(id)
+  return { ...edits, deletes, updates, replacements }
+}
+
+/** Rewrites a loaded row's whole document; writing back what was loaded drops the change. */
+export function replaceDocument(edits: Edits, key: Values, document: string, original: string): Edits {
+  const id = rowKey(key)
+  const replacements = new Map(edits.replacements)
+  if (document === original) replacements.delete(id)
+  else replacements.set(id, { key, document })
+  return { ...edits, replacements }
+}
+
+/** Starts a new document with `document` as its text. */
+export function addDocument(edits: Edits, document: string): Edits {
+  const id = Math.max(0, ...edits.newDocuments.map((d) => d.id)) + 1
+  return { ...edits, newDocuments: [{ id, document }, ...edits.newDocuments] }
+}
+
+export function editNewDocument(edits: Edits, id: number, document: string): Edits {
+  return {
+    ...edits,
+    newDocuments: edits.newDocuments.map((d) => (d.id === id ? { ...d, document } : d)),
+  }
+}
+
+export function removeNewDocument(edits: Edits, id: number): Edits {
+  return { ...edits, newDocuments: edits.newDocuments.filter((d) => d.id !== id) }
 }
 
 export function addRow(edits: Edits): Edits {
@@ -92,7 +132,11 @@ export function removeNewRow(edits: Edits, id: number): Edits {
 }
 
 export function counts(edits: Edits) {
-  return { updated: edits.updates.size, inserted: edits.inserts.length, deleted: edits.deletes.size }
+  return {
+    updated: edits.updates.size + edits.replacements.size,
+    inserted: edits.inserts.length + edits.newDocuments.length,
+    deleted: edits.deletes.size,
+  }
 }
 
 export function hasEdits(edits: Edits): boolean {
@@ -108,7 +152,15 @@ export function toChanges(edits: Edits): RowChange[] {
   return [
     ...[...edits.deletes.values()].map((key): RowChange => ({ kind: 'delete', key })),
     ...[...edits.updates.values()].map(({ key, values }): RowChange => ({ kind: 'update', key, values })),
+    ...[...edits.replacements.values()].map(({ key, document }): RowChange => ({
+      kind: 'replace',
+      key,
+      document,
+    })),
     ...[...edits.inserts].reverse().map(({ values }): RowChange => ({ kind: 'insert', values })),
+    ...[...edits.newDocuments]
+      .reverse()
+      .map(({ document }): RowChange => ({ kind: 'insertDocument', document })),
   ]
 }
 
