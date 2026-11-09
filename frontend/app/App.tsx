@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
-import { defaultDatabase, defaultSchema, hasDiagram, type Connection } from '../domain/connection'
+import {
+  defaultDatabase,
+  defaultSchema,
+  DUMP_ENGINES,
+  hasDiagram,
+  type Connection,
+} from '../domain/connection'
 import { tableRefFromPath } from '../domain/table'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
+import { ExportDatabaseDialog, ImportDatabaseDialog } from '../features/dump/DumpDialogs'
 import { useConnections } from '../features/connections/useConnections'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { usePanelWidth } from '../components/usePanelWidth'
@@ -42,6 +49,13 @@ export function App() {
   )
   const [selection, setSelection] = useState<Selection | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
+  // A database being exported with pg_dump, or a file being imported into one with psql.
+  const [dump, setDump] = useState<{
+    mode: 'export' | 'import'
+    connection: Connection
+    database: string
+    refresh: () => void
+  } | null>(null)
   const [tabs, setTabs] = useState(NO_TABS)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -181,6 +195,17 @@ export function App() {
             }}
             onNewConnection={() => setDialog({})}
             onEditConnection={(connection) => setDialog({ connection })}
+            menuOf={(node, refresh) => {
+              const connection = connections.find((c) => c.id === node.connectionId)
+              if (node.kind !== 'database' || !connection || !DUMP_ENGINES.includes(connection.engine))
+                return []
+              const open = (mode: 'export' | 'import') => () =>
+                setDump({ mode, connection, database: node.name, refresh })
+              return [
+                { label: 'Export database…', onSelect: open('export') },
+                { label: 'Import SQL file…', onSelect: open('import') },
+              ]
+            }}
           />
         </div>
         <main className={`island ${styles.main}`}>
@@ -222,6 +247,25 @@ export function App() {
           onSave={save}
           onDelete={removeConnection}
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {dump?.mode === 'export' && (
+        <ExportDatabaseDialog
+          connectionId={dump.connection.id}
+          connectionName={dump.connection.name}
+          database={dump.database}
+          onClose={() => setDump(null)}
+        />
+      )}
+      {dump?.mode === 'import' && (
+        <ImportDatabaseDialog
+          connectionId={dump.connection.id}
+          connectionName={dump.connection.name}
+          database={dump.database}
+          production={dump.connection.environment === 'production'}
+          onClose={() => setDump(null)}
+          onImported={dump.refresh}
         />
       )}
 

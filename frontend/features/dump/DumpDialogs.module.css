@@ -1,0 +1,138 @@
+.dialog {
+  width: min(560px, calc(100% - 32px));
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px 20px 8px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.choice strong {
+  font-weight: 500;
+}
+
+.choice[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.description {
+  display: block;
+  color: var(--text3);
+  font-size: 11.5px;
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.check input {
+  margin-top: 2px;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: 12px var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.note {
+  margin: 6px 0 0;
+  color: var(--text3);
+  font-size: 12px;
+}
+
+/* One line, always there, so the dialog never jumps while a tool writes. */
+.status {
+  min-height: 36px;
+  margin: 0;
+  color: var(--text2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.progress {
+  display: block;
+  font: 12px var(--font-mono);
+  color: var(--text3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error {
+  color: var(--err);
+  white-space: pre-wrap;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}

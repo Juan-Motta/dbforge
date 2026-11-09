@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button, IconButton } from '../../components/Button'
+import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { Icon } from '../../components/Icon'
 import type { Connection } from '../../domain/connection'
 import { filterTree, visibleRows, type TreeNode } from './tree'
@@ -16,6 +17,8 @@ interface ExplorerProps {
   diagramOf: (node: TreeNode) => (() => void) | null
   onNewConnection: () => void
   onEditConnection: (connection: Connection) => void
+  /** A node's right-click menu; `refresh` reloads the tree, e.g. once a database was created. */
+  menuOf: (node: TreeNode, refresh: () => void) => MenuItem[]
 }
 
 export function Explorer({
@@ -25,10 +28,12 @@ export function Explorer({
   diagramOf,
   onNewConnection,
   onEditConnection,
+  menuOf,
 }: ExplorerProps) {
   const { roots, expanded, toggle, collapseAll, refresh } = useExplorerTree(connections)
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
 
   const rows = useMemo(() => {
     const filtering = query.trim() !== ''
@@ -81,6 +86,10 @@ export function Explorer({
               onOpen={onOpen}
               onEdit={(node) => node.kind === 'connection' && onEditConnection(node.connection)}
               onDiagram={diagramOf(row.node) ?? undefined}
+              onMenu={(node, x, y) => {
+                const items = menuOf(node, refresh)
+                setMenu(items.length > 0 ? { x, y, items } : null)
+              }}
             />
           ) : (
             <p
@@ -106,6 +115,7 @@ export function Explorer({
           <p className={styles.message}>No objects match “{query.trim()}”.</p>
         )}
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </aside>
   )
 }

@@ -33,6 +33,8 @@ interface TreeItemProps {
   onEdit: (node: TreeNode) => void
   /** Present on schemas (or schemaless databases) whose ER diagram can open. */
   onDiagram?: (node: TreeNode) => void
+  /** Opens the node's right-click menu at the pointer. */
+  onMenu: (node: TreeNode, x: number, y: number) => void
 }
 
 export function TreeItem({
@@ -45,6 +47,7 @@ export function TreeItem({
   onOpen,
   onEdit,
   onDiagram,
+  onMenu,
 }: TreeItemProps) {
   const isConnection = node.kind === 'connection'
   const environment = isConnection ? node.connection.environment : null
@@ -61,6 +64,11 @@ export function TreeItem({
       style={{ paddingLeft: 6 + depth * INDENT_PX }}
       onClick={() => onSelect(node)}
       onDoubleClick={() => (node.expandable ? onToggle(node) : onOpen(node))}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        onSelect(node)
+        onMenu(node, event.clientX, event.clientY)
+      }}
     >
       <span
         className={styles.chevron}

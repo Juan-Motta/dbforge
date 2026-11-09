@@ -52,6 +52,9 @@ export const DEFAULT_PORTS: Record<Engine, number> = {
   cosmosdb: 443,
 }
 
+/** Engines whose whole databases export to a .sql file and import back (pg_dump and psql). */
+export const DUMP_ENGINES: Engine[] = ['postgres']
+
 export const RELATIONAL_ENGINES: Engine[] = ['postgres', 'mysql', 'mariadb', 'sqlite', 'sqlserver']
 export const NOSQL_ENGINES: Engine[] = ['mongodb', 'cosmosdb', 'redis']
 
