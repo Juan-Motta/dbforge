@@ -25,6 +25,33 @@ pub enum AppError {
     MongoDb(#[from] mongodb::error::Error),
     #[error("{}", redis_message(.0))]
     Redis(#[from] redis::RedisError),
+    #[error("{}", http_message(.0))]
+    Http(#[from] reqwest::Error),
+}
+
+/// Why an HTTP request (Cosmos DB) never got an answer, from the innermost cause:
+/// reqwest's own text only says that sending failed.
+fn http_message(error: &reqwest::Error) -> String {
+    let mut cause = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        cause = inner.to_string();
+        source = inner.source();
+    }
+    if error.is_timeout() {
+        "The server took too long to answer.".into()
+    } else if cause.contains("failed to lookup address") || cause.contains("nodename nor servname") {
+        "Could not find the host. Check its name, or that you are on the network that can see it.".into()
+    } else if cause.contains("invalid peer certificate") || cause.contains("UnknownIssuer") {
+        format!(
+            "The server's TLS certificate isn't trusted ({cause}). If the server uses a self-signed \
+             certificate, turn on Accept self-signed certificate."
+        )
+    } else if error.is_connect() {
+        format!("Could not reach the server: {cause}")
+    } else {
+        cause
+    }
 }
 
 /// The server's reply as redis-cli prints it (`WRONGTYPE Operation against…`).

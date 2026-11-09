@@ -1,5 +1,6 @@
 //! Entry points that dispatch to the right database driver by engine.
 
+mod cosmos;
 mod edit_sql;
 mod mongodb;
 mod row_filter;
@@ -300,6 +301,7 @@ pub async fn server_version(connection: &Connection, password: Option<&str>) -> 
             Engine::Sqlserver => sqlserver::server_version(connection, password).await,
             Engine::Mongodb => mongodb::server_version(connection, password).await,
             Engine::Redis => redis::server_version(connection, password).await,
+            Engine::Cosmosdb => cosmos::server_version(connection, password).await,
         }
     })
     .await
@@ -314,6 +316,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
             Engine::Sqlserver => sqlserver::list_objects(connection, password, path).await,
             Engine::Mongodb => mongodb::list_objects(connection, password, path).await,
             Engine::Redis => redis::list_objects(connection, password, path).await,
+            Engine::Cosmosdb => cosmos::list_objects(connection, password, path).await,
         }
     })
     .await
@@ -331,6 +334,7 @@ pub async fn list_relations(
             Engine::Mysql | Engine::Mariadb => mysql::list_relations(connection, password, database).await,
             Engine::Sqlserver => sqlserver::list_relations(connection, password, database).await,
             Engine::Mongodb => mongodb::list_relations(connection, password, database).await,
+            Engine::Cosmosdb => cosmos::list_relations(connection, password, database).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -352,6 +356,7 @@ pub async fn stream_table(
         Engine::Mysql | Engine::Mariadb => mysql::stream_table(connection, password, table, filter, sink).await,
         Engine::Sqlserver => sqlserver::stream_table(connection, password, table, filter, sink).await,
         Engine::Mongodb => mongodb::stream_table(connection, password, table, filter, sink).await,
+        Engine::Cosmosdb => cosmos::stream_table(connection, password, table, filter, sink).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }
@@ -373,6 +378,7 @@ pub async fn fetch_rows(
             }
             Engine::Sqlserver => sqlserver::fetch_rows(connection, password, table, filter, offset, limit).await,
             Engine::Mongodb => mongodb::fetch_rows(connection, password, table, filter, offset, limit).await,
+            Engine::Cosmosdb => cosmos::fetch_rows(connection, password, table, filter, offset, limit).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })
@@ -498,6 +504,7 @@ pub async fn open_session(connection: &Connection, password: Option<&str>, datab
             }
             Engine::Mongodb => Ok(Session::Mongodb(mongodb::open_session(connection, password, database).await?)),
             Engine::Redis => Ok(Session::Redis(redis::open_session(connection, password, database).await?)),
+            other @ Engine::Cosmosdb => Err(AppError::Unsupported(other.label())),
         }
     })
     .await

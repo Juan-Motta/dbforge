@@ -12,6 +12,7 @@ pub enum Engine {
     Sqlserver,
     Mongodb,
     Redis,
+    Cosmosdb,
 }
 
 impl Engine {
@@ -24,6 +25,7 @@ impl Engine {
             Engine::Sqlserver => "SQL Server",
             Engine::Mongodb => "MongoDB",
             Engine::Redis => "Redis",
+            Engine::Cosmosdb => "Azure Cosmos DB",
         }
     }
 }
@@ -48,7 +50,7 @@ pub struct Connection {
     pub port: u16,
     pub database: String,
     pub username: String,
-    /// Encrypts the connection (Redis and MongoDB).
+    /// Encrypts the connection (Redis, MongoDB and Cosmos DB, whose local emulator may use HTTP).
     #[serde(default)]
     pub tls: bool,
     /// Accepts a certificate no authority signed, as development servers have.
