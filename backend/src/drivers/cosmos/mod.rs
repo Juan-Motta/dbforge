@@ -11,9 +11,11 @@ mod client;
 mod explain;
 mod query;
 mod session;
+mod structure;
 
 pub use explain::explain;
 pub use session::{Session, open_session};
+pub use structure::table_structure;
 
 use std::collections::BTreeSet;
 

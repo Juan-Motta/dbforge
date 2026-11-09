@@ -450,6 +450,7 @@ pub async fn table_structure(
             Engine::Mysql | Engine::Mariadb => mysql::table_structure(connection, password, table).await,
             Engine::Sqlserver => sqlserver::table_structure(connection, password, table).await,
             Engine::Mongodb => mongodb::table_structure(connection, password, table).await,
+            Engine::Cosmosdb => cosmos::table_structure(connection, password, table).await,
             other => Err(AppError::Unsupported(other.label())),
         }
     })

@@ -57,6 +57,11 @@ impl Target {
         Target::Feed { kind: "docs", parent: container_link(database, container) }
     }
 
+    /// The throughput provisioned on the account's databases and containers.
+    pub fn offers() -> Self {
+        Target::Feed { kind: "offers", parent: String::new() }
+    }
+
     pub fn partition_key_ranges(database: &str, container: &str) -> Self {
         Target::Feed { kind: "pkranges", parent: container_link(database, container) }
     }
