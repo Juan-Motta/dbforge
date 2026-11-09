@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 
 use super::client::{Client, Target};
 use super::query::{Feed, split_top_level};
-use super::session::{console_database, container_for};
+use super::session::{console_container, console_database};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -27,6 +27,7 @@ pub async fn explain(
     connection: &Connection,
     password: Option<&str>,
     database: Option<&str>,
+    container: Option<&str>,
     script: &str,
     analyze: bool,
 ) -> Result<Value> {
@@ -36,7 +37,7 @@ pub async fn explain(
     };
     let database = console_database(connection, database)?;
     let client = Client::new(connection, password)?;
-    let container = container_for(&client, &database, query).await?;
+    let container = console_container(&client, &database, container).await?;
     if analyze {
         let metrics = run_with_metrics(&client, &database, &container, query).await?;
         Ok(analyzed(&container, &metrics))
@@ -316,18 +317,18 @@ mod tests {
     async fn explains_and_analyzes_a_query() {
         let items = (0..4).map(|i| json!({"id": i.to_string(), "customer": "c", "total": i})).collect();
         let connection = database("dbforge_explain", &[("orders", "/customer", items)]).await;
-        let query = "SELECT * FROM orders o WHERE o.total > 1 ORDER BY o.total DESC";
+        let query = "SELECT * FROM o WHERE o.total > 1 ORDER BY o.total DESC";
 
-        let plan = explain(&connection, KEY, None, query, false).await.unwrap();
+        let plan = explain(&connection, KEY, None, Some("orders"), query, false).await.unwrap();
         assert!(plan[0]["Plan"].get("Actual Total Time").is_none());
 
-        let run = explain(&connection, KEY, None, query, true).await.unwrap();
+        let run = explain(&connection, KEY, None, Some("orders"), query, true).await.unwrap();
         let root = &run[0]["Plan"];
         assert_eq!(root["Node Type"], "Query");
         assert_eq!(root["Actual Rows"], 2.0);
         assert!(root["Request Charge (RU)"].as_f64().unwrap() > 0.0);
 
-        let error = explain(&connection, KEY, None, "SELECT 1 FROM orders; SELECT 2 FROM orders", false).await;
+        let error = explain(&connection, KEY, None, Some("orders"), "SELECT 1 FROM c; SELECT 2 FROM c", false).await;
         assert_eq!(error.unwrap_err().to_string(), "Explain one query at a time.");
     }
 }

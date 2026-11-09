@@ -43,7 +43,7 @@ export function CliPanel({ sessionId, connectionId, db, address, onRan }: CliPan
     setInput('')
     setRunning(true)
     try {
-      const outcome = await queryApi.run(sessionId, connectionId, String(db), command)
+      const outcome = await queryApi.run(sessionId, connectionId, { database: String(db) }, command)
       const replies = outcome.results.flatMap((result) => result.rows.map((row) => row[0] ?? ''))
       setLines((current) => [...current, ...replies.map((text) => ({ kind: 'reply' as const, text }))])
       onRan()

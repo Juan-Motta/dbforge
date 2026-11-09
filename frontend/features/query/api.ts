@@ -17,19 +17,28 @@ export interface QueryOutcome {
 }
 
 /**
+ * Where a console's queries run: a database (the connection's own when
+ * omitted) and, for Cosmos DB, the container picked in the console.
+ */
+export interface QueryScope {
+  database?: string
+  container?: string
+}
+
+/**
  * Each console has a session: a connection the backend keeps open between runs,
  * so transactions and SET carry over. It opens on the first run.
  */
 export const queryApi = {
-  /** Runs a script; `database` defaults to the connection's own. */
-  run: (sessionId: string, connectionId: string, database: string | undefined, sql: string) =>
-    invoke<QueryOutcome>('run_query', { sessionId, connectionId, database, sql }),
+  /** Runs a script in the session; another scope opens a new one. */
+  run: (sessionId: string, connectionId: string, scope: QueryScope, sql: string) =>
+    invoke<QueryOutcome>('run_query', { sessionId, connectionId, scope, sql }),
   /**
    * The plan of one statement as EXPLAIN's JSON. With `analyze` it really runs,
    * on its own connection and inside a transaction that is always rolled back.
    */
-  explain: (connectionId: string, database: string | undefined, sql: string, analyze: boolean) =>
-    invoke<unknown>('explain_query', { connectionId, database, sql, analyze }),
+  explain: (connectionId: string, scope: QueryScope, sql: string, analyze: boolean) =>
+    invoke<unknown>('explain_query', { connectionId, scope, sql, analyze }),
   /** Stops the running query; its run then fails with a cancel error. */
   cancel: (sessionId: string) => invoke<void>('cancel_query', { sessionId }),
   /** Closes the connection; uncommitted work is rolled back. */

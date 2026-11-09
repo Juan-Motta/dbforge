@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
@@ -18,6 +19,14 @@ use crate::history::{HistoryEntry, HistoryStore};
 /// Rows kept per result; the rest are read and dropped.
 const ROW_LIMIT: usize = 500;
 
+/// Where a console's queries run: a database (the connection's own when
+/// `None`) and, for Cosmos DB, the container picked in the console.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct QueryScope {
+    pub database: Option<String>,
+    pub container: Option<String>,
+}
+
 /// Open sessions by console id.
 #[derive(Default)]
 pub struct QuerySessions(Mutex<HashMap<String, Arc<QuerySession>>>);
@@ -25,7 +34,7 @@ pub struct QuerySessions(Mutex<HashMap<String, Arc<QuerySession>>>);
 struct QuerySession {
     /// The connection's settings when the session opened.
     connection: Connection,
-    database: Option<String>,
+    scope: QueryScope,
     cancel_target: CancelTarget,
     /// Locked while a query runs; one query at a time per session.
     driver: tokio::sync::Mutex<drivers::Session>,
@@ -54,10 +63,11 @@ impl QuerySessions {
 }
 
 impl QuerySession {
-    async fn open(connection: Connection, database: Option<String>) -> Result<Self> {
+    async fn open(connection: Connection, scope: QueryScope) -> Result<Self> {
         let password = secrets::get_password(&connection.id)?;
-        let driver = drivers::open_session(&connection, password.as_deref(), database.as_deref()).await?;
-        Ok(Self { cancel_target: driver.cancel_target(), connection, database, driver: driver.into() })
+        let (database, container) = (scope.database.as_deref(), scope.container.as_deref());
+        let driver = drivers::open_session(&connection, password.as_deref(), database, container).await?;
+        Ok(Self { cancel_target: driver.cancel_target(), connection, scope, driver: driver.into() })
     }
 
     fn is_running(&self) -> bool {
@@ -66,13 +76,13 @@ impl QuerySession {
 
     async fn cancel(&self) -> Result<()> {
         let password = secrets::get_password(&self.connection.id)?;
-        drivers::cancel(&self.connection, password.as_deref(), self.database.as_deref(), self.cancel_target.clone())
-            .await
+        let database = self.scope.database.as_deref();
+        drivers::cancel(&self.connection, password.as_deref(), database, self.cancel_target.clone()).await
     }
 }
 
 /// Runs a SQL script in the console's session, opening it on first use, and
-/// records the run in the history. `database` defaults to the connection's own.
+/// records the run in the history.
 #[tauri::command]
 pub async fn run_query(
     store: State<'_, ConnectionStore>,
@@ -80,20 +90,21 @@ pub async fn run_query(
     history: State<'_, HistoryStore>,
     session_id: String,
     connection_id: String,
-    database: Option<String>,
+    scope: QueryScope,
     sql: String,
 ) -> Result<QueryOutcome> {
     let connection = store.get(&connection_id)?;
     let executed_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let started = Instant::now();
-    let outcome = run_in_session(&sessions, &session_id, connection.clone(), database.clone(), &sql).await;
+    let outcome = run_in_session(&sessions, &session_id, connection.clone(), scope.clone(), &sql).await;
 
     let entry = HistoryEntry {
         id: Uuid::new_v4().to_string(),
         executed_at,
         connection_id: connection.id,
         connection_name: connection.name,
-        database,
+        database: scope.database,
+        container: scope.container,
         elapsed_ms: match &outcome {
             Ok(outcome) => outcome.elapsed_ms,
             Err(_) => started.elapsed().as_millis() as u64,
@@ -114,14 +125,14 @@ async fn run_in_session(
     sessions: &QuerySessions,
     session_id: &str,
     connection: Connection,
-    database: Option<String>,
+    scope: QueryScope,
     sql: &str,
 ) -> Result<QueryOutcome> {
     let session = match sessions.get(session_id) {
-        // Edited connection settings take effect on the next run.
-        Some(session) if session.connection == connection && session.database == database => session,
+        // Edited connection settings, or another database or container, take effect on the next run.
+        Some(session) if session.connection == connection && session.scope == scope => session,
         _ => {
-            let session = Arc::new(QuerySession::open(connection, database).await?);
+            let session = Arc::new(QuerySession::open(connection, scope).await?);
             sessions.insert(session_id.to_string(), session.clone());
             session
         }
@@ -144,13 +155,14 @@ async fn run_in_session(
 pub async fn explain_query(
     store: State<'_, ConnectionStore>,
     connection_id: String,
-    database: Option<String>,
+    scope: QueryScope,
     sql: String,
     analyze: bool,
 ) -> Result<serde_json::Value> {
     let connection = store.get(&connection_id)?;
     let password = secrets::get_password(&connection.id)?;
-    drivers::explain(&connection, password.as_deref(), database.as_deref(), &sql, analyze).await
+    let (database, container) = (scope.database.as_deref(), scope.container.as_deref());
+    drivers::explain(&connection, password.as_deref(), database, container, &sql, analyze).await
 }
 
 /// Stops the query running in the console, if any.

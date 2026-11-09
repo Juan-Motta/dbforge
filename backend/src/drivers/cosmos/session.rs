@@ -1,7 +1,7 @@
-//! The query console: Cosmos DB SQL, one query per statement, separated by `;`.
-//! A query reads one container, and in Cosmos DB SQL the name after FROM is
-//! only an alias for it, so the console takes that name as the container:
-//! `SELECT * FROM orders o WHERE o.total > 100` reads `orders` as written.
+//! The query console: Cosmos DB SQL on the container picked in the console, as
+//! Data Explorer runs it. In Cosmos DB SQL the name after FROM is only an alias
+//! for that container, so `SELECT * FROM c WHERE c.total > 100` reads as written.
+//! Queries are separated by `;`.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -9,7 +9,7 @@ use std::time::Instant;
 use serde_json::Value;
 use tokio::sync::Notify;
 
-use super::client::{Client, Target};
+use super::client::Client;
 use super::query::{Feed, documents, split_top_level};
 use super::{containers, row, shared_type, text, typed};
 use crate::connections::model::Connection;
@@ -19,17 +19,22 @@ use crate::error::{AppError, Result};
 pub struct Session {
     client: Client,
     database: String,
+    container: String,
     /// Wakes a running query to stop reading it.
     cancel: Arc<Notify>,
 }
 
-/// A console on `database`, or on the connection's own.
-pub async fn open_session(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Session> {
+/// A console on `container` of `database` (the connection's own when `None`).
+pub async fn open_session(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+    container: Option<&str>,
+) -> Result<Session> {
     let database = console_database(connection, database)?;
     let client = Client::new(connection, password)?;
-    // Proves the database is there before the first query.
-    client.get(&Target::database(&database), &[]).await?;
-    Ok(Session { client, database, cancel: Arc::new(Notify::new()) })
+    let container = console_container(&client, &database, container).await?;
+    Ok(Session { client, database, container, cancel: Arc::new(Notify::new()) })
 }
 
 impl Session {
@@ -37,8 +42,8 @@ impl Session {
         self.cancel.clone()
     }
 
-    /// Runs every query in order. Each query's container is found first, so a
-    /// wrong name anywhere means nothing runs. Only `row_limit` items are read.
+    /// Runs every query in order on the console's container. Only `row_limit`
+    /// items of each are read.
     pub async fn run(&mut self, script: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
         // Registered before the queries start, so a cancel can't slip in between.
@@ -51,13 +56,9 @@ impl Session {
             return Err(AppError::Invalid("Nothing to run.".into()));
         }
         let run = async {
-            let mut targets = Vec::new();
-            for query in &queries {
-                targets.push(container_for(&self.client, &self.database, query).await?);
-            }
             let mut results = Vec::new();
-            for (query, container) in queries.iter().zip(&targets) {
-                results.push(read(&self.client, &self.database, container, query, row_limit).await?);
+            for query in &queries {
+                results.push(read(&self.client, &self.database, &self.container, query, row_limit).await?);
             }
             Ok::<_, AppError>(results)
         };
@@ -83,17 +84,14 @@ pub(super) fn console_database(connection: &Connection, database: Option<&str>) 
         .ok_or_else(|| AppError::Invalid("Select a database for the console.".into()))
 }
 
-/// The container `query` names after FROM, once it is known to exist.
-pub(super) async fn container_for(client: &Client, database: &str, query: &str) -> Result<String> {
-    let container = container_of(query).ok_or_else(|| {
-        AppError::Invalid("Name the container after FROM, like SELECT * FROM orders o WHERE o.total > 100.".into())
-    })?;
-    if !containers(client, database).await?.contains(&container) {
-        return Err(AppError::Invalid(format!(
-            "There's no container {container} in {database}. The name after FROM is the container to read."
-        )));
+/// The console's container, once it is known to exist.
+pub(super) async fn console_container(client: &Client, database: &str, container: Option<&str>) -> Result<String> {
+    let container =
+        container.filter(|c| !c.is_empty()).ok_or_else(|| AppError::Invalid("Pick the container to query.".into()))?;
+    if !containers(client, database).await?.iter().any(|name| name == container) {
+        return Err(AppError::Invalid(format!("There's no container {container} in {database}.")));
     }
-    Ok(container)
+    Ok(container.to_string())
 }
 
 /// Reads the query's items up to `row_limit`; the rest are never fetched.
@@ -148,70 +146,12 @@ fn column(name: &str, data_type: String) -> Column {
     Column { name: name.into(), data_type, primary_key: false, generated: false, default: None }
 }
 
-/// The container a query reads: the name after its first FROM outside
-/// quotes and brackets. `FROM x IN c.list` iterates a property, not a container.
-pub(super) fn container_of(query: &str) -> Option<String> {
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    let chars: Vec<char> = query.chars().collect();
-    let mut index = 0;
-    while index < chars.len() {
-        let ch = chars[index];
-        if let Some(q) = quote {
-            if ch == '\\' {
-                index += 1;
-            } else if ch == q {
-                quote = None;
-            }
-        } else {
-            match ch {
-                '\'' | '"' => quote = Some(ch),
-                '(' | '[' | '{' => depth += 1,
-                ')' | ']' | '}' => depth -= 1,
-                _ if depth == 0 && word_at(&chars, index).eq_ignore_ascii_case("from") => {
-                    let mut words = chars[index + 4..].iter().collect::<String>();
-                    words = words.trim_start().to_string();
-                    let name: String = words.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-                    let rest = words[name.len()..].trim_start();
-                    let iterates = rest.len() >= 3 && rest[..3].eq_ignore_ascii_case("in ");
-                    return (!name.is_empty() && !iterates).then_some(name);
-                }
-                _ => {}
-            }
-        }
-        index += 1;
-    }
-    None
-}
-
-/// The word starting at `index`, when a word starts there.
-fn word_at(chars: &[char], index: usize) -> String {
-    let is_word = |c: &char| c.is_alphanumeric() || *c == '_';
-    if index > 0 && is_word(&chars[index - 1]) {
-        return String::new();
-    }
-    chars[index..].iter().take_while(|c| is_word(c)).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::super::tests::{KEY, database};
     use super::*;
-
-    #[test]
-    fn finds_the_container_after_from() {
-        assert_eq!(container_of("SELECT * FROM orders o WHERE o.total > 1").as_deref(), Some("orders"));
-        assert_eq!(container_of("select value count(1) from c").as_deref(), Some("c"));
-        assert_eq!(
-            container_of("SELECT 'from x' AS f, (SELECT VALUE 1 FROM t IN o.tags) FROM orders o").as_deref(),
-            Some("orders")
-        );
-        assert_eq!(container_of("SELECT o.fromage FROM\n  big_orders").as_deref(), Some("big_orders"));
-        assert_eq!(container_of("SELECT * FROM t IN c.tags"), None);
-        assert_eq!(container_of("SELECT 1"), None);
-    }
 
     #[test]
     fn results_show_objects_as_columns_and_values_as_one() {
@@ -232,29 +172,31 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the Cosmos DB emulator on port 58081"]
-    async fn runs_queries_on_the_container_after_from() {
+    async fn runs_queries_on_the_picked_container() {
         let items =
             (0..5).map(|i| json!({"id": i.to_string(), "customer": format!("c{}", i % 2), "total": i})).collect();
-        let connection = database("dbforge_console", &[("orders", "/customer", items)]).await;
-        let mut session = open_session(&connection, KEY, None).await.unwrap();
+        let connection = database("dbforge_console", &[("order-items", "/customer", items)]).await;
+        let mut session = open_session(&connection, KEY, None, Some("order-items")).await.unwrap();
 
-        let outcome = session
-            .run("SELECT o.id, o.total FROM orders o WHERE o.total > 1 ORDER BY o.total DESC; SELECT VALUE COUNT(1) FROM orders", 2)
-            .await
-            .unwrap();
+        // Written as Data Explorer writes it: the name after FROM is any alias.
+        let script =
+            "SELECT c.id, c.total FROM c WHERE c.total > 1 ORDER BY c.total DESC; SELECT VALUE COUNT(1) FROM o";
+        let outcome = session.run(script, 2).await.unwrap();
         let first = &outcome.results[0];
         assert_eq!(first.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["id", "total"]);
         assert_eq!(first.rows, [[Some("4".into()), Some("4".into())], [Some("3".into()), Some("3".into())]]);
         assert!(first.truncated);
         assert_eq!(outcome.results[1].rows, [[Some("5".into())]]);
 
-        let error = session.run("SELECT * FROM orders; SELECT * FROM nope", 10).await.unwrap_err();
-        assert!(error.to_string().starts_with("There's no container nope in dbforge_console"), "{error}");
-        let error = session.run("SELECT * FROM orders o WHERE o.nope(", 10).await.unwrap_err();
+        let error = session.run("SELECT * FROM c WHERE c.nope(", 10).await.unwrap_err();
         assert!(error.to_string().contains("Syntax error"), "{error}");
 
-        let missing = open_session(&connection, KEY, Some("dbforge_nope")).await.err().unwrap();
-        assert!(missing.to_string().contains("not found"), "{missing}");
+        let missing = open_session(&connection, KEY, None, Some("nope")).await.err().unwrap();
+        assert_eq!(missing.to_string(), "There's no container nope in dbforge_console.");
+        let unpicked = open_session(&connection, KEY, None, None).await.err().unwrap();
+        assert_eq!(unpicked.to_string(), "Pick the container to query.");
+        let no_database = open_session(&connection, KEY, Some("dbforge_nope"), Some("x")).await.err().unwrap();
+        assert!(no_database.to_string().contains("not found"), "{no_database}");
     }
 
     #[tokio::test]
@@ -262,11 +204,11 @@ mod tests {
     async fn cancel_stops_the_running_query_and_the_session_stays_usable() {
         let items = (0..3).map(|i| json!({"id": i.to_string(), "customer": "c"})).collect();
         let connection = database("dbforge_cancel", &[("orders", "/customer", items)]).await;
-        let mut session = open_session(&connection, KEY, None).await.unwrap();
+        let mut session = open_session(&connection, KEY, None, Some("orders")).await.unwrap();
         let canceller = session.canceller();
         // Harmless while idle, and not remembered for the next run.
         canceller.notify_waiters();
-        assert_eq!(session.run("SELECT * FROM orders", 10).await.unwrap().results[0].rows.len(), 3);
+        assert_eq!(session.run("SELECT * FROM c", 10).await.unwrap().results[0].rows.len(), 3);
 
         let waker = canceller.clone();
         let cancel = tokio::spawn(async move {
@@ -274,11 +216,11 @@ mod tests {
             waker.notify_waiters();
         });
         // Many queries, so the cancel lands while they run.
-        let script = vec!["SELECT * FROM orders"; 200].join(";");
+        let script = vec!["SELECT * FROM c"; 200].join(";");
         let error = session.run(&script, 10).await.unwrap_err();
         cancel.await.unwrap();
         assert_eq!(error.to_string(), "Query cancelled.");
         assert!(session.is_alive().await);
-        assert_eq!(session.run("SELECT VALUE COUNT(1) FROM orders", 10).await.unwrap().results[0].rows.len(), 1);
+        assert_eq!(session.run("SELECT VALUE COUNT(1) FROM c", 10).await.unwrap().results[0].rows.len(), 1);
     }
 }

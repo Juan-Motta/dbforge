@@ -63,7 +63,19 @@ export function App() {
               activePath[0] ?? `db${activeConnection.database || 0}`,
             ),
           )
-      : () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
+      : activeConnection.engine === 'cosmosdb'
+        ? // A Cosmos DB console queries one container: the selected one, if any.
+          () =>
+            setTabs((state) =>
+              newQueryTab(
+                state,
+                activeConnection.id,
+                activePath[0] ?? (activeConnection.database || undefined),
+                undefined,
+                activePath[1],
+              ),
+            )
+        : () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
     : undefined
 
   // The diagram of the selected schema, or the default one when only a connection or database is selected.
@@ -190,7 +202,13 @@ export function App() {
               }
               onOpenQuery={(entry) =>
                 setTabs((state) =>
-                  newQueryTab(state, entry.connectionId, entry.database ?? undefined, entry.sql),
+                  newQueryTab(
+                    state,
+                    entry.connectionId,
+                    entry.database ?? undefined,
+                    entry.sql,
+                    entry.container ?? undefined,
+                  ),
                 )
               }
             />

@@ -2,7 +2,7 @@ import type { TableRef } from '../domain/table'
 import type { RowFilter } from '../features/table-data/rowFilter'
 
 export type Tab = { id: string; title: string; connectionId: string } & (
-  | { kind: 'query'; database?: string; initialSql?: string }
+  | { kind: 'query'; database?: string; initialSql?: string; container?: string }
   | { kind: 'table'; table: TableRef; filter?: RowFilter }
   | { kind: 'diagram'; database: string; schema: string }
   | { kind: 'keyspace'; database: string }
@@ -17,12 +17,13 @@ export interface TabsState {
 
 export const NO_TABS: TabsState = { tabs: [], activeId: null, queriesCreated: 0 }
 
-/** Opens a new query console, optionally prefilled with `initialSql`. */
+/** Opens a new query console, optionally prefilled with `initialSql` (on a Cosmos DB `container`). */
 export function newQueryTab(
   state: TabsState,
   connectionId: string,
   database?: string,
   initialSql?: string,
+  container?: string,
 ): TabsState {
   const n = state.queriesCreated + 1
   const tab: Tab = {
@@ -32,6 +33,7 @@ export function newQueryTab(
     connectionId,
     database,
     initialSql,
+    container,
   }
   return { ...openTab(state, tab), queriesCreated: n }
 }

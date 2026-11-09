@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { errorMessage } from '../../lib/errors'
-import { queryApi, type QueryOutcome } from './api'
+import { queryApi, type QueryOutcome, type QueryScope } from './api'
 import { parsePlan, type Plan } from './plan'
 
 /** The latest finished run or explain; `id` changes every time. */
 export type LastRun = { id: number } & ({ outcome: QueryOutcome } | { plan: Plan } | { error: string })
 
 /** Runs queries in the console's session and closes the session on unmount. */
-export function useQueryRunner(sessionId: string, connectionId: string, database: string | undefined) {
+export function useQueryRunner(sessionId: string, connectionId: string, scope: QueryScope) {
   const [running, setRunning] = useState(false)
   const [explaining, setExplaining] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -23,7 +23,7 @@ export function useQueryRunner(sessionId: string, connectionId: string, database
     setCancelError(null)
     const id = (lastRun?.id ?? 0) + 1
     try {
-      setLastRun({ id, outcome: await queryApi.run(sessionId, connectionId, database, sql) })
+      setLastRun({ id, outcome: await queryApi.run(sessionId, connectionId, scope, sql) })
     } catch (error) {
       setLastRun({ id, error: errorMessage(error) })
     } finally {
@@ -38,7 +38,7 @@ export function useQueryRunner(sessionId: string, connectionId: string, database
     setExplaining(true)
     const id = (lastRun?.id ?? 0) + 1
     try {
-      setLastRun({ id, plan: parsePlan(await queryApi.explain(connectionId, database, sql, analyze)) })
+      setLastRun({ id, plan: parsePlan(await queryApi.explain(connectionId, scope, sql, analyze)) })
     } catch (error) {
       setLastRun({ id, error: errorMessage(error) })
     } finally {

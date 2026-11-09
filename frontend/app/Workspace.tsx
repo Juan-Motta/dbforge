@@ -73,6 +73,7 @@ export function Workspace({
               sessionId={tab.id}
               connectionId={tab.connectionId}
               database={tab.database}
+              container={tab.container}
               initialSql={tab.initialSql}
               onOpenQuery={onOpenQuery}
               canOpen={(entry) => connectionOf(entry.connectionId) !== undefined}

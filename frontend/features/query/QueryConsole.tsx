@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { SqlDialect } from '../../domain/connection'
+import { explorerApi } from '../explorer/api'
 import type { HistoryEntry } from '../history/api'
 import { HistoryPanel } from '../history/HistoryPanel'
 import type { StatementResult } from './api'
@@ -17,6 +18,8 @@ interface QueryConsoleProps {
   connectionId: string
   /** Runs against this database; the connection's default when omitted. */
   database?: string
+  /** Cosmos DB: the container picked first; the console's picker can change it. */
+  container?: string
   /** Text the editor starts with, e.g. a query reopened from the history. */
   initialSql?: string
   onExportResult: (result: StatementResult) => void
@@ -32,6 +35,7 @@ export function QueryConsole({
   sessionId,
   connectionId,
   database,
+  container: firstContainer,
   initialSql,
   onExportResult,
   dialect,
@@ -39,10 +43,14 @@ export function QueryConsole({
   canOpen,
 }: QueryConsoleProps) {
   const editor = useRef<SqlEditorHandle>(null)
+  const containers = useContainers(dialect === 'cosmosdb' ? connectionId : null, database)
+  const [picked, setPicked] = useState(firstContainer)
+  // Until one is picked, the database's first container.
+  const container = picked ?? containers?.[0]
   const { running, explaining, cancelling, cancelError, lastRun, run, explain, cancel } = useQueryRunner(
     sessionId,
     connectionId,
-    database,
+    { database, container },
   )
   const [analyze, setAnalyze] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -63,6 +71,22 @@ export function QueryConsole({
         <span className="muted">
           <Icon name="database" size={14} className={styles.inline} /> {database ?? 'default database'}
         </span>
+        {containers && (
+          <select
+            className={styles.container}
+            aria-label="Container to query"
+            value={container ?? ''}
+            disabled={running || explaining || containers.length === 0}
+            onChange={(event) => setPicked(event.target.value)}
+          >
+            {containers.length === 0 && <option value="">No containers</option>}
+            {containers.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
         <span className={styles.spacer} />
         {cancelError && <span className={styles.cancelError}>Could not cancel: {cancelError}</span>}
         <Button
@@ -135,4 +159,25 @@ export function QueryConsole({
       </div>
     </div>
   )
+}
+
+/**
+ * The containers a Cosmos DB console can query, for its picker; `null` for other
+ * engines, and while they load. Without a database there is nothing to list.
+ */
+function useContainers(connectionId: string | null, database: string | undefined): string[] | null {
+  const [containers, setContainers] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (connectionId === null || !database) return
+    let current = true
+    explorerApi
+      .listObjects(connectionId, [database])
+      .then((objects) => current && setContainers(objects.map((object) => object.name)))
+      .catch(() => current && setContainers([]))
+    return () => {
+      current = false
+    }
+  }, [connectionId, database])
+  if (connectionId === null) return null
+  return database ? containers : []
 }

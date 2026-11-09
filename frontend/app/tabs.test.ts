@@ -42,6 +42,11 @@ describe('tabs', () => {
     expect(state.tabs[0]).toMatchObject({ kind: 'query', database: 'shop', initialSql: 'SELECT 1' })
   })
 
+  it('opens a Cosmos DB console on a container', () => {
+    const state = newQueryTab(NO_TABS, 'cosmos', 'shop', 'SELECT * FROM c', 'order-items')
+    expect(state.tabs[0]).toMatchObject({ database: 'shop', container: 'order-items' })
+  })
+
   it('keeps numbering after a query tab closes', () => {
     const one = newQueryTab(NO_TABS, 'pg')
     const state = newQueryTab(closeTab(one, 'query:1'), 'pg')

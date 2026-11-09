@@ -8,6 +8,8 @@ export interface HistoryEntry {
   /** The name when it ran; the connection may have been renamed or deleted since. */
   connectionName: string
   database: string | null
+  /** The Cosmos DB container the console queried. */
+  container?: string | null
   sql: string
   elapsedMs: number
   statements: number

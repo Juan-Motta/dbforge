@@ -496,7 +496,13 @@ pub enum CancelTarget {
     Unavailable,
 }
 
-pub async fn open_session(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Session> {
+/// `container` is the one a Cosmos DB console queries; other engines name tables in the query.
+pub async fn open_session(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+    container: Option<&str>,
+) -> Result<Session> {
     with_timeout(async {
         match connection.engine {
             Engine::Postgres => Ok(Session::Postgres(postgres::open_session(connection, password, database).await?)),
@@ -509,7 +515,9 @@ pub async fn open_session(connection: &Connection, password: Option<&str>, datab
             }
             Engine::Mongodb => Ok(Session::Mongodb(mongodb::open_session(connection, password, database).await?)),
             Engine::Redis => Ok(Session::Redis(redis::open_session(connection, password, database).await?)),
-            Engine::Cosmosdb => Ok(Session::Cosmosdb(cosmos::open_session(connection, password, database).await?)),
+            Engine::Cosmosdb => {
+                Ok(Session::Cosmosdb(cosmos::open_session(connection, password, database, container).await?))
+            }
         }
     })
     .await
@@ -563,6 +571,7 @@ pub async fn explain(
     connection: &Connection,
     password: Option<&str>,
     database: Option<&str>,
+    container: Option<&str>,
     sql: &str,
     analyze: bool,
 ) -> Result<serde_json::Value> {
@@ -572,7 +581,7 @@ pub async fn explain(
         Engine::Mysql | Engine::Mariadb => mysql::explain(connection, password, database, sql, analyze).await,
         Engine::Sqlserver => sqlserver::explain(connection, password, database, sql, analyze).await,
         Engine::Mongodb => mongodb::explain(connection, password, database, sql, analyze).await,
-        Engine::Cosmosdb => cosmos::explain(connection, password, database, sql, analyze).await,
+        Engine::Cosmosdb => cosmos::explain(connection, password, database, container, sql, analyze).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }

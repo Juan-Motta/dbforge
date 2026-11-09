@@ -26,6 +26,9 @@ pub struct HistoryEntry {
     /// The name when it ran, so the entry stays readable after a rename or delete.
     pub connection_name: String,
     pub database: Option<String>,
+    /// The Cosmos DB container the console queried. Missing from older lines.
+    #[serde(default)]
+    pub container: Option<String>,
     pub sql: String,
     pub elapsed_ms: u64,
     pub statements: usize,
@@ -121,12 +124,20 @@ mod tests {
             connection_id: "c1".into(),
             connection_name: "local".into(),
             database: None,
+            container: None,
             sql: sql.into(),
             elapsed_ms: 1,
             statements: 1,
             rows: 0,
             error: error.map(Into::into),
         }
+    }
+
+    #[test]
+    fn reads_lines_saved_before_containers_were_recorded() {
+        let old = r#"{"id":"1","executedAt":1,"connectionId":"c1","connectionName":"local","database":"shop","sql":"SELECT 1","elapsedMs":1,"statements":1,"rows":1,"error":null}"#;
+        let entry: HistoryEntry = serde_json::from_str(old).unwrap();
+        assert_eq!((entry.database.as_deref(), entry.container), (Some("shop"), None));
     }
 
     fn ids(entries: &[HistoryEntry]) -> Vec<&str> {
