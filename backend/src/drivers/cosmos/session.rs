@@ -119,9 +119,10 @@ async fn read(
 }
 
 /// Objects show their properties as columns, every one the query returned;
-/// anything else (`SELECT VALUE …`) is one `value` column.
+/// anything else (`SELECT VALUE …`, or nothing) is one `value` column.
 fn result_of(items: &[Value], truncated: bool) -> StatementResult {
-    let objects = items.iter().all(Value::is_object);
+    // No items still shows a grid, empty, rather than a statement that returns none.
+    let objects = !items.is_empty() && items.iter().all(Value::is_object);
     let columns = if objects {
         // In the order they first appear, the service's own included: the query asked for them.
         let mut names: Vec<&String> = Vec::new();
@@ -218,6 +219,9 @@ mod tests {
         let names: Vec<_> = objects.columns.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["customer", "n", "_ts"]);
         assert_eq!(objects.rows[1], [Some("b".into()), None, Some("5".into())]);
+
+        let empty = result_of(&[], false);
+        assert_eq!((empty.columns.len(), empty.rows.len()), (1, 0));
 
         let values = result_of(&[json!(3), json!({"a": 1})], true);
         assert_eq!(values.columns[0].name, "value");

@@ -19,6 +19,14 @@ describe('sortBy', () => {
     expect(sortBy('mongodb', 'created at', NO_FILTER).order).toBe('{"created at": 1}')
   })
 
+  it('writes Cosmos DB sorts on the item `c`', () => {
+    const asc = sortBy('cosmosdb', 'total', NO_FILTER)
+    expect(asc.order).toBe('c.total')
+    expect(sortBy('cosmosdb', 'total', asc).order).toBe('c.total DESC')
+    expect(sortBy('cosmosdb', 'created at', NO_FILTER).order).toBe('c["created at"]')
+    expect(sortOf('cosmosdb', 'total', 'c.total DESC')).toBe('desc')
+  })
+
   it('replaces another column’s order', () => {
     expect(sortBy('postgres', 'id', { filter: '', order: 'total DESC, id' }).order).toBe('"id"')
   })

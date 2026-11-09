@@ -2,8 +2,8 @@ import type { SqlDialect } from '../../domain/connection'
 
 /**
  * What the filter bar narrows and orders a table's rows by. SQL engines read a
- * `WHERE` condition and an `ORDER BY` list as typed; MongoDB reads a filter and
- * a sort document in mongosh syntax.
+ * `WHERE` condition and an `ORDER BY` list as typed, Cosmos DB the same on its
+ * items, called `c`; MongoDB reads a filter and a sort document in mongosh syntax.
  */
 export interface RowFilter {
   filter: string
@@ -18,22 +18,32 @@ export function isFiltered(filter: RowFilter): boolean {
 
 /** How the bar labels and hints its two fields for an engine. */
 export function filterLabels(dialect: SqlDialect) {
-  return dialect === 'mongodb'
-    ? {
+  switch (dialect) {
+    case 'mongodb':
+      return {
         filter: 'Filter',
         filterHint: "{status: 'paid', total: {$gt: 100}}",
         order: 'Sort',
         orderHint: '{created: -1}',
       }
-    : {
+    case 'cosmosdb':
+      return {
+        filter: 'WHERE',
+        filterHint: "c.status = 'paid' AND c.total > 100",
+        order: 'ORDER BY',
+        orderHint: 'c.created DESC',
+      }
+    default:
+      return {
         filter: 'WHERE',
         filterHint: "status = 'paid' AND total > 100",
         order: 'ORDER BY',
         orderHint: 'created_at DESC',
       }
+  }
 }
 
-/** A column name as the dialect writes it in SQL (or a key in a MongoDB document). */
+/** A column name as the dialect writes it in SQL (a key in a MongoDB document, a property of Cosmos DB's `c`). */
 export function quote(dialect: SqlDialect, column: string): string {
   switch (dialect) {
     case 'mysql':
@@ -42,6 +52,8 @@ export function quote(dialect: SqlDialect, column: string): string {
       return '[' + column.replaceAll(']', ']]') + ']'
     case 'mongodb':
       return /^[A-Za-z_$][\w$]*$/.test(column) ? column : JSON.stringify(column)
+    case 'cosmosdb':
+      return /^[A-Za-z_][\w]*$/.test(column) ? `c.${column}` : `c[${JSON.stringify(column)}]`
     default:
       return '"' + column.replaceAll('"', '""') + '"'
   }

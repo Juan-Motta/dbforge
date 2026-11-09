@@ -17,6 +17,14 @@ describe('withEngine', () => {
   it('keeps a port the user changed', () => {
     expect(withEngine({ ...emptyForm(), port: '6543' }, 'mysql').port).toBe('6543')
   })
+
+  it('turns TLS on for Cosmos DB, and back off, unless the user changed it', () => {
+    const cosmos = withEngine(emptyForm(), 'cosmosdb')
+    expect(cosmos).toMatchObject({ port: '443', tls: true })
+    expect(withEngine(cosmos, 'mongodb').tls).toBe(false)
+    expect(withEngine({ ...cosmos, tls: false }, 'redis').tls).toBe(false)
+    expect(withEngine({ ...withEngine(emptyForm(), 'redis'), tls: true }, 'cosmosdb').tls).toBe(true)
+  })
 })
 
 describe('isValidPort', () => {
@@ -121,6 +129,26 @@ describe('parseConnectionUrl', () => {
     expect(replica.ignored).toEqual(['hosts b:27018'])
   })
 
+  it('reads a Cosmos DB connection string, key padding included', () => {
+    const azure = parseConnectionUrl(
+      'AccountEndpoint=https://shop.documents.azure.com:443/;AccountKey=abc+/def==;Database=x;',
+    )!
+    expect(azure.changes).toEqual({
+      engine: 'cosmosdb',
+      host: 'shop.documents.azure.com',
+      port: '443',
+      username: '',
+      password: 'abc+/def==',
+      tls: true,
+      allowSelfSigned: false,
+      srv: false,
+    })
+    expect(azure.ignored).toEqual(['Database=x'])
+    const emulator = parseConnectionUrl('AccountEndpoint=http://localhost:8081/;AccountKey=k==')!
+    expect(emulator.changes).toMatchObject({ host: 'localhost', port: '8081', tls: false })
+    expect(parseConnectionUrl('AccountEndpoint=not a url;AccountKey=k')).toBeNull()
+  })
+
   it('leaves anything else alone', () => {
     expect(parseConnectionUrl('localhost')).toBeNull()
     expect(parseConnectionUrl('postgres://x')).toBeNull()
@@ -159,6 +187,11 @@ describe('TLS options', () => {
   it('sends no database for Redis: the explorer opens any of them', () => {
     const redis = { ...withEngine(emptyForm(), 'redis'), name: 'r', database: '3' }
     expect(toInput(redis).database).toBe('')
+  })
+
+  it('sends no user with an account key', () => {
+    const cosmos = { ...withEngine(emptyForm(), 'cosmosdb'), name: 'c', username: 'left over' }
+    expect(toInput(cosmos)).toMatchObject({ username: '', tls: true, port: 443 })
   })
 
   it('needs no port for a MongoDB seed list', () => {

@@ -10,6 +10,7 @@ import {
   ENGINE_LABELS,
   ENVIRONMENT_LABELS,
   isFileEngine,
+  KEY_ENGINES,
   NOSQL_ENGINES,
   RELATIONAL_ENGINES,
   TLS_ENGINES,
@@ -51,6 +52,7 @@ interface ConnectionDialogProps {
 /** Engines whose host field also takes a pasted URL, which it splits into the fields. */
 const HOST_HINTS: Partial<Record<Engine, string>> = {
   mongodb: 'localhost, or paste a mongodb:// URL',
+  cosmosdb: 'account.documents.azure.com, or paste a connection string',
   redis: 'localhost, or paste a redis:// URL',
 }
 
@@ -58,6 +60,7 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
   )
+  const keyed = KEY_ENGINES.includes(form.engine)
   const [test, setTest] = useState<TestState>({ status: 'idle' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -250,27 +253,31 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 />
               )}
 
-              <div className={styles.pair}>
+              <div className={keyed ? undefined : styles.pair}>
+                {!keyed && (
+                  <TextField
+                    // Redis 6+ has ACL users; without ACLs the password alone is enough.
+                    label={form.engine === 'redis' ? 'User (ACL, optional)' : 'User'}
+                    placeholder={form.engine === 'redis' ? 'default' : undefined}
+                    mono
+                    autoComplete="off"
+                    value={form.username}
+                    onChange={(e) => update({ username: e.target.value })}
+                  />
+                )}
                 <TextField
-                  // Redis 6+ has ACL users; without ACLs the password alone is enough.
-                  label={form.engine === 'redis' ? 'User (ACL, optional)' : 'User'}
-                  placeholder={form.engine === 'redis' ? 'default' : undefined}
-                  mono
-                  autoComplete="off"
-                  value={form.username}
-                  onChange={(e) => update({ username: e.target.value })}
-                />
-                <TextField
-                  label="Password"
+                  label={keyed ? 'Key' : 'Password'}
                   mono
                   type="password"
                   autoComplete="new-password"
-                  placeholder={connection ? 'Unchanged' : ''}
+                  placeholder={connection ? 'Unchanged' : keyed ? 'Primary or secondary key' : ''}
                   value={form.password}
                   onChange={(e) => update({ password: e.target.value })}
                 />
               </div>
-              <p className={styles.hint}>Passwords are stored in your OS keychain, never in a file.</p>
+              <p className={styles.hint}>
+                {keyed ? 'Keys' : 'Passwords'} are stored in your OS keychain, never in a file.
+              </p>
 
               {TLS_ENGINES.includes(form.engine) && (
                 <div className={styles.options}>

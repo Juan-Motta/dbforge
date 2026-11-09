@@ -1,6 +1,8 @@
 import {
   DEFAULT_PORTS,
   isFileEngine,
+  KEY_ENGINES,
+  TLS_BY_DEFAULT,
   TLS_ENGINES,
   type Connection,
   type Engine,
@@ -46,10 +48,16 @@ export function formFromConnection(connection: Connection): ConnectionForm {
   return parsed ? { ...form, ...parsed.changes } : form
 }
 
-/** Switches engine, moving the port to the new default unless the user changed it. */
+/** Switches engine, moving the port and TLS to the new defaults unless the user changed them. */
 export function withEngine(form: ConnectionForm, engine: Engine): ConnectionForm {
   const usesDefaultPort = form.port === String(DEFAULT_PORTS[form.engine])
-  return { ...form, engine, port: usesDefaultPort ? String(DEFAULT_PORTS[engine]) : form.port }
+  const usesDefaultTls = form.tls === TLS_BY_DEFAULT.includes(form.engine)
+  return {
+    ...form,
+    engine,
+    port: usesDefaultPort ? String(DEFAULT_PORTS[engine]) : form.port,
+    tls: usesDefaultTls ? TLS_BY_DEFAULT.includes(engine) : form.tls,
+  }
 }
 
 export function isValidPort(port: string): boolean {
@@ -87,6 +95,8 @@ export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
     port: srv && !isValidPort(port) ? DEFAULT_PORTS.mongodb : Number(port),
     // Redis databases are numbered and all listed in the explorer; there is none to pick here.
     database: form.engine === 'redis' ? '' : form.database,
+    // An account key stands alone.
+    username: KEY_ENGINES.includes(form.engine) ? '' : form.username,
     password: password === '' ? undefined : password,
     tls,
     allowSelfSigned: tls && form.allowSelfSigned,
@@ -102,12 +112,15 @@ const MONGO_OPTIONS = ['tls', 'ssl', 'tlsAllowInvalidCertificates', 'tlsInsecure
 
 /**
  * The form values a `redis://`, `rediss://`, `mongodb://` or `mongodb+srv://`
- * URL stands for, and the parts of it the form can't hold (`ignored`), so they
- * can be shown rather than dropped silently. `null` for anything else.
+ * URL, or a Cosmos DB connection string, stands for, and the parts of it the
+ * form can't hold (`ignored`), so they can be shown rather than dropped
+ * silently. `null` for anything else.
  */
 export function parseConnectionUrl(
   text: string,
 ): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
+  const cosmos = parseCosmosConnectionString(text)
+  if (cosmos) return cosmos
   const match = URL_PATTERN.exec(text.trim())
   if (!match) return null
   const [, scheme, user = '', pass = '', hosts, path = '', query = '', fragment = ''] = match
@@ -164,6 +177,45 @@ export function parseConnectionUrl(
       tls,
       allowSelfSigned: tls && on('tlsAllowInvalidCertificates', 'tlsInsecure'),
       srv,
+    },
+    ignored,
+  }
+}
+
+/**
+ * `AccountEndpoint=https://<account>.documents.azure.com:443/;AccountKey=…;`, as
+ * the Azure portal and the emulator give it. Its key is the account key.
+ */
+function parseCosmosConnectionString(
+  text: string,
+): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
+  const settings = new Map<string, string>()
+  const ignored: string[] = []
+  for (const part of text
+    .trim()
+    .split(';')
+    .map((p) => p.trim())) {
+    // A key ends in Base64 padding, so only the first `=` splits a setting.
+    const cut = part.indexOf('=')
+    if (cut <= 0) continue
+    const name = part.slice(0, cut).toLowerCase()
+    if (name === 'accountendpoint' || name === 'accountkey') settings.set(name, part.slice(cut + 1))
+    else ignored.push(part)
+  }
+  const endpoint = settings.get('accountendpoint')
+  if (!endpoint || !URL.canParse(endpoint)) return null
+  const url = new URL(endpoint)
+  const tls = url.protocol === 'https:'
+  return {
+    changes: {
+      engine: 'cosmosdb',
+      host: url.hostname,
+      port: url.port || (tls ? '443' : '80'),
+      username: '',
+      password: settings.get('accountkey') ?? '',
+      tls,
+      allowSelfSigned: false,
+      srv: false,
     },
     ignored,
   }

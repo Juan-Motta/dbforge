@@ -28,6 +28,7 @@ describe('engines', () => {
     expect(defaultSchema('sqlserver', 'shop')).toBe('dbo')
     // A MongoDB database holds its collections directly.
     expect(defaultSchema('mongodb', 'shop')).toBe('shop')
+    expect(defaultSchema('cosmosdb', 'shop')).toBe('shop')
   })
 
   it('picks the SQL dialect', () => {
@@ -36,6 +37,7 @@ describe('engines', () => {
     expect(sqlDialectOf('sqlite')).toBe('sqlite')
     expect(sqlDialectOf('sqlserver')).toBe('sqlserver')
     expect(sqlDialectOf('mongodb')).toBe('mongodb')
+    expect(sqlDialectOf('cosmosdb')).toBe('cosmosdb')
     expect(sqlDialectOf(undefined)).toBe('postgres')
   })
 })
@@ -45,6 +47,7 @@ describe('hasDiagram', () => {
     expect(hasDiagram('postgres')).toBe(true)
     expect(hasDiagram('sqlserver')).toBe(true)
     expect(hasDiagram('mongodb')).toBe(false)
+    expect(hasDiagram('cosmosdb')).toBe(false)
   })
 })
 
@@ -65,6 +68,11 @@ describe('connectionAddress', () => {
 
   it('shows user, host and port for servers', () => {
     expect(connectionAddress(base)).toBe('app@db.local:5432')
+  })
+
+  it('shows only host and port for an account key', () => {
+    const cosmos = { ...base, engine: 'cosmosdb' as const, host: 'shop.documents.azure.com', port: 443 }
+    expect(connectionAddress({ ...cosmos, username: '' })).toBe('shop.documents.azure.com:443')
   })
 
   it('shows the file for SQLite', () => {

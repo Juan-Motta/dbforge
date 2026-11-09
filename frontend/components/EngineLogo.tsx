@@ -7,6 +7,7 @@ import sqlite from '../assets/engines/sqlite.svg'
 import sqlserver from '../assets/engines/sql-server.svg'
 import mongodb from '../assets/engines/mongodb.svg'
 import redis from '../assets/engines/redis.svg'
+import cosmosdb from '../assets/engines/cosmosdb.svg'
 
 const LOGOS: Record<Engine, string> = {
   postgres,
@@ -16,6 +17,7 @@ const LOGOS: Record<Engine, string> = {
   sqlserver,
   mongodb,
   redis,
+  cosmosdb,
 }
 
 export function EngineLogo({ engine, size = 16 }: { engine: Engine; size?: number }) {

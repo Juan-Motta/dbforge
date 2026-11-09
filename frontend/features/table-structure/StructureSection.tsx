@@ -29,7 +29,7 @@ export function StructureSection({
     case 'triggers':
       return <Triggers structure={structure} />
     case 'ddl':
-      return <SqlCode value={structure.ddl} dialect={dialect} />
+      return <SqlCode value={structure.ddl} dialect={dialect} definition />
   }
 }
 
