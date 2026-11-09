@@ -149,9 +149,22 @@ describe('parseConnectionUrl', () => {
     expect(parseConnectionUrl('AccountEndpoint=not a url;AccountKey=k')).toBeNull()
   })
 
+  it('reads the account URI the Azure portal shows, keeping the key typed', () => {
+    const uri = parseConnectionUrl(' https://shop.documents.azure.com:443/ ')!
+    expect(uri.changes).toMatchObject({
+      engine: 'cosmosdb',
+      host: 'shop.documents.azure.com',
+      port: '443',
+      tls: true,
+    })
+    expect(uri.changes).not.toHaveProperty('password')
+    expect(parseConnectionUrl('http://127.0.0.1:8081/')!.changes).toMatchObject({ port: '8081', tls: false })
+  })
+
   it('leaves anything else alone', () => {
     expect(parseConnectionUrl('localhost')).toBeNull()
     expect(parseConnectionUrl('postgres://x')).toBeNull()
+    expect(parseConnectionUrl('https://')).toBeNull()
   })
 })
 

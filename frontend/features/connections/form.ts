@@ -119,7 +119,7 @@ const MONGO_OPTIONS = ['tls', 'ssl', 'tlsAllowInvalidCertificates', 'tlsInsecure
 export function parseConnectionUrl(
   text: string,
 ): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
-  const cosmos = parseCosmosConnectionString(text)
+  const cosmos = parseCosmosConnectionString(text) ?? parseCosmosEndpoint(text)
   if (cosmos) return cosmos
   const match = URL_PATTERN.exec(text.trim())
   if (!match) return null
@@ -183,6 +183,29 @@ export function parseConnectionUrl(
 }
 
 /**
+ * An account's URI, `https://<account>.documents.azure.com:443/`, as the Azure
+ * portal shows it. Only Cosmos DB is reached over HTTP, so any http(s) URL is one.
+ */
+function parseCosmosEndpoint(text: string): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
+  const trimmed = text.trim()
+  if (!/^https?:\/\//i.test(trimmed) || !URL.canParse(trimmed)) return null
+  return { changes: cosmosEndpoint(new URL(trimmed)), ignored: [] }
+}
+
+function cosmosEndpoint(url: URL): Partial<ConnectionForm> {
+  const tls = url.protocol === 'https:'
+  return {
+    engine: 'cosmosdb',
+    host: url.hostname,
+    port: url.port || (tls ? '443' : '80'),
+    username: '',
+    tls,
+    allowSelfSigned: false,
+    srv: false,
+  }
+}
+
+/**
  * `AccountEndpoint=https://<account>.documents.azure.com:443/;AccountKey=…;`, as
  * the Azure portal and the emulator give it. Its key is the account key.
  */
@@ -204,19 +227,8 @@ function parseCosmosConnectionString(
   }
   const endpoint = settings.get('accountendpoint')
   if (!endpoint || !URL.canParse(endpoint)) return null
-  const url = new URL(endpoint)
-  const tls = url.protocol === 'https:'
   return {
-    changes: {
-      engine: 'cosmosdb',
-      host: url.hostname,
-      port: url.port || (tls ? '443' : '80'),
-      username: '',
-      password: settings.get('accountkey') ?? '',
-      tls,
-      allowSelfSigned: false,
-      srv: false,
-    },
+    changes: { ...cosmosEndpoint(new URL(endpoint)), password: settings.get('accountkey') ?? '' },
     ignored,
   }
 }
