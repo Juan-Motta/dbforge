@@ -110,8 +110,13 @@
   opacity: 0.4;
 }
 
-.header:hover .sortable {
+.header:enabled:hover .sortable {
   opacity: 1;
+}
+
+/* While sorting is off, the mark of an unsorted column is not drawn but keeps its room. */
+.header:disabled .sortable {
+  visibility: hidden;
 }
 
 .key {

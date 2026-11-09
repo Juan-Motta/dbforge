@@ -334,15 +334,14 @@ export function EditableGrid(props: EditableGridProps) {
                     <span className={styles.name}>{column.name}</span>
                     {column.generated && <span className={styles.computed}>auto</span>}
                     <span className={styles.type}>{shortTypeName(column.dataType)}</span>
-                    {props.onSort && (
-                      // A click sorts ascending, then descending, then not at all.
-                      <Icon
-                        name={sorted === 'asc' ? 'chevronUp' : sorted === 'desc' ? 'chevronDown' : 'sortable'}
-                        size={12}
-                        className={sorted ? styles.sorted : styles.sortable}
-                        aria-hidden="true"
-                      />
-                    )}
+                    {/* A click sorts ascending, then descending, then not at all. The mark stays
+                        while sorting is off, so the column keeps its width. */}
+                    <Icon
+                      name={sorted === 'asc' ? 'chevronUp' : sorted === 'desc' ? 'chevronDown' : 'sortable'}
+                      size={12}
+                      className={sorted ? styles.sorted : styles.sortable}
+                      aria-hidden="true"
+                    />
                   </button>
                   <span
                     className={styles.resize}
