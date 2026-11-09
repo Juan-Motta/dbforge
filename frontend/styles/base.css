@@ -43,3 +43,23 @@ input {
 .mono {
   font-family: var(--font-mono);
 }
+
+/* Scrollbars at half the system's width, in the theme's colors. */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--border2);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text3);
+}
