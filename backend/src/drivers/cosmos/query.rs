@@ -240,6 +240,14 @@ impl<'a> Feed<'a> {
         }
     }
 
+    /// Values for the query's `@name` parameters.
+    pub fn with_parameters(mut self, parameters: &[(&str, Value)]) -> Self {
+        let parameters: Vec<Value> =
+            parameters.iter().map(|(name, value)| json!({ "name": name, "value": value })).collect();
+        self.query["parameters"] = Value::Array(parameters);
+        self
+    }
+
     /// The next page's reply, or `None` once the query is read to the end.
     pub async fn next(&mut self) -> Result<Option<Reply>> {
         if self.done {

@@ -8,11 +8,13 @@
 //! partition key first, and nested values are written as JSON.
 
 mod client;
+mod edit;
 mod explain;
 mod query;
 mod session;
 mod structure;
 
+pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
 pub use session::{Session, open_session};
 pub use structure::table_structure;

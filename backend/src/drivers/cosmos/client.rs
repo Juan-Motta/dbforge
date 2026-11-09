@@ -62,6 +62,10 @@ impl Target {
         Target::Feed { kind: "offers", parent: String::new() }
     }
 
+    pub fn item(database: &str, container: &str, id: &str) -> Self {
+        Target::Resource { kind: "docs", link: format!("{}/docs/{id}", container_link(database, container)) }
+    }
+
     pub fn partition_key_ranges(database: &str, container: &str) -> Self {
         Target::Feed { kind: "pkranges", parent: container_link(database, container) }
     }
@@ -260,6 +264,10 @@ pub(super) fn error_message(status: StatusCode, body: &str) -> String {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN if message.contains("authorization token") => {
             "Authentication failed: the account key is wrong. Copy the primary key from the account's Keys page.".into()
         }
+        StatusCode::PRECONDITION_FAILED => {
+            "The item was changed by someone else since it was loaded, so it was left as it is.".into()
+        }
+        StatusCode::CONFLICT => "An item with this id already exists in this partition.".into(),
         _ if message.is_empty() => format!("The server answered {status}"),
         _ => message,
     }
@@ -325,5 +333,7 @@ mod tests {
         let key = r#"{"code":"Unauthorized","message":"The input authorization token can't serve the request."}"#;
         assert!(error_message(StatusCode::UNAUTHORIZED, key).starts_with("Authentication failed"));
         assert_eq!(error_message(StatusCode::BAD_GATEWAY, ""), "The server answered 502 Bad Gateway");
+        assert!(error_message(StatusCode::PRECONDITION_FAILED, "{}").starts_with("The item was changed"));
+        assert!(error_message(StatusCode::CONFLICT, "{}").starts_with("An item with this id already exists"));
     }
 }
