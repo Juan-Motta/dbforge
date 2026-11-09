@@ -8,7 +8,12 @@
 //! partition key first, and nested values are written as JSON.
 
 mod client;
+mod explain;
 mod query;
+mod session;
+
+pub use explain::explain;
+pub use session::{Session, open_session};
 
 use std::collections::BTreeSet;
 
@@ -183,21 +188,25 @@ fn key_properties(container: &Value) -> Vec<String> {
 /// the order they first appear, each with the JSON type its values share
 /// (`mixed` when they differ).
 fn columns_of(items: &[Value], keys: &[String]) -> Vec<Column> {
-    let mut columns = ordered_columns(items.iter(), keys, BTreeSet::new());
+    typed(ordered_columns(items.iter(), keys, BTreeSet::new()), items)
+}
+
+/// `columns` with the JSON type their values share in `items`.
+fn typed(mut columns: Vec<Column>, items: &[Value]) -> Vec<Column> {
     for column in &mut columns {
-        let types: BTreeSet<&str> = items
-            .iter()
-            .filter_map(|item| item.get(&column.name))
-            .filter(|value| !value.is_null())
-            .map(type_name)
-            .collect();
-        column.data_type = match types.len() {
-            0 => "null".into(),
-            1 => types.into_iter().next().expect("one").into(),
-            _ => "mixed".into(),
-        };
+        column.data_type = shared_type(items.iter().filter_map(|item| item.get(&column.name)));
     }
     columns
+}
+
+/// The JSON type `values` share, ignoring nulls: `mixed` when they differ.
+fn shared_type<'a>(values: impl Iterator<Item = &'a Value>) -> String {
+    let types: BTreeSet<&str> = values.filter(|value| !value.is_null()).map(type_name).collect();
+    match types.len() {
+        0 => "null".into(),
+        1 => types.into_iter().next().expect("one").into(),
+        _ => "mixed".into(),
+    }
 }
 
 /// Property names in order of first appearance in `items`, then `extra` ones,

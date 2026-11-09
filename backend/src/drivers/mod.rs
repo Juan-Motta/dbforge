@@ -466,6 +466,7 @@ pub enum Session {
     Sqlserver(Box<sqlserver::Session>),
     Mongodb(mongodb::Session),
     Redis(redis::Session),
+    Cosmosdb(cosmos::Session),
 }
 
 /// What a cancel request needs to find a session's running query on the server.
@@ -477,7 +478,8 @@ pub enum CancelTarget {
     Mysql {
         id: u64,
     },
-    /// SQL Server cancels on the session's own connection, which this wakes.
+    /// SQL Server cancels on the session's own connection, and Cosmos DB stops
+    /// reading the query's pages; this wakes the running query to do it.
     Signal(Arc<tokio::sync::Notify>),
     /// MongoDB finds the operations tagged with the session's comment.
     Mongodb {
@@ -504,7 +506,7 @@ pub async fn open_session(connection: &Connection, password: Option<&str>, datab
             }
             Engine::Mongodb => Ok(Session::Mongodb(mongodb::open_session(connection, password, database).await?)),
             Engine::Redis => Ok(Session::Redis(redis::open_session(connection, password, database).await?)),
-            other @ Engine::Cosmosdb => Err(AppError::Unsupported(other.label())),
+            Engine::Cosmosdb => Ok(Session::Cosmosdb(cosmos::open_session(connection, password, database).await?)),
         }
     })
     .await
@@ -519,6 +521,7 @@ impl Session {
             Session::Sqlserver(session) => CancelTarget::Signal(session.canceller()),
             Session::Mongodb(session) => CancelTarget::Mongodb { tag: session.tag() },
             Session::Redis(session) => CancelTarget::Redis { client_id: session.client_id() },
+            Session::Cosmosdb(session) => CancelTarget::Signal(session.canceller()),
         }
     }
 
@@ -531,6 +534,7 @@ impl Session {
             Session::Sqlserver(session) => session.run(sql, row_limit).await,
             Session::Mongodb(session) => session.run(sql, row_limit).await,
             Session::Redis(session) => session.run(sql, row_limit).await,
+            Session::Cosmosdb(session) => session.run(sql, row_limit).await,
         }
     }
 
@@ -544,6 +548,7 @@ impl Session {
                 Session::Sqlserver(session) => session.is_alive().await,
                 Session::Mongodb(session) => session.is_alive().await,
                 Session::Redis(session) => session.is_alive().await,
+                Session::Cosmosdb(session) => session.is_alive().await,
             })
         };
         with_timeout(check).await.unwrap_or(false)
@@ -564,6 +569,7 @@ pub async fn explain(
         Engine::Mysql | Engine::Mariadb => mysql::explain(connection, password, database, sql, analyze).await,
         Engine::Sqlserver => sqlserver::explain(connection, password, database, sql, analyze).await,
         Engine::Mongodb => mongodb::explain(connection, password, database, sql, analyze).await,
+        Engine::Cosmosdb => cosmos::explain(connection, password, database, sql, analyze).await,
         other => Err(AppError::Unsupported(other.label())),
     }
 }

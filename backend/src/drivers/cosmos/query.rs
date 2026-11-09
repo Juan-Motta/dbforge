@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use reqwest::Method;
 use serde_json::{Value, json};
 
-use super::client::{Client, Target};
+use super::client::{Client, Reply, Target};
 use crate::drivers::RowFilter;
 use crate::error::Result;
 
@@ -33,7 +33,7 @@ impl Select {
     /// The filter and sort typed in the table view: `c.total > 100` and `c.total DESC`.
     /// The server checks the expressions themselves.
     pub fn of(filter: &RowFilter) -> Self {
-        let order = split_top_level(&filter.order)
+        let order = split_top_level(&filter.order, ',')
             .into_iter()
             .map(|term| {
                 let (expression, descending) = match term.rsplit_once(char::is_whitespace) {
@@ -73,8 +73,9 @@ impl Select {
     }
 }
 
-/// Splits a list at the commas outside quotes, brackets and parentheses.
-fn split_top_level(text: &str) -> Vec<String> {
+/// Splits text at the `separator`s outside quotes, brackets and parentheses,
+/// dropping empty parts.
+pub fn split_top_level(text: &str, separator: char) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut depth = 0i32;
@@ -95,7 +96,7 @@ fn split_top_level(text: &str) -> Vec<String> {
                 '\'' | '"' => quote = Some(ch),
                 '(' | '[' | '{' => depth += 1,
                 ')' | ']' | '}' => depth -= 1,
-                ',' if depth == 0 => {
+                ch if ch == separator && depth == 0 => {
                     parts.push(std::mem::take(&mut current));
                     continue;
                 }
@@ -201,14 +202,65 @@ impl<'a> Items<'a> {
             let reply = self.client.send(Method::POST, &self.target, &headers, Some(&self.query)).await?;
             let continuation = reply.header("x-ms-continuation").map(String::from);
             let range = &mut self.ranges[index];
-            if let Some(Value::Array(items)) = reply.body.get("Documents") {
-                range.buffer.extend(items.iter().cloned());
-            }
+            range.buffer.extend(documents(&reply).iter().cloned());
             range.done = continuation.is_none();
             range.continuation = continuation;
         }
         Ok(())
     }
+}
+
+/// A query the gateway runs over the whole container, read page by page. The
+/// gateway refuses what needs merging across partition key ranges (ORDER BY,
+/// aggregates, …) on a container that has several; its message says so.
+pub struct Feed<'a> {
+    client: &'a Client,
+    target: Target,
+    query: Value,
+    headers: Vec<(&'static str, &'static str)>,
+    continuation: Option<String>,
+    done: bool,
+}
+
+impl<'a> Feed<'a> {
+    pub fn new(
+        client: &'a Client,
+        database: &str,
+        container: &str,
+        text: &str,
+        headers: &[(&'static str, &'static str)],
+    ) -> Self {
+        Self {
+            client,
+            target: Target::items(database, container),
+            query: json!({ "query": text, "parameters": [] }),
+            headers: headers.to_vec(),
+            continuation: None,
+            done: false,
+        }
+    }
+
+    /// The next page's reply, or `None` once the query is read to the end.
+    pub async fn next(&mut self) -> Result<Option<Reply>> {
+        if self.done {
+            return Ok(None);
+        }
+        let mut headers =
+            vec![("x-ms-documentdb-isquery", "true"), ("x-ms-documentdb-query-enablecrosspartition", "true")];
+        headers.extend(self.headers.iter().copied());
+        if let Some(token) = &self.continuation {
+            headers.push(("x-ms-continuation", token.as_str()));
+        }
+        let reply = self.client.send(Method::POST, &self.target, &headers, Some(&self.query)).await?;
+        self.continuation = reply.header("x-ms-continuation").map(String::from);
+        self.done = self.continuation.is_none();
+        Ok(Some(reply))
+    }
+}
+
+/// The items of a query reply.
+pub fn documents(reply: &Reply) -> &[Value] {
+    reply.body.get("Documents").and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
 fn text_of<'v>(value: &'v Value, key: &str) -> &'v str {
@@ -286,6 +338,15 @@ mod tests {
              AS orderByItems, c AS payload FROM c WHERE c.total > 1 \
              ORDER BY c.total DESC, c[\"a,b\"] ASC, ARRAY_LENGTH(c.tags) ASC"
         );
+    }
+
+    #[test]
+    fn splits_outside_quotes_and_brackets() {
+        assert_eq!(
+            split_top_level("SELECT ';' FROM c; SELECT [1;2] FROM d ;; ", ';'),
+            ["SELECT ';' FROM c", "SELECT [1;2] FROM d"]
+        );
+        assert_eq!(split_top_level(r#"c["a\"b,c"], f(x, y)"#, ','), [r#"c["a\"b,c"]"#, "f(x, y)"]);
     }
 
     #[test]

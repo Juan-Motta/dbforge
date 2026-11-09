@@ -41,8 +41,6 @@ impl Target {
         Target::Feed { kind: "dbs", parent: String::new() }
     }
 
-    /// Only the tests drop databases.
-    #[cfg(test)]
     pub fn database(database: &str) -> Self {
         Target::Resource { kind: "dbs", link: database_link(database) }
     }
