@@ -202,7 +202,8 @@ pub async fn fetch_rows(
     documents.truncate(limit as usize);
     let columns = columns_of(&documents);
     let rows = documents.iter().map(|document| row(document, &columns)).collect();
-    Ok(RowsPage { columns, rows, has_more })
+    let texts = documents.into_iter().map(|document| pretty_literal(&Bson::Document(document))).collect();
+    Ok(RowsPage { columns, rows, has_more, documents: Some(texts) })
 }
 
 /// Sends every document to `sink`. The columns are every top-level field used
@@ -386,6 +387,30 @@ pub fn literal(value: &Bson) -> String {
     }
 }
 
+/// A document as the JSON view shows it: [`literal`]'s syntax, which mongosh
+/// reads back, with one field or item per line.
+pub fn pretty_literal(value: &Bson) -> String {
+    pretty(value, 0)
+}
+
+fn pretty(value: &Bson, depth: usize) -> String {
+    let (inner, outer) = ("  ".repeat(depth + 1), "  ".repeat(depth));
+    let lines = |items: Vec<String>, open: char, close: char| {
+        format!("{open}\n{inner}{}\n{outer}{close}", items.join(&format!(",\n{inner}")))
+    };
+    match value {
+        Bson::Document(document) if !document.is_empty() => {
+            let quote = |key: &str| serde_json::Value::from(key).to_string();
+            let fields = document.iter().map(|(key, value)| format!("{}: {}", quote(key), pretty(value, depth + 1)));
+            lines(fields.collect(), '{', '}')
+        }
+        Bson::Array(items) if !items.is_empty() => {
+            lines(items.iter().map(|item| pretty(item, depth + 1)).collect(), '[', ']')
+        }
+        other => literal(other),
+    }
+}
+
 /// Runs against a real server. Start one and run `cargo test -- --ignored`:
 /// `docker run -d --name dbforge-test-mongo -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=dbforge -p 57017:27017 mongo:8`
 /// Each test creates its own database.
@@ -433,6 +458,27 @@ pub(super) mod tests {
 
     pub fn table(database: &str, name: &str) -> TableRef {
         TableRef { database: database.into(), schema: database.into(), name: name.into() }
+    }
+
+    #[test]
+    fn documents_print_one_field_per_line_in_mongosh_syntax() {
+        let id = ObjectId::parse_str("65a0f0f0f0f0f0f0f0f0f0f0").unwrap();
+        let document = doc! { "_id": id, "n": 5_i64, "tags": ["a", 1], "empty": {}, "nested": { "ok": true } };
+        assert_eq!(
+            pretty_literal(&Bson::Document(document)),
+            r#"{
+  "_id": ObjectId("65a0f0f0f0f0f0f0f0f0f0f0"),
+  "n": NumberLong(5),
+  "tags": [
+    "a",
+    1
+  ],
+  "empty": {},
+  "nested": {
+    "ok": true
+  }
+}"#
+        );
     }
 
     fn names(objects: &[DbObject]) -> Vec<&str> {

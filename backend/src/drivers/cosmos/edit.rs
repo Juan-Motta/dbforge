@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 
 use super::client::{Client, Target};
 use super::query::{Feed, Items, Select, documents};
-use super::{SYSTEM_PROPERTIES, shared_type, text, type_name};
+use super::{shared_type, text, type_name, without_system_properties};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{changed_elsewhere, summarize};
 use crate::drivers::{ApplySummary, CellValue, RowChange, RowFilter, TableRef};
@@ -96,13 +96,7 @@ async fn prepare(client: &Client, table: &TableRef, changes: &[RowChange]) -> Re
                     let kind = item.get(property).filter(|v| !v.is_null()).map(type_name);
                     set(&mut updated, property, value, kind)?;
                 }
-                if updated.get("id") != item.get("id") || partition(&updated, &paths) != partition(&item, &paths) {
-                    return Err(AppError::Invalid(
-                        "Changing an item's id or partition key moves it, which Cosmos DB can't do in place: \
-                         add a new item and delete this one."
-                            .into(),
-                    ));
-                }
+                stays_in_place(&item, &updated, &paths)?;
                 Write::Replace {
                     id: id_of(&item),
                     partition: partition(&item, &paths),
@@ -116,10 +110,23 @@ async fn prepare(client: &Client, table: &TableRef, changes: &[RowChange]) -> Re
                     let kind = if property == "id" { Some("string") } else { types.get(property).map(String::as_str) };
                     set(&mut item, property, value, kind)?;
                 }
-                // Cosmos DB needs an id; the SDKs make one up the same way.
-                if item.get("id").is_none_or(Value::is_null) {
-                    item["id"] = uuid::Uuid::new_v4().to_string().into();
+                with_id(&mut item);
+                Write::Create { partition: partition(&item, &paths), item }
+            }
+            RowChange::Replace { key, document } => {
+                let item = find(client, table, key).await?;
+                let replacement = parse_document(document)?;
+                stays_in_place(&item, &replacement, &paths)?;
+                Write::Replace {
+                    id: id_of(&item),
+                    partition: partition(&item, &paths),
+                    etag: etag_of(&item),
+                    item: replacement,
                 }
+            }
+            RowChange::InsertDocument { document } => {
+                let mut item = parse_document(document)?;
+                with_id(&mut item);
                 Write::Create { partition: partition(&item, &paths), item }
             }
             RowChange::Delete { key } => {
@@ -260,11 +267,33 @@ fn etag_of(item: &Value) -> String {
     item.get("_etag").and_then(Value::as_str).unwrap_or_default().to_string()
 }
 
-fn without_system_properties(mut item: Value) -> Value {
-    if let Some(properties) = item.as_object_mut() {
-        properties.retain(|name, _| !SYSTEM_PROPERTIES.contains(&name.as_str()));
+/// Cosmos DB moves an item only by deleting it and adding another.
+fn stays_in_place(item: &Value, changed: &Value, paths: &[String]) -> Result<()> {
+    if changed.get("id") != item.get("id") || partition(changed, paths) != partition(item, paths) {
+        return Err(AppError::Invalid(
+            "Changing an item's id or partition key moves it, which Cosmos DB can't do in place: \
+             add a new item and delete this one."
+                .into(),
+        ));
     }
-    item
+    Ok(())
+}
+
+/// Cosmos DB needs an id; the SDKs make one up the same way.
+fn with_id(item: &mut Value) {
+    if item.get("id").is_none_or(Value::is_null) {
+        item["id"] = uuid::Uuid::new_v4().to_string().into();
+    }
+}
+
+/// A document from the JSON view: one JSON object, the service's properties left out.
+fn parse_document(text: &str) -> Result<Value> {
+    let value: Value = serde_json::from_str(text)
+        .map_err(|error| AppError::Invalid(format!("The document isn't valid JSON: {error}.")))?;
+    if !value.is_object() {
+        return Err(AppError::Invalid("A document is a JSON object, in braces.".into()));
+    }
+    Ok(without_system_properties(value))
 }
 
 #[cfg(test)]
@@ -349,6 +378,51 @@ mod tests {
         assert_eq!(rows[2][..3], [Some("4".into()), Some("c".into()), Some("40".into())]);
         // The new item without an id got one.
         assert!(rows.iter().any(|row| row[1].as_deref() == Some("d") && row[0].as_ref().unwrap().len() == 36));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Cosmos DB emulator on port 58081"]
+    async fn replaces_and_adds_whole_documents() {
+        let connection = database("dbforge_edit_documents", &[("orders", "/customer", orders())]).await;
+        let table = table("dbforge_edit_documents", "orders");
+        let changes = vec![
+            RowChange::Replace {
+                key: map(&[("id", Some("1")), ("customer", Some("a"))]),
+                // The service's properties are dropped; a property left out is gone.
+                document: r#"{"id": "1", "customer": "a", "total": 11, "items": [{"sku": "x"}], "_etag": "old"}"#
+                    .into(),
+            },
+            RowChange::InsertDocument { document: r#"{"customer": "n", "nested": {"deep": true}}"#.into() },
+        ];
+        let preview = preview_changes(&connection, KEY, &table, &changes).await.unwrap();
+        assert_eq!(
+            preview[0],
+            r#"REPLACE orders/1 PARTITION ["a"] {"id":"1","customer":"a","total":11,"items":[{"sku":"x"}]}"#
+        );
+        let summary = apply_changes(&connection, KEY, &table, &changes).await.unwrap();
+        assert_eq!(summary, ApplySummary { updated: 1, inserted: 1, deleted: 0 });
+
+        let filter = RowFilter { filter: String::new(), order: "c.id".into() };
+        let page = fetch_rows(&connection, KEY, &table, &filter, 0, 50).await.unwrap();
+        let documents = page.documents.unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&documents[0]).unwrap(),
+            json!({"id": "1", "customer": "a", "total": 11, "items": [{"sku": "x"}]})
+        );
+        assert!(documents.iter().any(|d| d.contains("\"deep\": true")));
+
+        let bad = |document: &str| {
+            vec![RowChange::Replace {
+                key: map(&[("id", Some("2")), ("customer", Some("b"))]),
+                document: document.into(),
+            }]
+        };
+        let error = apply_changes(&connection, KEY, &table, &bad("{\"id\": ")).await.unwrap_err();
+        assert!(error.to_string().starts_with("The document isn't valid JSON"), "{error}");
+        let error = apply_changes(&connection, KEY, &table, &bad("[1]")).await.unwrap_err();
+        assert_eq!(error.to_string(), "A document is a JSON object, in braces.");
+        let error = apply_changes(&connection, KEY, &table, &bad(r#"{"id": "2", "customer": "z"}"#)).await.unwrap_err();
+        assert!(error.to_string().starts_with("Changing an item's id or partition key"), "{error}");
     }
 
     #[tokio::test]

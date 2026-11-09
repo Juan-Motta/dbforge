@@ -119,6 +119,15 @@ pub enum RowChange {
     Delete {
         key: BTreeMap<String, Option<String>>,
     },
+    /// Document databases: the row's whole new document, in the engine's own syntax.
+    Replace {
+        key: BTreeMap<String, Option<String>>,
+        document: String,
+    },
+    /// Document databases: a new document, in the engine's own syntax.
+    InsertDocument {
+        document: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -167,6 +176,10 @@ pub struct RowsPage {
     pub columns: Vec<Column>,
     pub rows: Vec<Vec<Option<String>>>,
     pub has_more: bool,
+    /// Document databases: each row's whole document, formatted in the engine's
+    /// own syntax (JSON, or mongosh's), for the JSON view.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documents: Option<Vec<String>>,
 }
 
 /// The outcome of one statement in a script.

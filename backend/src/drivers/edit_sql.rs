@@ -66,6 +66,7 @@ pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &
         let values = match change {
             RowChange::Update { values, .. } | RowChange::Insert { values } => values,
             RowChange::Delete { .. } => continue,
+            RowChange::Replace { .. } | RowChange::InsertDocument { .. } => return Err(not_documents()),
         };
         if let Some(name) = values.keys().find(|name| computed.contains(name.as_str())) {
             return Err(AppError::Invalid(format!("{name} is computed by the database and can't be set.")));
@@ -99,6 +100,7 @@ pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &
                         key: Some(describe_key(key)),
                     })
                 }
+                RowChange::Replace { .. } | RowChange::InsertDocument { .. } => Err(not_documents()),
                 RowChange::Insert { values } if values.is_empty() => {
                     Ok(Statement { sql: format!("INSERT INTO {relation} {}", dialect.default_row), params, key: None })
                 }
@@ -241,11 +243,16 @@ pub fn inline(dialect: &Dialect, statement: &Statement) -> String {
     out
 }
 
+/// Whole documents are for document databases; SQL rows change cell by cell.
+fn not_documents() -> AppError {
+    AppError::Invalid("Rows of a SQL table are edited cell by cell, not as whole documents.".into())
+}
+
 pub fn summarize(changes: &[RowChange]) -> ApplySummary {
     let count = |f: fn(&RowChange) -> bool| changes.iter().filter(|c| f(c)).count() as u64;
     ApplySummary {
-        updated: count(|c| matches!(c, RowChange::Update { .. })),
-        inserted: count(|c| matches!(c, RowChange::Insert { .. })),
+        updated: count(|c| matches!(c, RowChange::Update { .. } | RowChange::Replace { .. })),
+        inserted: count(|c| matches!(c, RowChange::Insert { .. } | RowChange::InsertDocument { .. })),
         deleted: count(|c| matches!(c, RowChange::Delete { .. })),
     }
 }
@@ -338,6 +345,19 @@ mod tests {
         // Its key may still identify a row, and a delete never sets values.
         let key: BTreeMap<String, Option<String>> = [("id".to_string(), Some("1".to_string()))].into();
         assert!(build(&QUESTION, &columns, &table, &[RowChange::Delete { key }]).is_ok());
+    }
+
+    #[test]
+    fn refuses_whole_documents() {
+        let columns =
+            [Column { name: "id".into(), data_type: "int".into(), primary_key: true, generated: false, default: None }];
+        let table = TableRef { database: "db".into(), schema: "s".into(), name: "t".into() };
+        let key: BTreeMap<String, Option<String>> = [("id".to_string(), Some("1".to_string()))].into();
+        let replace = RowChange::Replace { key, document: "{}".into() };
+        let error = build(&QUESTION, &columns, &table, &[replace]).unwrap_err();
+        assert!(error.to_string().contains("edited cell by cell"), "{error}");
+        let insert = RowChange::InsertDocument { document: "{}".into() };
+        assert!(build(&QUESTION, &columns, &table, &[insert]).is_err());
     }
 
     #[test]

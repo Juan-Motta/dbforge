@@ -151,7 +151,7 @@ pub async fn fetch_rows(
 
     let has_more = rows.len() > limit as usize;
     rows.truncate(limit as usize);
-    Ok(RowsPage { columns, rows, has_more })
+    Ok(RowsPage { columns, rows, has_more, documents: None })
 }
 
 /// Sends every row to `sink` as it arrives, so memory stays flat for any table size.

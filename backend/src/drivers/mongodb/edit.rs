@@ -30,6 +30,7 @@ const SAMPLE: i64 = 100;
 /// One change, ready to send.
 enum Write {
     Update { id: Bson, set: Document, unset: Document },
+    Replace { id: Bson, document: Document },
     Insert(Document),
     Delete { id: Bson },
 }
@@ -69,6 +70,11 @@ pub async fn preview_changes(
                 }
                 format!("{target}.updateOne({}, {});", literal(&id_filter(id).into()), literal(&update.into()))
             }
+            Write::Replace { id, document } => format!(
+                "{target}.replaceOne({}, {});",
+                literal(&id_filter(id).into()),
+                literal(&document.clone().into())
+            ),
             Write::Insert(document) => format!("{target}.insertOne({});", literal(&document.clone().into())),
             Write::Delete { id } => format!("{target}.deleteOne({});", literal(&id_filter(id).into())),
         })
@@ -117,6 +123,9 @@ async fn send(collection: &Collection<Document>, session: &mut ClientSession, wr
             }
             collection.update_one(id_filter(id), update).session(&mut *session).await?.matched_count
         }
+        Write::Replace { id, document } => {
+            collection.replace_one(id_filter(id), document).session(&mut *session).await?.matched_count
+        }
         Write::Insert(document) => {
             collection.insert_one(document).session(&mut *session).await?;
             1
@@ -125,7 +134,7 @@ async fn send(collection: &Collection<Document>, session: &mut ClientSession, wr
     };
     if matched != 1 {
         let id = match write {
-            Write::Update { id, .. } | Write::Delete { id } => id,
+            Write::Update { id, .. } | Write::Replace { id, .. } | Write::Delete { id } => id,
             Write::Insert(_) => unreachable!("inserts always count one"),
         };
         return Err(changed_elsewhere(&format!("_id {}", literal(id))));
@@ -162,10 +171,7 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                 let mut unset = Document::new();
                 for (field, text) in values {
                     if field == "_id" {
-                        return Err(AppError::Invalid(
-                            "A document's _id can't be changed. Insert a copy with the new _id and delete this one."
-                                .into(),
-                        ));
+                        return Err(id_unchangeable());
                     }
                     match text {
                         // A document has no column defaults: a field at its default is a field it lacks.
@@ -197,9 +203,38 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                 let document = find(collection, key).await?;
                 Write::Delete { id: document.get("_id").cloned().unwrap_or(Bson::Null) }
             }
+            RowChange::Replace { key, document } => {
+                let id = find(collection, key).await?.get("_id").cloned().unwrap_or(Bson::Null);
+                let replacement = parse_document(document)?;
+                let document = match replacement.get("_id") {
+                    Some(given) if *given != id => return Err(id_unchangeable()),
+                    Some(_) => replacement,
+                    // Left out, the _id is kept, first as the server keeps it.
+                    None => {
+                        let mut with_id = doc! { "_id": id.clone() };
+                        with_id.extend(replacement);
+                        with_id
+                    }
+                };
+                Write::Replace { id, document }
+            }
+            RowChange::InsertDocument { document } => Write::Insert(parse_document(document)?),
         });
     }
     Ok(writes)
+}
+
+fn id_unchangeable() -> AppError {
+    AppError::Invalid("A document's _id can't be changed. Insert a copy with the new _id and delete this one.".into())
+}
+
+/// A document from the JSON view, in mongosh syntax: `{name: "Ann", _id: ObjectId("…")}`.
+fn parse_document(text: &str) -> Result<Document> {
+    match parse_value(text) {
+        Ok(Bson::Document(document)) => Ok(document),
+        Ok(_) => Err(AppError::Invalid("A document is written in braces: {name: \"Ann\"}.".into())),
+        Err(error) => Err(AppError::Invalid(format!("The document can't be read: {error}"))),
+    }
 }
 
 /// The document whose `_id` the grid showed as `key["_id"]`. The grid shows
@@ -394,6 +429,57 @@ mod tests {
                 r#"db.getCollection("people").insertOne({"name": "Dee"});"#.to_string(),
                 r#"db.getCollection("people").deleteOne({"_id": "3"});"#.to_string(),
             ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn replaces_and_adds_whole_documents() {
+        let connection = people("dbforge_edit_documents").await;
+        let table = table("dbforge_edit_documents", "people");
+        let changes = vec![
+            // Without its _id, the document keeps the one it has; fields left out are gone.
+            RowChange::Replace {
+                key: map(&[("_id", Some(ID))]),
+                document: r#"{name: "Ann", age: NumberLong(31), joined: ISODate("2024-01-01T00:00:00Z")}"#.into(),
+            },
+            RowChange::Replace { key: map(&[("_id", Some("2"))]), document: "{_id: 2, name: 'Bob'}".into() },
+            RowChange::InsertDocument { document: "{name: 'Dee', tags: ['x', {deep: true}]}".into() },
+        ];
+        let preview = preview_changes(&connection, PASSWORD, &table, &changes).await.unwrap();
+        assert_eq!(preview[1], r#"db.getCollection("people").replaceOne({"_id": 2}, {"_id": 2, "name": "Bob"});"#);
+        let summary = apply_changes(&connection, PASSWORD, &table, &changes).await.unwrap();
+        assert_eq!(summary, ApplySummary { updated: 2, inserted: 1, deleted: 0 });
+
+        let all = documents(&connection, "dbforge_edit_documents").await;
+        let ann = all.iter().find(|d| d.get_str("name") == Ok("Ann")).unwrap();
+        assert_eq!(ann.keys().collect::<Vec<_>>(), ["_id", "name", "age", "joined"]);
+        assert_eq!(ann.get_i64("age"), Ok(31));
+        assert!(all.iter().any(|d| d.get_str("name") == Ok("Bob") && d.len() == 2));
+        assert!(all.iter().any(|d| d.get_str("name") == Ok("Dee")));
+
+        let bad =
+            |document: &str| vec![RowChange::Replace { key: map(&[("_id", Some("3"))]), document: document.into() }];
+        let error = apply_changes(&connection, PASSWORD, &table, &bad("{name: ")).await.unwrap_err();
+        assert!(error.to_string().starts_with("The document can't be read"), "{error}");
+        let error = apply_changes(&connection, PASSWORD, &table, &bad("[1]")).await.unwrap_err();
+        assert!(error.to_string().starts_with("A document is written in braces"), "{error}");
+        let error = apply_changes(&connection, PASSWORD, &table, &bad("{_id: 4}")).await.unwrap_err();
+        assert!(error.to_string().starts_with("A document's _id can't be changed"), "{error}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn pages_carry_each_document_as_mongosh_writes_it() {
+        let connection = people("dbforge_page_documents").await;
+        let filter = crate::drivers::RowFilter { filter: "{name: 'Bob'}".into(), order: String::new() };
+        let page =
+            super::super::fetch_rows(&connection, PASSWORD, &table("dbforge_page_documents", "people"), &filter, 0, 10)
+                .await
+                .unwrap();
+        assert_eq!(
+            page.documents.unwrap(),
+            ["{\n  \"_id\": 2,\n  \"name\": \"Bob\",\n  \"age\": NumberLong(41),\n  \"score\": 1.5\n}"]
         );
     }
 }

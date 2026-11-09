@@ -105,7 +105,7 @@ pub async fn fetch_rows(
 
     let has_more = rows.len() > limit as usize;
     rows.truncate(limit as usize);
-    Ok(RowsPage { columns, rows, has_more })
+    Ok(RowsPage { columns, rows, has_more, documents: None })
 }
 
 pub async fn stream_table(

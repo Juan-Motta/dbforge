@@ -136,7 +136,8 @@ pub async fn fetch_rows(
     page.truncate(limit as usize);
     let columns = columns_of(&page, &keys);
     let rows = page.iter().map(|item| row(item, &columns)).collect();
-    Ok(RowsPage { columns, rows, has_more })
+    let documents = page.iter().map(document_text).collect();
+    Ok(RowsPage { columns, rows, has_more, documents: Some(documents) })
 }
 
 /// Sends every item to `sink`. The columns are every top-level property used
@@ -238,6 +239,18 @@ fn ordered_columns<'a>(
             default: None,
         })
         .collect()
+}
+
+/// An item as the JSON view shows it: formatted, without the service's properties.
+fn document_text(item: &Value) -> String {
+    serde_json::to_string_pretty(&without_system_properties(item.clone())).unwrap_or_default()
+}
+
+fn without_system_properties(mut item: Value) -> Value {
+    if let Some(properties) = item.as_object_mut() {
+        properties.retain(|name, _| !SYSTEM_PROPERTIES.contains(&name.as_str()));
+    }
+    item
 }
 
 fn row(item: &Value, columns: &[Column]) -> Vec<Option<String>> {
@@ -396,6 +409,9 @@ pub(super) mod tests {
         let names: Vec<_> = first.columns.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["id", "customer", "total"]);
         assert_eq!(first.rows.iter().map(|r| r[0].clone().unwrap()).collect::<Vec<_>>(), ["6", "5", "4"]);
+        // The JSON view's documents: formatted, without the service's properties.
+        let documents = first.documents.as_ref().unwrap();
+        assert_eq!(documents[0], "{\n  \"id\": \"6\",\n  \"customer\": \"c0\",\n  \"total\": 60\n}");
         assert!(first.has_more);
 
         let last = fetch_rows(&connection, KEY, &table, &filter("", "c.total DESC"), 6, 3).await.unwrap();
