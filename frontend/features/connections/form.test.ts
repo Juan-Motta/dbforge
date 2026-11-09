@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canSubmit,
+  canTest,
   emptyForm,
   formFromConnection,
   isValidPort,
@@ -18,12 +19,12 @@ describe('withEngine', () => {
     expect(withEngine({ ...emptyForm(), port: '6543' }, 'mysql').port).toBe('6543')
   })
 
-  it('turns TLS on for Cosmos DB, and back off, unless the user changed it', () => {
+  it('empties the host for an account URI, and back', () => {
     const cosmos = withEngine(emptyForm(), 'cosmosdb')
-    expect(cosmos).toMatchObject({ port: '443', tls: true })
-    expect(withEngine(cosmos, 'mongodb').tls).toBe(false)
-    expect(withEngine({ ...cosmos, tls: false }, 'redis').tls).toBe(false)
-    expect(withEngine({ ...withEngine(emptyForm(), 'redis'), tls: true }, 'cosmosdb').tls).toBe(true)
+    expect(cosmos).toMatchObject({ host: '', port: '443' })
+    expect(withEngine({ ...cosmos, host: 'https://a.documents.azure.com/' }, 'mongodb').host).toBe(
+      'localhost',
+    )
   })
 })
 
@@ -135,30 +136,15 @@ describe('parseConnectionUrl', () => {
     )!
     expect(azure.changes).toEqual({
       engine: 'cosmosdb',
-      host: 'shop.documents.azure.com',
-      port: '443',
+      host: 'https://shop.documents.azure.com/',
       username: '',
       password: 'abc+/def==',
-      tls: true,
-      allowSelfSigned: false,
       srv: false,
     })
     expect(azure.ignored).toEqual(['Database=x'])
-    const emulator = parseConnectionUrl('AccountEndpoint=http://localhost:8081/;AccountKey=k==')!
-    expect(emulator.changes).toMatchObject({ host: 'localhost', port: '8081', tls: false })
     expect(parseConnectionUrl('AccountEndpoint=not a url;AccountKey=k')).toBeNull()
-  })
-
-  it('reads the account URI the Azure portal shows, keeping the key typed', () => {
-    const uri = parseConnectionUrl(' https://shop.documents.azure.com:443/ ')!
-    expect(uri.changes).toMatchObject({
-      engine: 'cosmosdb',
-      host: 'shop.documents.azure.com',
-      port: '443',
-      tls: true,
-    })
-    expect(uri.changes).not.toHaveProperty('password')
-    expect(parseConnectionUrl('http://127.0.0.1:8081/')!.changes).toMatchObject({ port: '8081', tls: false })
+    // A bare URI is what the URI field holds; nothing to fill in.
+    expect(parseConnectionUrl('https://shop.documents.azure.com:443/')).toBeNull()
   })
 
   it('leaves anything else alone', () => {
@@ -202,9 +188,39 @@ describe('TLS options', () => {
     expect(toInput(redis).database).toBe('')
   })
 
-  it('sends no user with an account key', () => {
-    const cosmos = { ...withEngine(emptyForm(), 'cosmosdb'), name: 'c', username: 'left over' }
-    expect(toInput(cosmos)).toMatchObject({ username: '', tls: true, port: 443 })
+  it('splits an account URI into host, port and TLS, with no user or database', () => {
+    const form = { ...withEngine(emptyForm(), 'cosmosdb'), name: 'c', username: 'x', database: 'y' }
+    const azure = toInput({ ...form, host: ' https://shop.documents.azure.com:443/ ', allowSelfSigned: true })
+    expect(azure).toMatchObject({
+      host: 'shop.documents.azure.com',
+      port: 443,
+      tls: true,
+      allowSelfSigned: true,
+      username: '',
+      database: '',
+    })
+    const emulator = toInput({ ...form, host: 'http://127.0.0.1:8081/', allowSelfSigned: true })
+    expect(emulator).toMatchObject({ host: '127.0.0.1', port: 8081, tls: false, allowSelfSigned: false })
+    expect(canTest({ ...form, host: 'shop.documents.azure.com' })).toBe(false)
+    expect(canTest({ ...form, host: 'https://shop.documents.azure.com' })).toBe(true)
+  })
+
+  it('opens a saved account connection as its URI', () => {
+    const saved = {
+      id: '1',
+      name: 'emulator',
+      engine: 'cosmosdb' as const,
+      environment: null,
+      host: '127.0.0.1',
+      port: 8081,
+      database: '',
+      username: '',
+      tls: false,
+      allowSelfSigned: false,
+      srv: false,
+    }
+    expect(formFromConnection(saved).host).toBe('http://127.0.0.1:8081/')
+    expect(formFromConnection({ ...saved, tls: true, port: 443 }).host).toBe('https://127.0.0.1:443/')
   })
 
   it('needs no port for a MongoDB seed list', () => {

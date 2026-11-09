@@ -10,7 +10,7 @@ import {
   ENGINE_LABELS,
   ENVIRONMENT_LABELS,
   isFileEngine,
-  KEY_ENGINES,
+  ACCOUNT_ENGINES,
   NOSQL_ENGINES,
   RELATIONAL_ENGINES,
   TLS_ENGINES,
@@ -52,7 +52,6 @@ interface ConnectionDialogProps {
 /** Engines whose host field also takes a pasted URL, which it splits into the fields. */
 const HOST_HINTS: Partial<Record<Engine, string>> = {
   mongodb: 'localhost, or paste a mongodb:// URL',
-  cosmosdb: 'account.documents.azure.com, or paste a connection string',
   redis: 'localhost, or paste a redis:// URL',
 }
 
@@ -60,7 +59,7 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
   )
-  const keyed = KEY_ENGINES.includes(form.engine)
+  const account = ACCOUNT_ENGINES.includes(form.engine)
   const [test, setTest] = useState<TestState>({ status: 'idle' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -211,40 +210,56 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
             </>
           ) : (
             <>
-              <div className={styles.hostRow}>
+              {account ? (
                 <TextField
-                  label="Host"
+                  label="URI"
                   mono
-                  placeholder={HOST_HINTS[form.engine]}
+                  placeholder="https://<account>.documents.azure.com:443/, or paste a connection string"
+                  aria-invalid={form.host.trim() !== '' && !canTest(form)}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
-                  // A connection URL, pasted or typed, fills the fields instead of staying in Host.
+                  // A connection string fills the URI and the key.
                   onPaste={(e) => {
                     if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
                   }}
                   onBlur={() => fillFromUrl(form.host)}
                 />
-                <TextField
-                  label="Port"
-                  mono
-                  inputMode="numeric"
-                  disabled={form.engine === 'mongodb' && form.srv}
-                  aria-invalid={!(form.engine === 'mongodb' && form.srv) && !isValidPort(form.port)}
-                  value={form.engine === 'mongodb' && form.srv ? '' : form.port}
-                  placeholder={form.engine === 'mongodb' && form.srv ? 'From DNS' : undefined}
-                  onChange={(e) => update({ port: e.target.value })}
-                />
-              </div>
+              ) : (
+                <div className={styles.hostRow}>
+                  <TextField
+                    label="Host"
+                    mono
+                    placeholder={HOST_HINTS[form.engine]}
+                    value={form.host}
+                    onChange={(e) => update({ host: e.target.value })}
+                    // A connection URL, pasted or typed, fills the fields instead of staying in Host.
+                    onPaste={(e) => {
+                      if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
+                    }}
+                    onBlur={() => fillFromUrl(form.host)}
+                  />
+                  <TextField
+                    label="Port"
+                    mono
+                    inputMode="numeric"
+                    disabled={form.engine === 'mongodb' && form.srv}
+                    aria-invalid={!(form.engine === 'mongodb' && form.srv) && !isValidPort(form.port)}
+                    value={form.engine === 'mongodb' && form.srv ? '' : form.port}
+                    placeholder={form.engine === 'mongodb' && form.srv ? 'From DNS' : undefined}
+                    onChange={(e) => update({ port: e.target.value })}
+                  />
+                </div>
+              )}
               {fromUrl && (
                 <p className={styles.hint} role="status">
-                  Filled in from the URL.
+                  Filled in from the {account ? 'connection string' : 'URL'}.
                   {fromUrl.length > 0 && (
                     <span className={styles.ignored}> Not carried over: {fromUrl.join(', ')}.</span>
                   )}
                 </p>
               )}
 
-              {form.engine !== 'redis' && (
+              {form.engine !== 'redis' && !account && (
                 <TextField
                   label="Database"
                   mono
@@ -253,8 +268,8 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                 />
               )}
 
-              <div className={keyed ? undefined : styles.pair}>
-                {!keyed && (
+              <div className={account ? undefined : styles.pair}>
+                {!account && (
                   <TextField
                     // Redis 6+ has ACL users; without ACLs the password alone is enough.
                     label={form.engine === 'redis' ? 'User (ACL, optional)' : 'User'}
@@ -266,17 +281,17 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                   />
                 )}
                 <TextField
-                  label={keyed ? 'Key' : 'Password'}
+                  label={account ? 'Key' : 'Password'}
                   mono
                   type="password"
                   autoComplete="new-password"
-                  placeholder={connection ? 'Unchanged' : keyed ? 'Primary or secondary key' : ''}
+                  placeholder={connection ? 'Unchanged' : account ? 'Primary or secondary key' : ''}
                   value={form.password}
                   onChange={(e) => update({ password: e.target.value })}
                 />
               </div>
               <p className={styles.hint}>
-                {keyed ? 'Keys' : 'Passwords'} are stored in your OS keychain, never in a file.
+                {account ? 'Keys' : 'Passwords'} are stored in your OS keychain, never in a file.
               </p>
 
               {TLS_ENGINES.includes(form.engine) && (
@@ -291,20 +306,26 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
                       DNS seed list (mongodb+srv), as Atlas uses
                     </label>
                   )}
-                  <label className={styles.check}>
-                    <input
-                      type="checkbox"
-                      checked={form.tls || (form.engine === 'mongodb' && form.srv)}
-                      disabled={form.engine === 'mongodb' && form.srv}
-                      onChange={(e) => update({ tls: e.target.checked })}
-                    />
-                    Use TLS
-                  </label>
+                  {!account && (
+                    <label className={styles.check}>
+                      <input
+                        type="checkbox"
+                        checked={form.tls || (form.engine === 'mongodb' && form.srv)}
+                        disabled={form.engine === 'mongodb' && form.srv}
+                        onChange={(e) => update({ tls: e.target.checked })}
+                      />
+                      Use TLS
+                    </label>
+                  )}
                   <label className={styles.check}>
                     <input
                       type="checkbox"
                       checked={form.allowSelfSigned}
-                      disabled={!(form.tls || (form.engine === 'mongodb' && form.srv))}
+                      disabled={
+                        account
+                          ? !/^https:/i.test(form.host.trim())
+                          : !(form.tls || (form.engine === 'mongodb' && form.srv))
+                      }
                       onChange={(e) => update({ allowSelfSigned: e.target.checked })}
                     />
                     Accept self-signed certificate

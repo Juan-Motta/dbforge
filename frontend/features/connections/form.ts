@@ -1,8 +1,7 @@
 import {
+  ACCOUNT_ENGINES,
   DEFAULT_PORTS,
   isFileEngine,
-  KEY_ENGINES,
-  TLS_BY_DEFAULT,
   TLS_ENGINES,
   type Connection,
   type Engine,
@@ -15,6 +14,7 @@ export interface ConnectionForm {
   name: string
   engine: Engine
   environment: Environment | null
+  /** The server's name, or for an account engine its whole URI (`https://….documents.azure.com:443/`). */
   host: string
   port: string
   database: string
@@ -44,20 +44,33 @@ export function emptyForm(): ConnectionForm {
 /** A saved connection as form values. A host saved as a whole URL is split into fields. */
 export function formFromConnection(connection: Connection): ConnectionForm {
   const form = { ...connection, port: String(connection.port), password: '' }
+  if (isAccount(connection.engine)) {
+    const scheme = connection.tls ? 'https' : 'http'
+    return { ...form, host: `${scheme}://${connection.host}:${connection.port}/` }
+  }
   const parsed = parseConnectionUrl(connection.host)
   return parsed ? { ...form, ...parsed.changes } : form
 }
 
-/** Switches engine, moving the port and TLS to the new defaults unless the user changed them. */
+/**
+ * Switches engine, moving the port to the new default unless the user changed it.
+ * An account engine's host is a URI, which no other engine's host field takes.
+ */
 export function withEngine(form: ConnectionForm, engine: Engine): ConnectionForm {
   const usesDefaultPort = form.port === String(DEFAULT_PORTS[form.engine])
-  const usesDefaultTls = form.tls === TLS_BY_DEFAULT.includes(form.engine)
-  return {
-    ...form,
-    engine,
-    port: usesDefaultPort ? String(DEFAULT_PORTS[engine]) : form.port,
-    tls: usesDefaultTls ? TLS_BY_DEFAULT.includes(engine) : form.tls,
-  }
+  const host = isAccount(engine) === isAccount(form.engine) ? form.host : isAccount(engine) ? '' : 'localhost'
+  return { ...form, engine, host, port: usesDefaultPort ? String(DEFAULT_PORTS[engine]) : form.port }
+}
+
+function isAccount(engine: Engine): boolean {
+  return ACCOUNT_ENGINES.includes(engine)
+}
+
+/** An account URI: `https://<account>.documents.azure.com:443/`, or `http://` for the local emulator. */
+function accountUrl(text: string): URL | null {
+  const trimmed = text.trim()
+  if (!/^https?:\/\/[^/]/i.test(trimmed) || !URL.canParse(trimmed)) return null
+  return new URL(trimmed)
 }
 
 export function isValidPort(port: string): boolean {
@@ -68,6 +81,7 @@ export function isValidPort(port: string): boolean {
 /** Enough to try connecting: a file for SQLite, a valid port for servers. */
 export function canTest(form: ConnectionForm): boolean {
   if (isFileEngine(form.engine)) return form.database.trim() !== ''
+  if (isAccount(form.engine)) return accountUrl(form.host) !== null
   // A seed list's DNS records name the port.
   return usesSrv(form) || isValidPort(form.port)
 }
@@ -87,6 +101,23 @@ export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
   if (isFileEngine(form.engine)) {
     return { ...rest, ...off, id, host: '', port: 0, username: '', password: undefined }
   }
+  const account = isAccount(form.engine) ? accountUrl(form.host) : null
+  if (account) {
+    // The databases are all listed in the explorer, and the key stands alone.
+    const tls = account.protocol === 'https:'
+    return {
+      ...rest,
+      ...off,
+      id,
+      host: account.hostname,
+      port: Number(account.port || (tls ? 443 : 80)),
+      database: '',
+      username: '',
+      password: password === '' ? undefined : password,
+      tls,
+      allowSelfSigned: tls && form.allowSelfSigned,
+    }
+  }
   const srv = usesSrv(form)
   const tls = TLS_ENGINES.includes(form.engine) && (form.tls || srv)
   return {
@@ -95,8 +126,6 @@ export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
     port: srv && !isValidPort(port) ? DEFAULT_PORTS.mongodb : Number(port),
     // Redis databases are numbered and all listed in the explorer; there is none to pick here.
     database: form.engine === 'redis' ? '' : form.database,
-    // An account key stands alone.
-    username: KEY_ENGINES.includes(form.engine) ? '' : form.username,
     password: password === '' ? undefined : password,
     tls,
     allowSelfSigned: tls && form.allowSelfSigned,
@@ -119,7 +148,7 @@ const MONGO_OPTIONS = ['tls', 'ssl', 'tlsAllowInvalidCertificates', 'tlsInsecure
 export function parseConnectionUrl(
   text: string,
 ): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
-  const cosmos = parseCosmosConnectionString(text) ?? parseCosmosEndpoint(text)
+  const cosmos = parseCosmosConnectionString(text)
   if (cosmos) return cosmos
   const match = URL_PATTERN.exec(text.trim())
   if (!match) return null
@@ -183,29 +212,6 @@ export function parseConnectionUrl(
 }
 
 /**
- * An account's URI, `https://<account>.documents.azure.com:443/`, as the Azure
- * portal shows it. Only Cosmos DB is reached over HTTP, so any http(s) URL is one.
- */
-function parseCosmosEndpoint(text: string): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
-  const trimmed = text.trim()
-  if (!/^https?:\/\//i.test(trimmed) || !URL.canParse(trimmed)) return null
-  return { changes: cosmosEndpoint(new URL(trimmed)), ignored: [] }
-}
-
-function cosmosEndpoint(url: URL): Partial<ConnectionForm> {
-  const tls = url.protocol === 'https:'
-  return {
-    engine: 'cosmosdb',
-    host: url.hostname,
-    port: url.port || (tls ? '443' : '80'),
-    username: '',
-    tls,
-    allowSelfSigned: false,
-    srv: false,
-  }
-}
-
-/**
  * `AccountEndpoint=https://<account>.documents.azure.com:443/;AccountKey=…;`, as
  * the Azure portal and the emulator give it. Its key is the account key.
  */
@@ -225,10 +231,16 @@ function parseCosmosConnectionString(
     if (name === 'accountendpoint' || name === 'accountkey') settings.set(name, part.slice(cut + 1))
     else ignored.push(part)
   }
-  const endpoint = settings.get('accountendpoint')
-  if (!endpoint || !URL.canParse(endpoint)) return null
+  const endpoint = accountUrl(settings.get('accountendpoint') ?? '')
+  if (!endpoint) return null
   return {
-    changes: { ...cosmosEndpoint(new URL(endpoint)), password: settings.get('accountkey') ?? '' },
+    changes: {
+      engine: 'cosmosdb',
+      host: endpoint.href,
+      password: settings.get('accountkey') ?? '',
+      username: '',
+      srv: false,
+    },
     ignored,
   }
 }

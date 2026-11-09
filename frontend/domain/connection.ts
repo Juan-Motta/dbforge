@@ -24,11 +24,11 @@ export interface Connection {
 /** Engines whose connections can use TLS from the form. */
 export const TLS_ENGINES: Engine[] = ['redis', 'mongodb', 'cosmosdb']
 
-/** Engines reached over TLS unless told otherwise: Azure serves Cosmos DB only over HTTPS. */
-export const TLS_BY_DEFAULT: Engine[] = ['cosmosdb']
-
-/** Engines that sign in with an account key instead of a user and password. */
-export const KEY_ENGINES: Engine[] = ['cosmosdb']
+/**
+ * Engines reached through an account URI and key, as Azure gives them: no host,
+ * port, user or database to type, and the URI's scheme says whether TLS is on.
+ */
+export const ACCOUNT_ENGINES: Engine[] = ['cosmosdb']
 
 export const ENGINE_LABELS: Record<Engine, string> = {
   postgres: 'PostgreSQL',
@@ -102,6 +102,6 @@ export function hasDiagram(engine: Engine): boolean {
 /** Where a connection points: `user@host:port`, `host:port` for a key, or the file for SQLite. */
 export function connectionAddress(connection: Connection): string {
   if (isFileEngine(connection.engine)) return connection.database
-  if (KEY_ENGINES.includes(connection.engine)) return `${connection.host}:${connection.port}`
+  if (ACCOUNT_ENGINES.includes(connection.engine)) return `${connection.host}:${connection.port}`
   return `${connection.username || 'default user'}@${connection.host}:${connection.port}`
 }
