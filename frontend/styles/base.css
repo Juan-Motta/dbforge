@@ -44,7 +44,13 @@ input {
   font-family: var(--font-mono);
 }
 
-/* Scrollbars at half the system's width, in the theme's colors. */
+/* Thin scrollbars in the theme's colors. Current WebKit and Chromium read the
+   standard properties; the ::-webkit-scrollbar rules cover older WebKit. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 7px;
   height: 7px;
