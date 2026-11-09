@@ -10,14 +10,14 @@
 mod tools;
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::process::Command;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::connections::model::{Connection, Engine};
 use crate::connections::secrets;
@@ -59,22 +59,25 @@ pub struct Imported {
     pub elapsed_ms: u64,
 }
 
-/// Writes `database` to `path` as plain SQL. A failed or cancelled dump leaves no file behind.
+/// Writes `database` to `path` as plain SQL. The dump goes to a file beside it
+/// first, so a failed or cancelled one leaves `path` as it was.
 pub async fn export(
     connection: &Connection,
     password: Option<&str>,
     database: &str,
     path: &Path,
     options: &DumpOptions,
-    cancel: &Notify,
+    cancel: &CancellationToken,
     on_line: impl FnMut(&str),
 ) -> Result<Exported> {
     postgres_only(connection)?;
     let started = Instant::now();
     let tool = tools::find("pg_dump").await?;
+    let partial = partial_path(path);
+    let session = session_name();
     let mut command = Command::new(&tool.path);
-    connect_with(&mut command, connection, password, database);
-    command.args(["--format=plain", "--encoding=UTF8", "--verbose", "--no-password", "--file"]).arg(path);
+    connect_with(&mut command, connection, password, database, &session);
+    command.args(["--format=plain", "--encoding=UTF8", "--verbose", "--no-password", "--file"]).arg(&partial);
     match options.content {
         Content::All => {}
         Content::Structure => {
@@ -90,21 +93,28 @@ pub async fn export(
     if !options.keep_owners {
         command.args(["--no-owner", "--no-privileges"]);
     }
-    if let Err(error) = tools::run(command, cancel, on_line).await {
-        let _ = std::fs::remove_file(path);
+    let outcome = tools::run(command, cancel, on_line).await;
+    if let Err(error) = outcome {
+        let _ = std::fs::remove_file(&partial);
+        if cancel.is_cancelled() {
+            postgres::end_sessions(connection, password, &session).await?;
+        }
         return Err(with_version_hint(error));
     }
+    std::fs::rename(&partial, path)?;
     let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or_default();
     Ok(Exported { bytes, elapsed_ms: started.elapsed().as_millis() as u64 })
 }
 
-/// Runs the SQL file at `path` into `database`, creating it first when it doesn't exist.
+/// Runs the SQL file at `path` into `database`, creating it first when it
+/// doesn't exist. A cancel is checked between steps, so one that comes before
+/// psql starts still stops the import.
 pub async fn import(
     connection: &Connection,
     password: Option<&str>,
     database: &str,
     path: &Path,
-    cancel: &Notify,
+    cancel: &CancellationToken,
     on_line: impl FnMut(&str),
 ) -> Result<Imported> {
     postgres_only(connection)?;
@@ -117,23 +127,47 @@ pub async fn import(
     }
     let started = Instant::now();
     let tool = tools::find("psql").await?;
+    let stop = || if cancel.is_cancelled() { Err(tools::cancelled()) } else { Ok(()) };
+    stop()?;
     let created = !postgres::database_exists(connection, password, database).await?;
+    stop()?;
     if created {
         postgres::create_database(connection, password, database).await?;
     }
+    let session = session_name();
     let mut command = Command::new(&tool.path);
-    connect_with(&mut command, connection, password, database);
+    connect_with(&mut command, connection, password, database, &session);
     command
         .args(["--no-psqlrc", "--no-password", "--set", "ON_ERROR_STOP=1", "--single-transaction", "--file"])
         .arg(path);
-    if let Err(error) = tools::run(command, cancel, on_line).await {
-        // Nothing was restored: the transaction rolled back. Leave no empty database behind.
-        if created {
-            postgres::drop_database(connection, password, database).await?;
-        }
-        return Err(error);
+    let Err(error) = tools::run(command, cancel, on_line).await else {
+        return Ok(Imported { created, elapsed_ms: started.elapsed().as_millis() as u64 });
+    };
+    // Killing psql leaves its session working on the server: end it, which rolls the transaction back.
+    let mut problems = Vec::new();
+    if cancel.is_cancelled()
+        && let Err(problem) = postgres::end_sessions(connection, password, &session).await
+    {
+        problems.push(problem.to_string());
     }
-    Ok(Imported { created, elapsed_ms: started.elapsed().as_millis() as u64 })
+    // Nothing was restored. Leave no empty database behind.
+    if created && let Err(problem) = postgres::drop_database(connection, password, database).await {
+        problems.push(format!("The database {database} created for the import couldn't be removed: {problem}"));
+    }
+    if problems.is_empty() { Err(error) } else { Err(AppError::Invalid(format!("{error}\n{}", problems.join("\n")))) }
+}
+
+/// Where a dump is written until it is complete: beside the file asked for.
+fn partial_path(path: &Path) -> PathBuf {
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".dbforge-partial");
+    PathBuf::from(partial)
+}
+
+/// The `application_name` a tool's sessions carry, unique per run, so a
+/// cancel can find them on the server.
+fn session_name() -> String {
+    format!("DBForge {}", uuid::Uuid::new_v4())
 }
 
 fn postgres_only(connection: &Connection) -> Result<()> {
@@ -148,7 +182,7 @@ fn postgres_only(connection: &Connection) -> Result<()> {
 
 /// The connection for libpq, in the environment. Inherited `PG…` settings
 /// (a service file, another host) are left out so they can't redirect it.
-fn connect_with(command: &mut Command, connection: &Connection, password: Option<&str>, database: &str) {
+fn connect_with(command: &mut Command, connection: &Connection, password: Option<&str>, database: &str, session: &str) {
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("PG") {
             command.env_remove(name);
@@ -158,7 +192,7 @@ fn connect_with(command: &mut Command, connection: &Connection, password: Option
         .env("PGHOST", &connection.host)
         .env("PGPORT", connection.port.to_string())
         .env("PGDATABASE", database)
-        .env("PGAPPNAME", "DBForge")
+        .env("PGAPPNAME", session)
         .env("PGCONNECT_TIMEOUT", "10");
     if !connection.username.is_empty() {
         command.env("PGUSER", &connection.username);
@@ -183,11 +217,11 @@ fn with_version_hint(error: AppError) -> AppError {
 
 /// Running exports and imports, by job id, so they can be cancelled.
 #[derive(Default)]
-pub struct DumpJobs(Mutex<HashMap<String, Arc<Notify>>>);
+pub struct DumpJobs(Mutex<HashMap<String, CancellationToken>>);
 
 impl DumpJobs {
-    fn start(&self, id: &str) -> Arc<Notify> {
-        let cancel = Arc::new(Notify::new());
+    fn start(&self, id: &str) -> CancellationToken {
+        let cancel = CancellationToken::new();
         self.0.lock().unwrap().insert(id.to_string(), cancel.clone());
         cancel
     }
@@ -269,7 +303,7 @@ pub async fn import_database(
 #[tauri::command]
 pub fn cancel_dump(jobs: State<'_, DumpJobs>, job_id: String) {
     if let Some(cancel) = jobs.0.lock().unwrap().get(&job_id) {
-        cancel.notify_waiters();
+        cancel.cancel();
     }
 }
 
@@ -318,7 +352,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("source.sql");
         let mut lines = Vec::new();
-        let exported = export(&local(), PASSWORD, "dbforge_dump_source", &file, &ALL, &Notify::new(), |l| {
+        let exported = export(&local(), PASSWORD, "dbforge_dump_source", &file, &ALL, &CancellationToken::new(), |l| {
             lines.push(l.to_string())
         })
         .await
@@ -331,10 +365,11 @@ mod tests {
 
         postgres::drop_database(&local(), PASSWORD, "dbforge_dump_copy").await.unwrap();
         let mut restored = Vec::new();
-        let imported =
-            import(&local(), PASSWORD, "dbforge_dump_copy", &file, &Notify::new(), |l| restored.push(l.to_string()))
-                .await
-                .unwrap();
+        let imported = import(&local(), PASSWORD, "dbforge_dump_copy", &file, &CancellationToken::new(), |l| {
+            restored.push(l.to_string())
+        })
+        .await
+        .unwrap();
         assert!(imported.created);
         assert_eq!(count("dbforge_dump_copy").await, 250);
         assert!(restored.iter().any(|l| l.starts_with("COPY 250")), "{restored:?}");
@@ -342,15 +377,24 @@ mod tests {
         // A dump that drops what it creates restores over the database it came from.
         let clean = dir.path().join("clean.sql");
         let options = DumpOptions { clean: true, ..ALL };
-        export(&local(), PASSWORD, "dbforge_dump_source", &clean, &options, &Notify::new(), |_| {}).await.unwrap();
-        let again = import(&local(), PASSWORD, "dbforge_dump_copy", &clean, &Notify::new(), |_| {}).await.unwrap();
+        export(&local(), PASSWORD, "dbforge_dump_source", &clean, &options, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap();
+        let again =
+            import(&local(), PASSWORD, "dbforge_dump_copy", &clean, &CancellationToken::new(), |_| {}).await.unwrap();
         assert!(!again.created);
         assert_eq!(count("dbforge_dump_copy").await, 250);
 
         let structure = dir.path().join("structure.sql");
         let options = DumpOptions { content: Content::Structure, ..ALL };
-        export(&local(), PASSWORD, "dbforge_dump_source", &structure, &options, &Notify::new(), |_| {}).await.unwrap();
+        export(&local(), PASSWORD, "dbforge_dump_source", &structure, &options, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap();
         assert!(!std::fs::read_to_string(&structure).unwrap().contains("COPY dumped.items"));
+
+        for name in ["dbforge_dump_source", "dbforge_dump_copy"] {
+            postgres::drop_database(&local(), PASSWORD, name).await.unwrap();
+        }
     }
 
     #[tokio::test]
@@ -361,13 +405,15 @@ mod tests {
         std::fs::write(&file, "CREATE TABLE ok (id int);\nINSERT INTO missing VALUES (1);\n").unwrap();
 
         postgres::drop_database(&local(), PASSWORD, "dbforge_dump_broken").await.unwrap();
-        let error = import(&local(), PASSWORD, "dbforge_dump_broken", &file, &Notify::new(), |_| {}).await.unwrap_err();
+        let error = import(&local(), PASSWORD, "dbforge_dump_broken", &file, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("relation \"missing\" does not exist"), "{error}");
         assert!(!postgres::database_exists(&local(), PASSWORD, "dbforge_dump_broken").await.unwrap());
 
         // Into an existing database, the transaction leaves it as it was.
         fresh("dbforge_dump_kept").await;
-        import(&local(), PASSWORD, "dbforge_dump_kept", &file, &Notify::new(), |_| {}).await.unwrap_err();
+        import(&local(), PASSWORD, "dbforge_dump_kept", &file, &CancellationToken::new(), |_| {}).await.unwrap_err();
         assert!(postgres::database_exists(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap());
         let url = "postgres://postgres:dbforge@127.0.0.1:55432/dbforge_dump_kept";
         let mut conn = PgConnection::connect(url).await.unwrap();
@@ -378,8 +424,10 @@ mod tests {
         assert_eq!(tables, 0);
         conn.close().await.unwrap();
 
-        let error = import(&local(), PASSWORD, "x", &dir.path().join("none.sql"), &Notify::new(), |_| {}).await;
+        let error =
+            import(&local(), PASSWORD, "x", &dir.path().join("none.sql"), &CancellationToken::new(), |_| {}).await;
         assert!(error.unwrap_err().to_string().starts_with("There's no file at"));
+        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap();
     }
 
     #[tokio::test]
@@ -387,9 +435,85 @@ mod tests {
     async fn a_wrong_password_reads_as_libpq_says_and_leaves_no_file() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("x.sql");
-        let error =
-            export(&local(), Some("wrong"), "shop", &file, &ALL, &Notify::new(), |_| {}).await.unwrap_err().to_string();
+        let error = export(&local(), Some("wrong"), "shop", &file, &ALL, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("password authentication failed"), "{error}");
         assert!(!file.exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432 and its client tools"]
+    async fn a_failed_export_leaves_the_file_that_was_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("kept.sql");
+        std::fs::write(&file, "-- an older dump").unwrap();
+        export(&local(), Some("wrong"), "shop", &file, &ALL, &CancellationToken::new(), |_| {}).await.unwrap_err();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "-- an older dump");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no partial file is left");
+
+        // Stopped before pg_dump even started.
+        let stopped = CancellationToken::new();
+        stopped.cancel();
+        let error = export(&local(), PASSWORD, "shop", &file, &ALL, &stopped, |_| {}).await.unwrap_err();
+        assert_eq!(error.to_string(), "Cancelled.");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "-- an older dump");
+    }
+
+    /// Imports a file that sleeps on the server, stopped after `after`.
+    async fn stopped_import(database: &str, after: std::time::Duration) -> AppError {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("slow.sql");
+        std::fs::write(&file, "CREATE TABLE slow (id int);\nSELECT pg_sleep(30);\n").unwrap();
+        let cancel = CancellationToken::new();
+        let stop = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(after).await;
+            stop.cancel();
+        });
+        let started = Instant::now();
+        let error = import(&local(), PASSWORD, database, &file, &cancel, |_| {}).await.unwrap_err();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "the cancel stopped the sleep");
+        error
+    }
+
+    async fn sessions_on(database: &str) -> i64 {
+        let mut conn = PgConnection::connect("postgres://postgres:dbforge@127.0.0.1:55432/postgres").await.unwrap();
+        let n = sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = $1")
+            .bind(database)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        conn.close().await.unwrap();
+        n
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432 and its client tools"]
+    async fn a_stopped_import_ends_its_session_and_removes_the_database_it_created() {
+        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_stopped").await.unwrap();
+        let error = stopped_import("dbforge_dump_stopped", std::time::Duration::from_millis(1500)).await;
+        assert_eq!(error.to_string(), "Cancelled.");
+        assert!(!postgres::database_exists(&local(), PASSWORD, "dbforge_dump_stopped").await.unwrap());
+
+        // Into an existing database: its session ends and the table it began is rolled back.
+        fresh("dbforge_dump_stopped_kept").await;
+        let error = stopped_import("dbforge_dump_stopped_kept", std::time::Duration::from_millis(1500)).await;
+        assert_eq!(error.to_string(), "Cancelled.");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(sessions_on("dbforge_dump_stopped_kept").await, 0);
+        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_stopped_kept").await.unwrap();
+
+        // Stopped before psql started: nothing is created.
+        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_never").await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("x.sql");
+        std::fs::write(&file, "SELECT 1;").unwrap();
+        let stopped = CancellationToken::new();
+        stopped.cancel();
+        let error = import(&local(), PASSWORD, "dbforge_dump_never", &file, &stopped, |_| {}).await.unwrap_err();
+        assert_eq!(error.to_string(), "Cancelled.");
+        assert!(!postgres::database_exists(&local(), PASSWORD, "dbforge_dump_never").await.unwrap());
     }
 }

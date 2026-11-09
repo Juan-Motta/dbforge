@@ -52,8 +52,33 @@ pub async fn create_database(connection: &Connection, password: Option<&str>, na
     run_on_server(connection, password, &format!("CREATE DATABASE {}", quote_ident(name))).await
 }
 
+/// Drops `name`, first ending the sessions still on it (a tool that was
+/// killed leaves its session running on the server until then).
 pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
-    run_on_server(connection, password, &format!("DROP DATABASE IF EXISTS {}", quote_ident(name))).await
+    let mut conn = connect(connection, password, None).await?;
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+    )
+    .bind(name)
+    .execute(&mut conn)
+    .await?;
+    sqlx::raw_sql(AssertSqlSafe(format!("DROP DATABASE IF EXISTS {}", quote_ident(name)))).execute(&mut conn).await?;
+    conn.close().await?;
+    Ok(())
+}
+
+/// Ends the sessions a tool opened as `application_name`, so a cancelled
+/// pg_dump or psql stops working on the server too.
+pub async fn end_sessions(connection: &Connection, password: Option<&str>, application_name: &str) -> Result<()> {
+    let mut conn = connect(connection, password, None).await?;
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1 AND pid <> pg_backend_pid()",
+    )
+    .bind(application_name)
+    .execute(&mut conn)
+    .await?;
+    conn.close().await?;
+    Ok(())
 }
 
 /// Runs a statement outside any transaction, on the connection's own database.

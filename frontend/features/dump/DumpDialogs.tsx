@@ -288,7 +288,8 @@ export function ImportDatabaseDialog({
 
         <p className={styles.note}>
           psql runs the file in one transaction and stops at the first error, so a failed import changes
-          nothing; a database created for it is removed again.
+          nothing; a database created for it is removed again. Import only files you trust: psql also runs its
+          own commands, such as <code>\!</code> for the shell.
         </p>
 
         <StatusLine

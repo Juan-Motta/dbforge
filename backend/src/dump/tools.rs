@@ -9,7 +9,7 @@ use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::error::{AppError, Result};
 
@@ -36,7 +36,8 @@ const KEPT_LINES: usize = 200;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tool {
     pub path: PathBuf,
-    pub major: u32,
+    /// Major and minor version.
+    pub version: (u32, u32),
 }
 
 /// The newest `name` (`pg_dump`, `psql`) installed, or how to install it.
@@ -44,9 +45,9 @@ pub async fn find(name: &str) -> Result<Tool> {
     let mut newest: Option<Tool> = None;
     for path in candidates(name) {
         let Ok(output) = Command::new(&path).arg("--version").output().await else { continue };
-        let Some(major) = major_version(&String::from_utf8_lossy(&output.stdout)) else { continue };
-        if newest.as_ref().is_none_or(|tool| major > tool.major) {
-            newest = Some(Tool { path, major });
+        let Some(version) = version_of(&String::from_utf8_lossy(&output.stdout)) else { continue };
+        if newest.as_ref().is_none_or(|tool| version > tool.version) {
+            newest = Some(Tool { path, version });
         }
     }
     newest.ok_or_else(|| {
@@ -65,7 +66,8 @@ fn candidates(name: &str) -> Vec<PathBuf> {
         directories.extend(expand(Path::new(place)));
     }
     let mut found = Vec::new();
-    for directory in directories {
+    // A relative entry (`.`, or an empty one) would run whatever sits in the current directory.
+    for directory in directories.into_iter().filter(|directory| directory.is_absolute()) {
         let tool = directory.join(name);
         if tool.is_file() && !found.contains(&tool) {
             found.push(tool);
@@ -92,19 +94,27 @@ fn expand(place: &Path) -> Vec<PathBuf> {
     matches
 }
 
-/// The major version in `pg_dump (PostgreSQL) 18.6 (Homebrew)`.
-fn major_version(text: &str) -> Option<u32> {
-    let version = text.split_whitespace().find(|word| word.starts_with(|c: char| c.is_ascii_digit()))?;
-    version.split(['.', 'b', 'r']).next()?.parse().ok()
+/// The version in `pg_dump (PostgreSQL) 18.6 (Homebrew)`, as major and minor:
+/// `(18, 6)`; a development build such as `19beta1` or `18devel` has minor 0.
+fn version_of(text: &str) -> Option<(u32, u32)> {
+    let word = text.split_whitespace().find(|word| word.starts_with(|c: char| c.is_ascii_digit()))?;
+    let number = |part: &str| part.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok();
+    let mut parts = word.splitn(2, '.');
+    let major = number(parts.next()?)?;
+    Some((major, parts.next().and_then(number).unwrap_or(0)))
+}
+
+pub fn cancelled() -> AppError {
+    AppError::Invalid("Cancelled.".into())
 }
 
 /// Runs `command`, handing every line it writes (output and errors alike) to
-/// `on_line`. `cancel` stops it. A failure is the tool's own last error lines.
-pub async fn run(mut command: Command, cancel: &Notify, mut on_line: impl FnMut(&str)) -> Result<()> {
-    // Registered before the tool starts, so a cancel can't slip in between.
-    let cancelled = cancel.notified();
-    tokio::pin!(cancelled);
-    cancelled.as_mut().enable();
+/// `on_line`. `cancel` stops it, even if it came before the tool started. A
+/// failure is the tool's own last error lines.
+pub async fn run(mut command: Command, cancel: &CancellationToken, mut on_line: impl FnMut(&str)) -> Result<()> {
+    if cancel.is_cancelled() {
+        return Err(cancelled());
+    }
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = command.spawn().map_err(|error| AppError::Invalid(format!("Could not start: {error}")))?;
     let mut stdout = BufReader::new(child.stdout.take().expect("piped")).lines();
@@ -127,9 +137,9 @@ pub async fn run(mut command: Command, cancel: &Notify, mut on_line: impl FnMut(
                 }
                 _ => err_done = true,
             },
-            () = &mut cancelled => {
+            () = cancel.cancelled() => {
                 let _ = child.kill().await;
-                return Err(AppError::Invalid("Cancelled.".into()));
+                return Err(cancelled());
             }
         }
     }
@@ -161,11 +171,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_major_versions() {
-        assert_eq!(major_version("pg_dump (PostgreSQL) 18.6 (Homebrew)"), Some(18));
-        assert_eq!(major_version("psql (PostgreSQL) 9.6.24"), Some(9));
-        assert_eq!(major_version("pg_dump (PostgreSQL) 19beta1"), Some(19));
-        assert_eq!(major_version("nothing here"), None);
+    fn reads_versions() {
+        assert_eq!(version_of("pg_dump (PostgreSQL) 18.6 (Homebrew)"), Some((18, 6)));
+        assert_eq!(version_of("psql (PostgreSQL) 9.6.24"), Some((9, 6)));
+        assert_eq!(version_of("pg_dump (PostgreSQL) 19beta1"), Some((19, 0)));
+        assert_eq!(version_of("pg_dump (PostgreSQL) 18devel"), Some((18, 0)));
+        assert_eq!(version_of("nothing here"), None);
+        assert!(version_of("pg_dump (PostgreSQL) 18.10").unwrap() > version_of("pg_dump (PostgreSQL) 18.6").unwrap());
     }
 
     #[test]
@@ -199,20 +211,29 @@ mod tests {
         let mut seen = Vec::new();
         let mut command = Command::new("sh");
         command.args(["-c", "echo one; echo two >&2; exit 0"]);
-        run(command, &Notify::new(), |line| seen.push(line.to_string())).await.unwrap();
+        run(command, &CancellationToken::new(), |line| seen.push(line.to_string())).await.unwrap();
         seen.sort();
         assert_eq!(seen, ["one", "two"]);
 
         let mut command = Command::new("sh");
         command.args(["-c", "echo 'psql: error: no such file' >&2; exit 2"]);
-        let error = run(command, &Notify::new(), |_| {}).await.unwrap_err();
+        let error = run(command, &CancellationToken::new(), |_| {}).await.unwrap_err();
         assert_eq!(error.to_string(), "psql: error: no such file");
 
-        let cancel = std::sync::Arc::new(Notify::new());
+        // A cancel that came before the tool started still stops it.
+        let early = CancellationToken::new();
+        early.cancel();
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo ran"]);
+        let mut ran = false;
+        assert_eq!(run(command, &early, |_| ran = true).await.unwrap_err().to_string(), "Cancelled.");
+        assert!(!ran);
+
+        let cancel = CancellationToken::new();
         let waker = cancel.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            waker.notify_waiters();
+            waker.cancel();
         });
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 5"]);
