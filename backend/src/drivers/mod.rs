@@ -7,7 +7,7 @@ mod row_filter;
 
 pub use row_filter::RowFilter;
 mod mysql;
-mod postgres;
+pub(crate) mod postgres;
 pub mod redis;
 mod sqlite;
 mod sqlserver;

@@ -33,7 +33,7 @@ tauri = { version = "2.12.5", features = [] }
 tauri-plugin-dialog = "2"
 thiserror = "2.0"
 tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono"] }
-tokio = { version = "1", features = ["macros", "net", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 uuid = { version = "1.29", features = ["v4"] }
 

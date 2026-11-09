@@ -1,6 +1,7 @@
 mod connections;
 mod cursor;
 mod drivers;
+mod dump;
 mod edit;
 mod error;
 mod explorer;
@@ -23,6 +24,7 @@ pub fn run() {
             let path = app.path().app_config_dir()?.join("connections.json");
             app.manage(ConnectionStore::load(path)?);
             app.manage(query::QuerySessions::default());
+            app.manage(dump::DumpJobs::default());
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
             app.manage(history::HistoryStore::load(history_path)?);
             Ok(())
@@ -52,6 +54,9 @@ pub fn run() {
             export::format_rows,
             export::export_rows,
             export::export_table,
+            dump::export_database,
+            dump::import_database,
+            dump::cancel_dump,
             cursor::keep_cursor,
         ])
         .run(tauri::generate_context!())

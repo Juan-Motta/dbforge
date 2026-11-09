@@ -36,6 +36,34 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
     Ok(PgConnection::connect_with(&options).await?)
 }
 
+/// Whether the server has a database named `name`.
+pub async fn database_exists(connection: &Connection, password: Option<&str>, name: &str) -> Result<bool> {
+    let mut conn = connect(connection, password, None).await?;
+    let exists = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)")
+        .bind(name)
+        .fetch_one(&mut conn)
+        .await?;
+    conn.close().await?;
+    Ok(exists)
+}
+
+/// Creates an empty database named `name`, owned by the connection's user.
+pub async fn create_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    run_on_server(connection, password, &format!("CREATE DATABASE {}", quote_ident(name))).await
+}
+
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    run_on_server(connection, password, &format!("DROP DATABASE IF EXISTS {}", quote_ident(name))).await
+}
+
+/// Runs a statement outside any transaction, on the connection's own database.
+async fn run_on_server(connection: &Connection, password: Option<&str>, statement: &str) -> Result<()> {
+    let mut conn = connect(connection, password, None).await?;
+    sqlx::raw_sql(AssertSqlSafe(statement.to_string())).execute(&mut conn).await?;
+    conn.close().await?;
+    Ok(())
+}
+
 pub async fn server_version(connection: &Connection, password: Option<&str>) -> Result<String> {
     let mut conn = connect(connection, password, None).await?;
     let version: String = sqlx::query_scalar("SHOW server_version").fetch_one(&mut conn).await?;
@@ -341,13 +369,13 @@ fn quote_ident(name: &str) -> String {
 /// `docker run --rm -e POSTGRES_PASSWORD=dbforge -e POSTGRES_DB=shop -p 55432:5432 postgres:17-alpine`
 /// The test creates the tables it needs.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::connections::model::Engine;
 
-    pub(super) const PASSWORD: Option<&str> = Some("dbforge");
+    pub(crate) const PASSWORD: Option<&str> = Some("dbforge");
 
-    pub(super) fn local() -> Connection {
+    pub(crate) fn local() -> Connection {
         Connection {
             id: "test".into(),
             name: "test".into(),
