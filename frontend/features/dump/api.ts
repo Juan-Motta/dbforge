@@ -52,6 +52,10 @@ export const dumpApi = {
   /** Runs `path` from now on once it proves to be that tool; `null` goes back to the one found. */
   setTool: (name: DumpTool, path: string | null) => invoke<ToolInfo>('set_dump_tool', { name, path }),
   fileExists: (path: string) => invoke<boolean>('dump_file_exists', { path }),
+  /** The exports DBForge wrote in `folder`; other files there don't count. */
+  folderUsage: (folder: string) => invoke<ExportFiles>('export_folder_usage', { folder }),
+  /** Deletes the exports in `folder`, leaving its other files, and says what went. */
+  clearFolder: (folder: string) => invoke<ExportFiles>('clear_export_folder', { folder }),
   /** Each line the job's tool writes while it runs; resolves to the function that stops listening. */
   onProgress: (jobId: string, handler: (line: string) => void) =>
     listen<{ jobId: string; line: string }>('dump-progress', (event) => {
@@ -78,4 +82,10 @@ export function chooseSqlFile(allFiles: string): Promise<string | null> {
     directory: false,
     filters: [...SQL_FILES, { name: allFiles, extensions: ['*'] }],
   })
+}
+
+/** How many export files, and their size in bytes. */
+export interface ExportFiles {
+  count: number
+  bytes: number
 }

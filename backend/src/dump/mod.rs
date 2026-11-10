@@ -7,6 +7,7 @@
 //! A restore runs in one transaction and stops at the first error, so a failed
 //! one changes nothing; a database created for it is dropped again.
 
+mod exports;
 mod tool_paths;
 mod tools;
 
@@ -370,6 +371,18 @@ pub async fn set_dump_tool(chosen: State<'_, ToolPaths>, name: String, path: Opt
 #[tauri::command]
 pub fn dump_file_exists(path: String) -> bool {
     Path::new(&path).exists()
+}
+
+/// How many exports are in `folder` and how much they take.
+#[tauri::command]
+pub fn export_folder_usage(folder: String) -> Result<exports::ExportFiles> {
+    exports::usage(Path::new(&folder))
+}
+
+/// Deletes the exports in `folder` (other files stay), and says what was deleted.
+#[tauri::command]
+pub fn clear_export_folder(folder: String) -> Result<exports::ExportFiles> {
+    exports::clear(Path::new(&folder))
 }
 
 /// Stops a running export or import. Harmless once it has finished.

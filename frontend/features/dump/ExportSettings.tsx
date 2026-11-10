@@ -3,6 +3,7 @@ import { Icon } from '../../components/Icon'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { chooseFolder } from './api'
 import { messages } from './messages'
+import { ExportFolderUsage } from './ExportFolderUsage'
 import { ToolRow } from './ToolRow'
 import { useExportFolder } from './useExportFolder'
 import styles from './DumpDialogs.module.css'
@@ -33,6 +34,8 @@ export function ExportSettings() {
           <Button onClick={() => void pick()}>{m.change}</Button>
         </div>
         <p className={styles.note}>{m.defaultFolderHelp}</p>
+        {exportFolder.folder && <ExportFolderUsage key={exportFolder.folder} folder={exportFolder.folder} />}
+        <p className={styles.note}>{m.exportFilesHelp}</p>
       </section>
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{m.clientTools}</h3>

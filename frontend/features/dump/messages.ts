@@ -8,6 +8,16 @@ export const messages = defineMessages({
     useDefaultFolder: 'Use the default',
     defaultFolderHelp:
       'Exports are saved here unless another folder is picked for one of them. The default is DBForge in Documents.',
+    exportFiles: (count: number, size: string) =>
+      count === 0 ? 'No exports in this folder' : `${count} ${count === 1 ? 'export' : 'exports'} · ${size}`,
+    exportFilesHelp: 'Only files DBForge named, like shop-2026-11-10-1432.sql, count and are deleted.',
+    measuring: 'Measuring…',
+    clearFolder: 'Delete exports…',
+    confirmClear: (count: number, size: string) =>
+      `Delete ${count} ${count === 1 ? 'export' : 'exports'} (${size})? This can’t be undone.`,
+    deleteExports: 'Delete',
+    cleared: (count: number, size: string) =>
+      `Deleted ${count} ${count === 1 ? 'export' : 'exports'}, freeing ${size}.`,
     clientTools: 'PostgreSQL client tools',
     clientToolsHelp:
       'DBForge finds the newest pg_dump and psql installed. Choose another one when it picks the wrong version.',
@@ -78,6 +88,19 @@ export const messages = defineMessages({
     useDefaultFolder: 'Usar la por defecto',
     defaultFolderHelp:
       'Los exports se guardan aquí salvo que elijas otra carpeta para alguno. Por defecto es DBForge en Documentos.',
+    exportFiles: (count: number, size: string) =>
+      count === 0
+        ? 'No hay exports en esta carpeta'
+        : `${count} ${count === 1 ? 'export' : 'exports'} · ${size}`,
+    exportFilesHelp:
+      'Solo cuentan y se borran los archivos que nombró DBForge, como shop-2026-11-10-1432.sql.',
+    measuring: 'Midiendo…',
+    clearFolder: 'Borrar exports…',
+    confirmClear: (count: number, size: string) =>
+      `¿Borrar ${count} ${count === 1 ? 'export' : 'exports'} (${size})? No se puede deshacer.`,
+    deleteExports: 'Borrar',
+    cleared: (count: number, size: string) =>
+      `Se borraron ${count} ${count === 1 ? 'export' : 'exports'} y se liberaron ${size}.`,
     clientTools: 'Herramientas cliente de PostgreSQL',
     clientToolsHelp:
       'DBForge encuentra el pg_dump y el psql más nuevos instalados. Elige otro si toma la versión equivocada.',

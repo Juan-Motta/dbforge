@@ -393,6 +393,13 @@ export function installMockBackend() {
           mockTools[name] = path ? { path, version: '16.4', custom: true } : { ...foundTools[name] }
           return delay(mockTools[name])
         }
+        case 'export_folder_usage':
+          return delay(exportFiles)
+        case 'clear_export_folder': {
+          const removed = exportFiles
+          exportFiles = { count: 0, bytes: 0 }
+          return delay(removed)
+        }
         case 'dump_file_exists':
           return delay(String(payload.path).includes('exists'))
         case 'plugin:path|resolve_directory':
@@ -428,6 +435,8 @@ let credentials = {
   storage: 'keychain' as 'keychain' | 'file',
   filePath: '/Users/demo/Library/Application Support/dev.dbforge.app/credentials.bin',
 }
+// The exports in the export folder.
+let exportFiles = { count: 7, bytes: 48_213_504 }
 // Roles and users created from a connection's menu.
 const accounts = new Set(['postgres'])
 

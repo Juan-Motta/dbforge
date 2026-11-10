@@ -71,6 +71,8 @@ pub fn run() {
             dump::dump_tool,
             dump::set_dump_tool,
             dump::dump_file_exists,
+            dump::export_folder_usage,
+            dump::clear_export_folder,
             cursor::keep_cursor,
         ])
         .run(tauri::generate_context!())
