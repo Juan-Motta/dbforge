@@ -97,7 +97,7 @@ fn sqlserver_message(error: &tiberius::error::Error) -> String {
 /// The server's message with its detail and hint, as psql shows them. sqlx's own
 /// text prefixes "error returned from database" and appends a line number that
 /// points into PostgreSQL's source code, not into the user's query.
-fn database_message(error: &sqlx::Error) -> String {
+pub(crate) fn database_message(error: &sqlx::Error) -> String {
     let Some(server) = error.as_database_error() else {
         return error.to_string();
     };

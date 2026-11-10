@@ -1,6 +1,6 @@
 //! Databases, roles and users created from a connection's menu.
 
-use sqlx::{AssertSqlSafe, Connection as _};
+use sqlx::AssertSqlSafe;
 
 use super::connect;
 use crate::connections::model::Connection;

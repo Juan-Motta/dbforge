@@ -3,14 +3,15 @@
 //! parameter to a column's type, and runs everything in one transaction where
 //! every UPDATE or DELETE must hit exactly one row.
 
-use sqlx::postgres::PgConnection;
-use sqlx::{AssertSqlSafe, Connection as _};
+use sqlx::AssertSqlSafe;
 
+use super::Conn;
 use super::{connect, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
 use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
 use crate::error::Result;
+use crate::statement_log;
 
 /// Values are sent as text and cast to the column's type by the server.
 const POSTGRES: Dialect = Dialect {
@@ -39,7 +40,9 @@ pub async fn apply_changes(
         for param in &statement.params {
             query = query.bind(param.clone());
         }
-        let affected = query.execute(&mut *transaction).await?.rows_affected();
+        // Recorded with its values written in, so it can be copied and run as is.
+        let shown = edit_sql::inline(&POSTGRES, statement);
+        let affected = statement_log::shown_as(shown, query.execute(&mut transaction)).await?.rows_affected();
         if let Some(key) = &statement.key
             && affected != 1
         {
@@ -71,7 +74,7 @@ pub async fn preview_changes(
 /// truncates, and the SQL spelling `character` even means `character(1)`; the
 /// internal name has no length, so the column's own limit applies on assignment
 /// and a value that doesn't fit is rejected.
-async fn editable_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<Column>> {
+async fn editable_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
     let rows: Vec<(String, String, bool, bool)> = sqlx::query_as(
         "SELECT a.attname::text, format('%I.%I', tn.nspname, t.typname),
                 COALESCE(a.attnum = ANY((i.indkey::int2[])[0:i.indnkeyatts - 1]), false),
@@ -101,13 +104,13 @@ async fn editable_columns(conn: &mut PgConnection, table: &TableRef) -> Result<V
 
 #[cfg(test)]
 mod tests {
-    use sqlx::postgres::PgConnection;
-
     use super::super::tests::{PASSWORD, local};
     use std::collections::BTreeMap;
 
     use super::*;
     use crate::drivers::CellValue;
+    use crate::statement_log::store::tests::Collected;
+    use crate::statement_log::{Origin, StatementLog};
 
     /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
     fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
@@ -118,13 +121,13 @@ mod tests {
         TableRef { database: "shop".into(), schema: "dbforge_edit".into(), name: "items".into() }
     }
 
-    async fn run(sql: &str) -> PgConnection {
+    async fn run(sql: &str) -> Conn {
         let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
         sqlx::raw_sql(AssertSqlSafe(sql)).execute(&mut conn).await.unwrap();
         conn
     }
 
-    async fn rows(conn: &mut PgConnection) -> Vec<(i32, String, i32, Option<String>)> {
+    async fn rows(conn: &mut Conn) -> Vec<(i32, String, i32, Option<String>)> {
         sqlx::query_as("SELECT id, name, qty, status::text FROM dbforge_edit.items ORDER BY id")
             .fetch_all(conn)
             .await
@@ -143,6 +146,34 @@ mod tests {
         );
         INSERT INTO dbforge_edit.items VALUES (1, 'one', 1, 'new'), (2, 'two', 2, NULL), (3, 'three', 3, NULL);
         CREATE TABLE dbforge_edit.loose (name text);";
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn records_the_transaction_with_values_written_in() {
+        run(&SETUP.replace("dbforge_edit", "dbforge_edit_log")).await;
+        let changes =
+            [RowChange::Update { key: map(&[("id", Some("1"))]), values: map(&[("name", Some("it's one"))]) }];
+        let table = TableRef { schema: "dbforge_edit_log".into(), ..items() };
+        let log = StatementLog::new(50, Collected::default());
+
+        statement_log::scoped(&log, "pg", Origin::Edit, apply_changes(&local(), PASSWORD, &table, &changes))
+            .await
+            .unwrap();
+
+        let entries = log.entries();
+        let texts: Vec<_> = entries.iter().map(|e| e.text.as_str()).skip_while(|t| *t != "BEGIN").collect();
+        assert_eq!(
+            texts,
+            [
+                "BEGIN",
+                r#"UPDATE "dbforge_edit_log"."items" SET "name" = CAST('it''s one'::text AS pg_catalog.text) WHERE "id" = CAST('1'::text AS pg_catalog.int4)"#,
+                "COMMIT"
+            ]
+        );
+        let update = entries.iter().find(|e| e.text.starts_with("UPDATE")).unwrap();
+        assert_eq!((update.database.as_deref(), update.origin, update.rows), (Some("shop"), Origin::Edit, Some(1)));
+        assert!(entries.iter().all(|e| e.connection_id == "pg" && e.error.is_none()));
+    }
 
     #[tokio::test]
     #[ignore = "needs a local PostgreSQL on port 55432"]

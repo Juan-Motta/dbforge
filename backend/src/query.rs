@@ -14,6 +14,7 @@ use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, CancelTarget, QueryOutcome};
 use crate::error::{AppError, Result};
 use crate::history::{HistoryEntry, HistoryStore};
+use crate::statement_log::{self, Origin, StatementLog};
 
 /// Rows kept per result; the rest are read and dropped.
 const ROW_LIMIT: usize = 500;
@@ -83,10 +84,12 @@ impl QuerySession {
 /// Runs a SQL script in the console's session, opening it on first use, and
 /// records the run in the history.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn run_query(
     store: State<'_, ConnectionStore>,
     sessions: State<'_, QuerySessions>,
     history: State<'_, HistoryStore>,
+    log: State<'_, StatementLog>,
     session_id: String,
     connection_id: String,
     scope: QueryScope,
@@ -97,7 +100,8 @@ pub async fn run_query(
     let started = Instant::now();
     // Read now, used only if a session opens; a failure is recorded like any other.
     let password = store.password(&connection.id);
-    let outcome = run_in_session(&sessions, &session_id, connection.clone(), password, scope.clone(), &sql).await;
+    let run = run_in_session(&sessions, &session_id, connection.clone(), password, scope.clone(), &sql);
+    let outcome = statement_log::scoped(&log, &connection.id, Origin::Console, run).await;
 
     let entry = HistoryEntry {
         id: Uuid::new_v4().to_string(),
@@ -156,6 +160,7 @@ async fn run_in_session(
 #[tauri::command]
 pub async fn explain_query(
     store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
     connection_id: String,
     scope: QueryScope,
     sql: String,
@@ -164,14 +169,21 @@ pub async fn explain_query(
     let connection = store.get(&connection_id)?;
     let password = store.password(&connection.id)?;
     let (database, container) = (scope.database.as_deref(), scope.container.as_deref());
-    drivers::explain(&connection, password.as_deref(), database, container, &sql, analyze).await
+    let explain = drivers::explain(&connection, password.as_deref(), database, container, &sql, analyze);
+    statement_log::scoped(&log, &connection.id, Origin::Console, explain).await
 }
 
 /// Stops the query running in the console, if any.
 #[tauri::command]
-pub async fn cancel_query(sessions: State<'_, QuerySessions>, session_id: String) -> Result<()> {
+pub async fn cancel_query(
+    sessions: State<'_, QuerySessions>,
+    log: State<'_, StatementLog>,
+    session_id: String,
+) -> Result<()> {
     match sessions.get(&session_id) {
-        Some(session) if session.is_running() => session.cancel().await,
+        Some(session) if session.is_running() => {
+            statement_log::scoped(&log, &session.connection.id, Origin::Console, session.cancel()).await
+        }
         _ => Ok(()),
     }
 }

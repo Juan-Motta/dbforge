@@ -6,6 +6,7 @@ use super::tags::{Tag, TagStore};
 use crate::credentials::{Storage, StorageInfo, SwitchProgress};
 use crate::drivers;
 use crate::error::{AppError, Result};
+use crate::statement_log::{self, Origin, StatementLog};
 
 #[tauri::command]
 pub fn list_connections(store: State<'_, ConnectionStore>) -> Vec<Connection> {
@@ -37,7 +38,11 @@ pub fn delete_connection(store: State<'_, ConnectionStore>, id: String) -> Resul
 /// Tests the values currently in the form, which may not be saved yet.
 /// Returns the server version.
 #[tauri::command]
-pub async fn test_connection(store: State<'_, ConnectionStore>, input: ConnectionInput) -> Result<String> {
+pub async fn test_connection(
+    store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
+    input: ConnectionInput,
+) -> Result<String> {
     let existing_id = input.id.clone();
     let (connection, password) = input.for_test().into_parts()?;
     let password = match (password, existing_id) {
@@ -45,7 +50,13 @@ pub async fn test_connection(store: State<'_, ConnectionStore>, input: Connectio
         (None, Some(id)) => store.password(&id)?,
         (None, None) => None,
     };
-    drivers::server_version(&connection, password.as_deref()).await
+    statement_log::scoped(
+        &log,
+        &connection.id,
+        Origin::Connect,
+        drivers::server_version(&connection, password.as_deref()),
+    )
+    .await
 }
 
 /// Where passwords are saved, as the settings show it.

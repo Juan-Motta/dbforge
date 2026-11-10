@@ -11,6 +11,7 @@ mod export;
 mod history;
 mod keyspace;
 mod query;
+mod statement_log;
 
 use tauri::Manager;
 
@@ -30,6 +31,7 @@ pub fn run() {
             app.manage(dump::ToolPaths::load(config.join("tools.json"))?);
             app.manage(query::QuerySessions::default());
             app.manage(dump::DumpJobs::default());
+            app.manage(statement_log::StatementLog::new(2000, statement_log::EventSink(app.handle().clone())));
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
             app.manage(history::HistoryStore::load(history_path)?);
             Ok(())
@@ -74,6 +76,8 @@ pub fn run() {
             dump::export_folder_usage,
             dump::clear_export_folder,
             cursor::keep_cursor,
+            statement_log::commands::list_statements,
+            statement_log::commands::clear_statements,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");

@@ -15,6 +15,7 @@ pub use diagram::schema_diagram;
 pub use edit::{apply_changes, preview_changes};
 pub use structure::table_structure;
 
+use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
@@ -23,9 +24,12 @@ use super::{
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
+/// A PostgreSQL connection whose statements are recorded in the statement log.
+pub(super) type Conn = Logged<PgConnection>;
+
 /// Opens a connection, optionally to a database other than the configured one.
 /// PostgreSQL can only read a database's schemas from a connection to that database.
-async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<PgConnection> {
+async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Conn> {
     let mut options =
         PgConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username);
     let database = database.unwrap_or(&connection.database);
@@ -35,7 +39,7 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
     if let Some(password) = password {
         options = options.password(password);
     }
-    Ok(PgConnection::connect_with(&options).await?)
+    Ok(Logged::new(PgConnection::connect_with(&options).await?, Some(database)))
 }
 
 /// Whether the server has a database named `name`.
@@ -231,7 +235,7 @@ pub async fn stream_table(
     Ok(())
 }
 
-async fn table_columns(conn: &mut PgConnection, table: &TableRef) -> Result<Vec<Column>> {
+async fn table_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
     let columns: Vec<Column> = sqlx::query_as::<_, (String, String, bool, bool)>(
         "SELECT a.attname, format_type(a.atttypid, a.atttypmod), COALESCE(a.attnum = ANY((i.indkey::int2[])[0:i.indnkeyatts - 1]), false),
                 (a.attgenerated <> '' OR a.attidentity = 'a')
@@ -272,7 +276,7 @@ fn select_as_text(columns: &[Column], table: &TableRef, filter: &RowFilter) -> S
 /// A connection kept open between runs, so transactions, `SET` and temporary
 /// tables carry over from one run to the next.
 pub struct Session {
-    conn: PgConnection,
+    conn: Conn,
     /// The server process serving this connection; cancel requests target it.
     pid: i32,
 }
@@ -343,7 +347,7 @@ pub async fn explain(
     let statement = format!("EXPLAIN ({options}) {}", sql.trim().trim_end_matches(';'));
 
     let mut transaction = conn.begin().await?;
-    let row = sqlx::query(AssertSqlSafe(statement)).fetch_one(&mut *transaction).await;
+    let row = sqlx::query(AssertSqlSafe(statement)).fetch_one(&mut transaction).await;
     transaction.rollback().await?;
     conn.close().await?;
 

@@ -2,6 +2,7 @@
 
 mod cosmos;
 mod edit_sql;
+mod logged;
 mod mongodb;
 mod row_filter;
 

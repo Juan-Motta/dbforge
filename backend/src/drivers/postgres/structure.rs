@@ -2,9 +2,7 @@
 //! PostgreSQL has no `SHOW CREATE TABLE`, so the script is assembled from the
 //! server's own `pg_get_*def` functions, the way `pg_dump` does.
 
-use sqlx::Connection as _;
-use sqlx::postgres::PgConnection;
-
+use super::Conn;
 use super::connect;
 use crate::connections::model::Connection;
 use crate::drivers::{ColumnInfo, ForeignKey, IndexInfo, ObjectKind, TableRef, TableStructure, TriggerInfo};
@@ -68,7 +66,7 @@ struct CatalogColumn {
     default_clause: Option<String>,
 }
 
-async fn columns(conn: &mut PgConnection, relation: &str) -> Result<Vec<CatalogColumn>> {
+async fn columns(conn: &mut Conn, relation: &str) -> Result<Vec<CatalogColumn>> {
     type Row = (String, String, String, bool, Option<String>, String, String, Option<String>, Vec<String>);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT a.attname::text, quote_ident(a.attname), format_type(a.atttypid, a.atttypmod), NOT a.attnotnull,
@@ -112,7 +110,7 @@ struct CatalogIndex {
     backs_constraint: bool,
 }
 
-async fn indexes(conn: &mut PgConnection, relation: &str) -> Result<Vec<CatalogIndex>> {
+async fn indexes(conn: &mut Conn, relation: &str) -> Result<Vec<CatalogIndex>> {
     type Row = (String, String, bool, bool, Vec<String>, Option<String>, i64, String, bool);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT i.relname::text, am.amname::text, x.indisunique, x.indisprimary,
@@ -140,7 +138,7 @@ async fn indexes(conn: &mut PgConnection, relation: &str) -> Result<Vec<CatalogI
         .collect())
 }
 
-async fn foreign_keys(conn: &mut PgConnection, relation: &str) -> Result<Vec<ForeignKey>> {
+async fn foreign_keys(conn: &mut Conn, relation: &str) -> Result<Vec<ForeignKey>> {
     type Row = (String, Vec<String>, String, Vec<String>, String, String);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT c.conname::text,
@@ -182,7 +180,7 @@ fn action_name(code: &str) -> &'static str {
     }
 }
 
-async fn triggers(conn: &mut PgConnection, relation: &str) -> Result<Vec<TriggerInfo>> {
+async fn triggers(conn: &mut Conn, relation: &str) -> Result<Vec<TriggerInfo>> {
     let rows: Vec<(String, bool, String)> = sqlx::query_as(
         "SELECT tgname::text, tgenabled <> 'D', pg_get_triggerdef(oid, true)
          FROM pg_trigger WHERE tgrelid = $1::regclass AND NOT tgisinternal
@@ -195,7 +193,7 @@ async fn triggers(conn: &mut PgConnection, relation: &str) -> Result<Vec<Trigger
 }
 
 async fn table_ddl(
-    conn: &mut PgConnection,
+    conn: &mut Conn,
     relation: &str,
     comment: &Option<String>,
     columns: &[CatalogColumn],
@@ -236,7 +234,7 @@ async fn table_ddl(
 }
 
 async fn view_ddl(
-    conn: &mut PgConnection,
+    conn: &mut Conn,
     relation: &str,
     relkind: &str,
     comment: &Option<String>,

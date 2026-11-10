@@ -12,6 +12,7 @@ use tauri::State;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, Column, RowFilter, RowSink, TableRef};
 use crate::error::Result;
+use crate::statement_log::{self, Origin, StatementLog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -221,6 +222,7 @@ pub fn export_rows(
 #[tauri::command]
 pub async fn export_table(
     store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
     connection_id: String,
     table: TableRef,
     filter: Option<RowFilter>,
@@ -231,7 +233,13 @@ pub async fn export_table(
     let password = store.password(&connection.id)?;
     let name = format!("{}.{}", quote_ident(&table.schema), quote_ident(&table.name));
     let mut writer = RowWriter::new(BufWriter::new(File::create(path)?), format, &name);
-    drivers::stream_table(&connection, password.as_deref(), &table, &filter.unwrap_or_default(), &mut writer).await?;
+    statement_log::scoped(
+        &log,
+        &connection.id,
+        Origin::Export,
+        drivers::stream_table(&connection, password.as_deref(), &table, &filter.unwrap_or_default(), &mut writer),
+    )
+    .await?;
     writer.finish()
 }
 

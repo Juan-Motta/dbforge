@@ -6,6 +6,7 @@ use crate::connections::model::Engine;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::redis::{self, KeyEdit, KeyValue, NewKey, Overview, ScanPage};
 use crate::error::{AppError, Result};
+use crate::statement_log::{self, Origin, StatementLog};
 
 /// Keys per page of the browser, and items per page of a value.
 const MAX_PAGE: usize = 1000;
@@ -24,15 +25,23 @@ fn redis_connection(
 
 /// Server metrics and the number of keys in database `db`.
 #[tauri::command]
-pub async fn redis_overview(store: State<'_, ConnectionStore>, connection_id: String, db: i64) -> Result<Overview> {
+pub async fn redis_overview(
+    store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
+    connection_id: String,
+    db: i64,
+) -> Result<Overview> {
     let (connection, password) = redis_connection(&store, &connection_id)?;
-    redis::overview(&connection, password.as_deref(), db).await
+    statement_log::scoped(&log, &connection.id, Origin::Browse, redis::overview(&connection, password.as_deref(), db))
+        .await
 }
 
 /// One page of keys matching `pattern` (and `kind`), from `cursor` (`"0"` first).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn redis_scan(
     store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
     connection_id: String,
     db: i64,
     pattern: String,
@@ -42,7 +51,13 @@ pub async fn redis_scan(
 ) -> Result<ScanPage> {
     let (connection, password) = redis_connection(&store, &connection_id)?;
     let limit = limit.clamp(1, MAX_PAGE);
-    redis::scan(&connection, password.as_deref(), db, &pattern, kind.as_deref(), &cursor, limit).await
+    statement_log::scoped(
+        &log,
+        &connection.id,
+        Origin::Browse,
+        redis::scan(&connection, password.as_deref(), db, &pattern, kind.as_deref(), &cursor, limit),
+    )
+    .await
 }
 
 /// One page of a key's value, from `cursor` (`None` first).
@@ -50,6 +65,7 @@ pub async fn redis_scan(
 #[allow(clippy::too_many_arguments)]
 pub async fn redis_read_key(
     store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
     connection_id: String,
     db: i64,
     key: String,
@@ -59,13 +75,20 @@ pub async fn redis_read_key(
 ) -> Result<KeyValue> {
     let (connection, password) = redis_connection(&store, &connection_id)?;
     let limit = limit.clamp(1, MAX_PAGE);
-    redis::read_key(&connection, password.as_deref(), db, &key, cursor.as_deref(), &filter, limit).await
+    statement_log::scoped(
+        &log,
+        &connection.id,
+        Origin::Browse,
+        redis::read_key(&connection, password.as_deref(), db, &key, cursor.as_deref(), &filter, limit),
+    )
+    .await
 }
 
 /// Changes `key`, which the browser showed as a `kind` (see `redis::KeyEdit`).
 #[tauri::command]
 pub async fn redis_edit_key(
     store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
     connection_id: String,
     db: i64,
     key: String,
@@ -73,17 +96,30 @@ pub async fn redis_edit_key(
     edit: KeyEdit,
 ) -> Result<()> {
     let (connection, password) = redis_connection(&store, &connection_id)?;
-    redis::edit_key(&connection, password.as_deref(), db, &key, &kind, &edit).await
+    statement_log::scoped(
+        &log,
+        &connection.id,
+        Origin::Edit,
+        redis::edit_key(&connection, password.as_deref(), db, &key, &kind, &edit),
+    )
+    .await
 }
 
 /// Creates a key with its first element; refused when the name is taken.
 #[tauri::command]
 pub async fn redis_create_key(
     store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
     connection_id: String,
     db: i64,
     key: NewKey,
 ) -> Result<()> {
     let (connection, password) = redis_connection(&store, &connection_id)?;
-    redis::create_key(&connection, password.as_deref(), db, &key).await
+    statement_log::scoped(
+        &log,
+        &connection.id,
+        Origin::Edit,
+        redis::create_key(&connection, password.as_deref(), db, &key),
+    )
+    .await
 }
