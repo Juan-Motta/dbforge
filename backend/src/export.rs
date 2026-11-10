@@ -31,6 +31,8 @@ enum Kind {
     Number,
     Boolean,
     Json,
+    /// Bytes, which MySQL and SQL Server show as `0x` and hex digits.
+    Binary,
     Text,
 }
 
@@ -43,8 +45,14 @@ fn kind_of(data_type: &str) -> Kind {
         | "int8" | "float4" | "float8" | "oid" => Kind::Number,
         "boolean" | "bool" => Kind::Boolean,
         "json" | "jsonb" => Kind::Json,
+        "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" | "image" => Kind::Binary,
         _ => Kind::Text,
     }
+}
+
+/// `0x` and an even number of hex digits.
+fn is_hex_literal(text: &str) -> bool {
+    text.strip_prefix("0x").is_some_and(|digits| digits.len() % 2 == 0 && digits.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 pub struct RowWriter<W: Write> {
@@ -159,7 +167,7 @@ fn json_value(value: Option<&str>, kind: Kind) -> serde_json::Value {
         Kind::Number => serde_json::from_str::<serde_json::Number>(text).ok().map(Value::Number),
         Kind::Boolean => Some(Value::Bool(text == "t" || text == "true")),
         Kind::Json => serde_json::from_str(text).ok(),
-        Kind::Text => None,
+        Kind::Binary | Kind::Text => None,
     };
     parsed.unwrap_or_else(|| Value::String(text.to_string()))
 }
@@ -169,6 +177,8 @@ fn sql_literal(value: Option<&str>, kind: Kind) -> String {
         (None, _) => "NULL".to_string(),
         (Some(text), Kind::Number) if text.parse::<f64>().is_ok_and(f64::is_finite) => text.to_string(),
         (Some(text), Kind::Boolean) => if text == "t" || text == "true" { "TRUE" } else { "FALSE" }.to_string(),
+        // A hex literal, as MySQL and SQL Server read it: quoted, it would be the text "0x…".
+        (Some(text), Kind::Binary) if is_hex_literal(text) => text.to_string(),
         (Some(text), _) => format!("'{}'", text.replace('\'', "''")),
     }
 }
@@ -344,6 +354,13 @@ mod tests {
     fn special_numbers_stay_strings() {
         assert_eq!(json_value(Some("NaN"), Kind::Number), serde_json::json!("NaN"));
         assert_eq!(sql_literal(Some("NaN"), Kind::Number), "'NaN'");
+        assert_eq!(kind_of("varbinary(16)"), Kind::Binary);
+        assert_eq!(sql_literal(Some("0xACED0005"), Kind::Binary), "0xACED0005");
+        assert_eq!(sql_literal(Some("0x"), Kind::Binary), "0x");
+        // Anything else stays a string, never written in raw.
+        assert_eq!(sql_literal(Some("0x1; DROP"), Kind::Binary), "'0x1; DROP'");
+        assert_eq!(sql_literal(Some("bytes"), Kind::Binary), "'bytes'");
+        assert_eq!(json_value(Some("0xFF"), Kind::Binary), serde_json::json!("0xFF"));
     }
 
     #[test]
