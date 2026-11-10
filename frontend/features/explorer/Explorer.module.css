@@ -108,14 +108,6 @@
   text-overflow: ellipsis;
 }
 
-.liveDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  flex: none;
-}
-
 .meta {
   margin-left: auto;
   padding-left: 8px;
