@@ -106,7 +106,7 @@ describe('explorerMenu', () => {
     const mongo = { ...postgres, engine: 'mongodb' as const }
     expect(labels(menu(node('table', ['shop', 'orders'], mongo), a, mongo)).at(-1)).toEqual([
       'Copy',
-      ['Name'],
+      ['Name', 'find() query', 'countDocuments() query'],
     ])
     const mysql = { ...postgres, engine: 'mysql' as const }
     expect(labels(menu(node('database', ['shop'], mysql), a, mysql))).toEqual([

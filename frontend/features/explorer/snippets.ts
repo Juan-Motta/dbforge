@@ -30,6 +30,11 @@ export function previewQuery(dialect: SqlDialect, table: TableRef): string {
   }
 }
 
+/** A collection's count in mongosh. */
+export function countQuery(table: TableRef): string {
+  return `db.getCollection(${JSON.stringify(table.name)}).countDocuments({})`
+}
+
 /** Every column, one per line, ready to trim. Relational dialects only. */
 export function selectStatement(dialect: SqlDialect, table: TableRef, columns: string[]): string {
   const list = columns.map((column) => `  ${quote(dialect, column)}`).join(',\n')

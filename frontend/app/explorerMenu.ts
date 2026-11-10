@@ -15,7 +15,7 @@ import { MENU_ICONS, menuLabelOf } from '../features/admin/newObject'
 import type { AdminMessages } from '../features/admin/messages'
 import { connectionUrl } from '../features/connections/url'
 import type { TreeNode } from '../features/explorer/tree'
-import { insertStatement, previewQuery, selectStatement } from '../features/explorer/snippets'
+import { countQuery, insertStatement, previewQuery, selectStatement } from '../features/explorer/snippets'
 import type { TableStructure } from '../features/table-structure/api'
 import type { AppMessages } from './messages'
 import type { TableTabView } from './tabs'
@@ -141,6 +141,12 @@ function tableMenu(node: TreeNode, connection: Connection, actions: MenuActions,
 
   const copy: MenuItem[] = [
     { label: m.copyName, onSelect: () => actions.copy(table.name) },
+    ...(connection.engine === 'mongodb'
+      ? [
+          { label: m.copyFind, onSelect: () => actions.copy(previewQuery(dialect, table)) },
+          { label: m.copyCount, onSelect: () => actions.copy(countQuery(table)) },
+        ]
+      : []),
     ...(relational
       ? [
           {

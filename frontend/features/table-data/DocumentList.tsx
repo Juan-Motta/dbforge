@@ -82,6 +82,12 @@ export function DocumentList({
         icon: 'duplicate',
         items: [
           { label: m.copyDocument, onSelect: () => write(text) },
+          ...(loaded
+            ? Object.entries(loaded.key).map(([name, value]) => ({
+                label: m.copyKeyValue(name),
+                onSelect: () => write(value ?? 'null'),
+              }))
+            : []),
           ...(count
             ? [
                 {
