@@ -1,9 +1,12 @@
 /** The environment variable Codex reads the token from: Codex keeps no secrets in its config. */
 export const TOKEN_VARIABLE = 'DBFORGE_MCP_TOKEN'
 
-/** Adds DBForge to Claude Code, the token sent as a header. */
+/**
+ * Adds DBForge to Claude Code for every project (`--scope user`; the default
+ * scope ties it to the folder the command runs in), the token sent as a header.
+ */
 export function claudeCommand(url: string, token: string): string {
-  return `claude mcp add --transport http dbforge ${url} --header "Authorization: Bearer ${token}"`
+  return `claude mcp add --transport http --scope user dbforge ${url} --header "Authorization: Bearer ${token}"`
 }
 
 /** Adds DBForge to Codex, which reads the token from the environment. */

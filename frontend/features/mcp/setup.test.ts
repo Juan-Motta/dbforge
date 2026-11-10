@@ -6,7 +6,7 @@ describe('agent setup', () => {
     const url = serverUrl(7419)
     expect(url).toBe('http://127.0.0.1:7419/mcp')
     expect(claudeCommand(url, 'abc')).toBe(
-      'claude mcp add --transport http dbforge http://127.0.0.1:7419/mcp --header "Authorization: Bearer abc"',
+      'claude mcp add --transport http --scope user dbforge http://127.0.0.1:7419/mcp --header "Authorization: Bearer abc"',
     )
     expect(codexCommand(url)).toBe(
       'codex mcp add dbforge --url http://127.0.0.1:7419/mcp --bearer-token-env-var DBFORGE_MCP_TOKEN',
