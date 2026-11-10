@@ -10,8 +10,8 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::io::ErrorKind;
+use std::path::PathBuf;
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
@@ -20,6 +20,7 @@ use sha2::Sha256;
 
 use super::SecretStore;
 use crate::error::{AppError, Result};
+use crate::files::{Access, write_atomic};
 
 const DATA_FILE: &str = "credentials.bin";
 const KEY_FILE: &str = "credentials.key";
@@ -98,7 +99,7 @@ impl EncryptedFile {
         let mut bytes = HEADER.to_vec();
         bytes.extend_from_slice(&nonce);
         bytes.extend_from_slice(&ciphertext);
-        write_private(&self.path(), &bytes)
+        write_atomic(&self.path(), &bytes, Access::Private)
     }
 
     /// The random half of the key, created on first use. Only `write` asks
@@ -114,7 +115,7 @@ impl EncryptedFile {
         }
         let mut key = vec![0u8; KEY_LEN];
         getrandom::fill(&mut key).map_err(random_error)?;
-        write_private(&path, &key)?;
+        write_atomic(&path, &key, Access::Private)?;
         Ok(key)
     }
 
@@ -161,37 +162,6 @@ impl SecretStore for EncryptedFile {
 
 fn random_error(error: getrandom::Error) -> AppError {
     AppError::Invalid(format!("No random bytes for the passwords' key: {error}"))
-}
-
-/// `credentials.bin.tmp` and `credentials.key.tmp`: each file has its own.
-fn temporary(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_owned();
-    name.push(".tmp");
-    PathBuf::from(name)
-}
-
-/// Writes through a temporary file, owner-only from the moment it exists, so a
-/// crash never leaves half a file and no other user can read it.
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = temporary(path);
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&tmp)?;
-    // A leftover temporary file from a crash keeps its old mode; tighten it.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(&tmp, path)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -255,13 +225,6 @@ pub(super) mod tests {
         fs::write(dir.join(KEY_FILE), b"").unwrap();
         file.set("c", "first").unwrap();
         assert_eq!(file.get("c").unwrap().as_deref(), Some("first"));
-    }
-
-    #[test]
-    fn each_file_is_written_through_its_own_temporary_file() {
-        let scratch = scratch();
-        let dir = scratch.path();
-        assert_ne!(temporary(&dir.join(DATA_FILE)), temporary(&dir.join(KEY_FILE)));
     }
 
     #[test]

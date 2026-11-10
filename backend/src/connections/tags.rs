@@ -2,14 +2,12 @@
 //! DEV by default, renamed, recolored, removed or added in the settings.
 
 use std::collections::HashSet;
-use std::fs;
-use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
+use crate::files::JsonFile;
 
 /// The longest name a badge has room for.
 const MAX_NAME: usize = 16;
@@ -53,49 +51,26 @@ fn defaults() -> Vec<Tag> {
 }
 
 pub struct TagStore {
-    path: PathBuf,
-    tags: Mutex<Vec<Tag>>,
+    tags: JsonFile<Vec<Tag>>,
 }
 
 impl TagStore {
     /// The tags saved at `path`; the defaults until the user changes them.
     pub fn load(path: PathBuf) -> Result<Self> {
-        let tags = match fs::read_to_string(&path) {
-            Ok(json) => serde_json::from_str(&json)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => defaults(),
-            Err(error) => return Err(error.into()),
-        };
-        Ok(Self { path, tags: Mutex::new(tags) })
+        Ok(Self { tags: JsonFile::load(path, defaults)? })
     }
 
     pub fn list(&self) -> Vec<Tag> {
-        self.lock().clone()
+        self.tags.get()
     }
 
     /// Replaces the tags with `tags`, in that order, after checking them.
     pub fn replace(&self, tags: Vec<Tag>) -> Result<()> {
         let tags = check(tags)?;
-        let mut current = self.lock();
-        self.persist(&tags)?;
-        *current = tags;
-        Ok(())
-    }
-
-    /// Through a temporary file synced to disk, so a crash never leaves half a file.
-    fn persist(&self, tags: &[Tag]) -> Result<()> {
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        let mut file = fs::File::create(&tmp)?;
-        file.write_all(serde_json::to_string_pretty(tags)?.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(&tmp, &self.path)?;
-        Ok(())
-    }
-
-    fn lock(&self) -> MutexGuard<'_, Vec<Tag>> {
-        self.tags.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.tags.update(|current| {
+            *current = tags;
+            Ok(())
+        })
     }
 }
 

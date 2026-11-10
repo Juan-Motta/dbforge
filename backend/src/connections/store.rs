@@ -1,28 +1,21 @@
-use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use super::model::Connection;
 use crate::credentials::Credentials;
 use crate::error::{AppError, Result};
+use crate::files::JsonFile;
 
 /// Saved connections, kept in memory and persisted to a JSON file, and their
 /// passwords, kept where the user chose.
 pub struct ConnectionStore {
-    path: PathBuf,
-    connections: Mutex<Vec<Connection>>,
+    connections: JsonFile<Vec<Connection>>,
     credentials: Credentials,
 }
 
 impl ConnectionStore {
     /// Loads the store from `path`. A missing file means no connections yet.
     pub fn load(path: PathBuf, credentials: Credentials) -> Result<Self> {
-        let connections = match fs::read_to_string(&path) {
-            Ok(json) => serde_json::from_str(&json)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(error) => return Err(error.into()),
-        };
-        Ok(Self { path, connections: Mutex::new(connections), credentials })
+        Ok(Self { connections: JsonFile::load(path, Vec::new)?, credentials })
     }
 
     /// The saved password of connection `id`, if any.
@@ -35,21 +28,24 @@ impl ConnectionStore {
     }
 
     pub fn list(&self) -> Vec<Connection> {
-        self.lock().clone()
+        self.connections.get()
     }
 
     pub fn get(&self, id: &str) -> Result<Connection> {
-        self.lock().iter().find(|c| c.id == id).cloned().ok_or_else(|| AppError::NotFound(id.into()))
+        self.connections
+            .read(|connections| connections.iter().find(|c| c.id == id).cloned())
+            .ok_or_else(|| AppError::NotFound(id.into()))
     }
 
     /// Adds the connection, or replaces the one with the same id.
     pub fn upsert(&self, connection: Connection) -> Result<()> {
-        let mut connections = self.lock();
-        match connections.iter_mut().find(|c| c.id == connection.id) {
-            Some(existing) => *existing = connection,
-            None => connections.push(connection),
-        }
-        self.persist(&connections)
+        self.connections.update(|connections| {
+            match connections.iter_mut().find(|c| c.id == connection.id) {
+                Some(existing) => *existing = connection,
+                None => connections.push(connection),
+            }
+            Ok(())
+        })
     }
 
     /// A copy of connection `id` named `name`, with a new id and the same
@@ -75,46 +71,34 @@ impl ConnectionStore {
     /// Checking against every tag that exists, not only the ones just
     /// deleted, also catches a clear that failed after an earlier delete.
     pub fn keep_only_tags(&self, tags: &[String]) -> Result<()> {
-        let mut connections = self.lock();
-        let mut changed = false;
-        for connection in connections.iter_mut() {
-            if connection.environment.as_ref().is_some_and(|tag| !tags.contains(tag)) {
-                connection.environment = None;
-                changed = true;
-            }
+        let stale = |connection: &Connection| connection.environment.as_ref().is_some_and(|tag| !tags.contains(tag));
+        if !self.connections.read(|connections| connections.iter().any(stale)) {
+            return Ok(());
         }
-        if changed { self.persist(&connections) } else { Ok(()) }
+        self.connections.update(|connections| {
+            for connection in connections.iter_mut().filter(|c| stale(c)) {
+                connection.environment = None;
+            }
+            Ok(())
+        })
     }
 
     pub fn remove(&self, id: &str) -> Result<()> {
-        let mut connections = self.lock();
-        let before = connections.len();
-        connections.retain(|c| c.id != id);
-        if connections.len() == before {
-            return Err(AppError::NotFound(id.into()));
-        }
-        self.persist(&connections)
-    }
-
-    /// Writes to a temporary file first so a crash never leaves a half-written file.
-    fn persist(&self, connections: &[Connection]) -> Result<()> {
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_string_pretty(connections)?)?;
-        fs::rename(&tmp, &self.path)?;
-        Ok(())
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Connection>> {
-        // A poisoned lock only means another thread panicked; the data is still valid.
-        self.connections.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.connections.update(|connections| {
+            let before = connections.len();
+            connections.retain(|c| c.id != id);
+            if connections.len() == before {
+                return Err(AppError::NotFound(id.into()));
+            }
+            Ok(())
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use crate::connections::model::Engine;
 

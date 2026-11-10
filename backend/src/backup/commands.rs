@@ -2,8 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -14,6 +13,7 @@ use crate::connections::store::ConnectionStore;
 use crate::connections::tags::TagStore;
 use crate::dump::ToolPaths;
 use crate::error::Result;
+use crate::files::{Access, write_atomic};
 use crate::mcp::{McpServer, SettingsFile};
 
 fn with_stores<T>(app: &AppHandle, work: impl FnOnce(&Stores<'_>) -> Result<T>) -> Result<T> {
@@ -41,7 +41,7 @@ pub fn export_backup(
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let version = app.package_info().version.to_string();
     let backup = with_stores(&app, |stores| super::collect(stores, preferences, secrets, now, &version))?;
-    write_private(&path, serde_json::to_string_pretty(&backup)?.as_bytes())?;
+    write_atomic(&path, serde_json::to_string_pretty(&backup)?.as_bytes(), Access::Private)?;
     Ok(Exported {
         connections: backup.connections.len(),
         passwords: backup.connections.iter().filter(|c| c.password.is_some()).count(),
@@ -68,34 +68,4 @@ pub async fn import_backup(app: AppHandle, path: PathBuf, parts: Parts) -> Resul
         crate::mcp::commands::apply(&app, mcp.settings).await;
     }
     Ok(imported)
-}
-
-/// Writes `bytes` to `path` so that only its owner can read it, whole or not at all.
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options.open(&tmp)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn the_file_is_readable_by_its_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("dbforge-backup.json");
-        write_private(&path, b"{}").unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
-    }
 }

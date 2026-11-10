@@ -5,7 +5,7 @@ mod file;
 mod keychain;
 
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use self::file::{EncryptedFile, MachineId};
 use self::keychain::Keychain;
 use crate::error::{AppError, Result};
+use crate::files::{Access, write_atomic};
 
 /// Reads, saves and removes one connection's password.
 trait SecretStore: Send + Sync {
@@ -170,16 +171,8 @@ impl Credentials {
     }
 
     fn save(&self, storage: Storage) -> Result<()> {
-        if let Some(dir) = self.settings_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let tmp = self.settings_path.with_extension("json.tmp");
-        let mut file = fs::File::create(&tmp)?;
-        file.write_all(serde_json::to_string_pretty(&Settings { credential_storage: storage })?.as_bytes())?;
-        // On disk before the rename, so a crash never leaves an empty settings file.
-        file.sync_all()?;
-        fs::rename(&tmp, &self.settings_path)?;
-        Ok(())
+        let json = serde_json::to_string_pretty(&Settings { credential_storage: storage })?;
+        write_atomic(&self.settings_path, json.as_bytes(), Access::Shared)
     }
 
     /// Reads and writes wait while the storage switches.

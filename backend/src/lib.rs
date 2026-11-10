@@ -9,6 +9,7 @@ mod edit;
 mod error;
 mod explorer;
 mod export;
+mod files;
 mod history;
 mod keyspace;
 mod mcp;

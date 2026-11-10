@@ -2,14 +2,12 @@
 //! token is a secret, so it lives in the credential store instead (see
 //! [`super::token`]).
 
-use std::fs;
-use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
+use crate::files::JsonFile;
 
 /// The port agents are told to use unless the user picks another.
 pub const DEFAULT_PORT: u16 = 7419;
@@ -29,45 +27,28 @@ impl Default for McpSettings {
 }
 
 pub struct SettingsFile {
-    file: PathBuf,
-    settings: Mutex<McpSettings>,
+    settings: JsonFile<McpSettings>,
 }
 
 impl SettingsFile {
     /// The settings saved at `file`; the defaults until the user changes them.
     pub fn load(file: PathBuf) -> Result<Self> {
-        let settings = match fs::read_to_string(&file) {
-            Ok(json) => serde_json::from_str(&json)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => McpSettings::default(),
-            Err(error) => return Err(error.into()),
-        };
-        Ok(Self { file, settings: Mutex::new(settings) })
+        Ok(Self { settings: JsonFile::load(file, McpSettings::default)? })
     }
 
     pub fn get(&self) -> McpSettings {
-        *self.lock()
+        self.settings.get()
     }
 
-    /// Keeps `settings`, written whole to a temporary file first so a crash never leaves half a file.
+    /// Keeps `settings`, after checking the port.
     pub fn set(&self, settings: McpSettings) -> Result<()> {
         if settings.port < 1024 {
             return Err(AppError::Invalid("Choose a port from 1024 to 65535.".into()));
         }
-        let mut current = self.lock();
-        if let Some(dir) = self.file.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let tmp = self.file.with_extension("json.tmp");
-        let mut file = fs::File::create(&tmp)?;
-        file.write_all(serde_json::to_string_pretty(&settings)?.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(&tmp, &self.file)?;
-        *current = settings;
-        Ok(())
-    }
-
-    fn lock(&self) -> MutexGuard<'_, McpSettings> {
-        self.settings.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.settings.update(|current| {
+            *current = settings;
+            Ok(())
+        })
     }
 }
 

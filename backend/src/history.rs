@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::files::{Access, write_atomic};
 
 /// Older entries are dropped past this, so the file stays small.
 const MAX_ENTRIES: usize = 5_000;
@@ -118,19 +119,13 @@ impl HistoryStore {
         Ok(())
     }
 
-    /// Writes to a temporary file first so a crash never leaves a half-written file.
     fn rewrite(&self, entries: &VecDeque<HistoryEntry>) -> Result<()> {
-        let tmp = self.path.with_extension("jsonl.tmp");
         let mut text = String::new();
         for entry in entries {
             text.push_str(&serde_json::to_string(entry)?);
             text.push('\n');
         }
-        let mut file = fs::File::create(&tmp)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        fs::rename(&tmp, &self.path)?;
-        Ok(())
+        write_atomic(&self.path, text.as_bytes(), Access::Shared)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
