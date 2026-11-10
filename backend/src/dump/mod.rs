@@ -16,7 +16,7 @@ pub use tool_paths::ToolPaths;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -268,6 +268,30 @@ struct Progress<'a> {
 }
 
 const PROGRESS: &str = "dump-progress";
+/// The dialog shows the last line the tool wrote; psql writes one per
+/// statement, so lines are sent this often at most, not one event for each.
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+
+/// Says yes at most once per `period`: the first time, then once it has passed again.
+struct Every {
+    period: Duration,
+    last: Option<Instant>,
+}
+
+impl Every {
+    fn new(period: Duration) -> Self {
+        Self { period, last: None }
+    }
+
+    fn due(&mut self) -> bool {
+        let now = Instant::now();
+        let due = self.last.is_none_or(|last| now.duration_since(last) >= self.period);
+        if due {
+            self.last = Some(now);
+        }
+        due
+    }
+}
 
 #[tauri::command]
 pub async fn export_database(
@@ -282,8 +306,11 @@ pub async fn export_database(
     let password = store.password(&connection.id)?;
     let tool = tools::resolve("pg_dump", chosen.get("pg_dump").as_deref()).await?;
     let cancel = jobs.start(&request.job_id);
+    let mut every = Every::new(PROGRESS_EVERY);
     let report = |line: &str| {
-        let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
+        if every.due() {
+            let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
+        }
     };
     let path = Path::new(&request.path);
     let run = Run { tool: &tool, cancel: &cancel };
@@ -306,8 +333,11 @@ pub async fn import_database(
     let password = store.password(&connection.id)?;
     let tool = tools::resolve("psql", chosen.get("psql").as_deref()).await?;
     let cancel = jobs.start(&request.job_id);
+    let mut every = Every::new(PROGRESS_EVERY);
     let report = |line: &str| {
-        let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
+        if every.due() {
+            let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
+        }
     };
     let path = Path::new(&request.path);
     let run = Run { tool: &tool, cancel: &cancel };
@@ -394,6 +424,16 @@ pub fn cancel_dump(jobs: State<'_, DumpJobs>, job_id: String) {
 #[cfg(test)]
 mod tests {
     use sqlx::{Connection as _, PgConnection};
+
+    #[test]
+    fn progress_is_sent_at_most_once_per_period() {
+        let mut every = Every::new(Duration::from_millis(50));
+        assert!(every.due(), "the first line goes at once");
+        assert!(!every.due() && !every.due(), "the lines right after it wait");
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(every.due());
+        assert!(!every.due());
+    }
 
     use super::*;
     use crate::drivers::postgres::tests::{PASSWORD, local};
