@@ -114,8 +114,13 @@ export function removeNewDocument(edits: Edits, id: number): Edits {
 }
 
 export function addRow(edits: Edits): Edits {
+  return addRowWith(edits, {})
+}
+
+/** A new row holding `values`, e.g. a loaded row's, to duplicate it; the other columns take their DEFAULT. */
+export function addRowWith(edits: Edits, values: Values): Edits {
   const id = Math.max(0, ...edits.inserts.map((r) => r.id)) + 1
-  return { ...edits, inserts: [{ id, values: {} }, ...edits.inserts] }
+  return { ...edits, inserts: [{ id, values }, ...edits.inserts] }
 }
 
 export function editNewCell(edits: Edits, id: number, column: string, value: Value): Edits {

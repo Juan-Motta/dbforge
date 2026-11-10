@@ -19,6 +19,7 @@ import {
   addRow,
   cellAt,
   counts,
+  addRowWith,
   editCell,
   editNewCell,
   editNewDocument,
@@ -39,6 +40,7 @@ import {
 import { DocumentList, NEW_DOCUMENT, type LoadedDocument } from './DocumentList'
 import { CellInspector, type InspectedCell } from './CellInspector'
 import { FilterBar } from './FilterBar'
+import { narrowedBy, sortedBy } from './cellActions'
 import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
@@ -362,6 +364,29 @@ export function TableView({
                 onInspect={() => setInspecting(!inspecting)}
                 sortOf={(column) => sortOf(dialect, column, filter.order)}
                 onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
+                dialect={dialect}
+                table={table}
+                onNarrow={pending ? undefined : (condition) => onFilterChange(narrowedBy(filter, condition))}
+                onSortColumn={
+                  pending
+                    ? undefined
+                    : (column, direction) => onFilterChange(sortedBy(dialect, column, direction, filter))
+                }
+                onDuplicateRow={(r) =>
+                  change((current) =>
+                    addRowWith(
+                      current,
+                      Object.fromEntries(
+                        columns
+                          // The copy gets its own key and lets the database compute what it computes.
+                          .map((column, c) => [column, rows[r][c]] as const)
+                          .filter(([column]) => !column.primaryKey && !column.generated)
+                          .map(([column, value]) => [column.name, value]),
+                      ),
+                    ),
+                  )
+                }
+                onDeleteRow={(r) => change((current) => toggleDelete(current, keyOf(rows[r], columns)))}
               />
             )
           )}

@@ -60,7 +60,8 @@ export function quote(dialect: SqlDialect, column: string): string {
   }
 }
 
-function orderText(dialect: SqlDialect, column: string, direction: 'asc' | 'desc'): string {
+/** How `order` sorts by `column` alone in `direction`, as the dialect writes it. */
+export function orderText(dialect: SqlDialect, column: string, direction: 'asc' | 'desc'): string {
   const name = quote(dialect, column)
   if (dialect === 'mongodb') return `{${name}: ${direction === 'asc' ? 1 : -1}}`
   return direction === 'asc' ? name : `${name} DESC`

@@ -56,7 +56,7 @@ export function linkFilter(
 }
 
 /** A string literal; the server converts it to the column's type. */
-function literal(dialect: SqlDialect, value: string): string {
+export function literal(dialect: SqlDialect, value: string): string {
   const escaped = dialect === 'mysql' ? value.replaceAll('\\', '\\\\') : value
   return `'${escaped.replaceAll("'", "''")}'`
 }

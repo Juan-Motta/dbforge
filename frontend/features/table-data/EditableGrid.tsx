@@ -12,10 +12,13 @@ import { isNumericType, isUuidType, shortTypeName } from '../../components/data-
 import { Icon } from '../../components/Icon'
 import { keepCursor } from '../../lib/cursor'
 import { useMessages } from '../../lib/i18n/useLanguage'
+import type { SqlDialect } from '../../domain/connection'
+import type { TableRef } from '../../domain/table'
 import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
 import { messages } from './messages'
-import { temporalKindOf } from './temporal'
+import { filtersByValue, rowAsInsert, rowAsJson, valueCondition } from './cellActions'
+import { formatTemporal, temporalKindOf, temporalOf } from './temporal'
 import { TemporalEditor } from './TemporalEditor'
 import styles from './EditableGrid.module.css'
 
@@ -51,7 +54,21 @@ interface EditableGridProps {
   columnInfo?: Record<string, { nullable: boolean; default: string | null }>
   /** Opens the row a foreign key column points to; `null` for other columns or NULL keys. */
   linkOf?: (row: number, column: number) => (() => void) | null
+  /** The query language, for the conditions and statements the cell menu writes. */
+  dialect?: SqlDialect
+  /** The table, for the INSERT the cell menu copies. */
+  table?: TableRef
+  /** Narrows the rows by a condition on a cell's value; absent while changes are pending. */
+  onNarrow?: (condition: string) => void
+  /** Sorts by one column; absent while changes are pending. */
+  onSortColumn?: (column: string, direction: 'asc' | 'desc') => void
+  /** Adds a new row with a loaded row's values. */
+  onDuplicateRow?: (row: number) => void
+  /** Marks a loaded row for deletion, or keeps it again. */
+  onDeleteRow?: (row: number) => void
 }
+
+const RELATIONAL_DIALECTS: SqlDialect[] = ['postgres', 'mysql', 'sqlite', 'sqlserver']
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
@@ -170,31 +187,128 @@ export function EditableGrid(props: EditableGridProps) {
   const pasteable = (cell: Cell) =>
     editable && !columns[cell.column]?.generated && cellAt(edits, rows, columns, cell)?.deleted === false
 
-  /** The cell's menu: copying always, and the changes its column allows. */
+  /** The cell's menu: copying, filtering and sorting always; the changes its column and row allow. */
   const menuItems = (at: Editing, column: number, state: CellState): MenuItem[] => {
     const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
-    const copy: MenuItem = {
-      label: m.copy,
-      onSelect: () => {
-        const text = cellText({ row: id, column })
-        if (text !== null) void navigator.clipboard.writeText(text)
-      },
-    }
-    if (!editable || state.locked) return [copy]
     const { name, dataType } = columns[column]
+    const names = columns.map((c) => c.name)
+    // The row as it stands, edits included; DEFAULT reads as NULL.
+    const current = () =>
+      columns.map((_, c) => cellAt(edits, rows, columns, { row: id, column: c })?.value ?? null)
+    const value = cellAt(edits, rows, columns, { row: id, column })?.value ?? null
+    const write = (text: string) => void navigator.clipboard.writeText(text)
+    const { dialect, table } = props
+
+    const copy: MenuItem = {
+      label: m.copyMenu,
+      icon: 'duplicate',
+      items: [
+        {
+          label: m.copyValue,
+          onSelect: () => {
+            const text = cellText({ row: id, column })
+            if (text !== null) write(text)
+          },
+        },
+        { label: m.copyColumnName, onSelect: () => write(name) },
+        ...(dialect && filtersByValue(dialect)
+          ? [{ label: m.copyCondition, onSelect: () => write(valueCondition(dialect, name, 'equal', value)) }]
+          : []),
+        { label: m.copyRowJson, onSelect: () => write(rowAsJson(names, current())) },
+        ...(dialect && table && RELATIONAL_DIALECTS.includes(dialect)
+          ? [{ label: m.copyRowInsert, onSelect: () => write(rowAsInsert(dialect, table, names, current())) }]
+          : []),
+      ],
+    }
+
+    const narrow = props.onNarrow
+    const sort = props.onSortColumn
+    const filter: MenuItem[] =
+      narrow || sort
+        ? [
+            {
+              label: m.filterMenu,
+              icon: 'search',
+              items: [
+                ...(narrow && dialect && filtersByValue(dialect)
+                  ? (
+                      [
+                        [m.filterEqual, 'equal'],
+                        [m.filterNotEqual, 'notEqual'],
+                        [m.filterIsNull, 'isNull'],
+                        [m.filterIsNotNull, 'isNotNull'],
+                      ] as const
+                    ).map(([label, test]) => ({
+                      label,
+                      onSelect: () => narrow(valueCondition(dialect, name, test, value)),
+                    }))
+                  : []),
+                ...(sort
+                  ? [
+                      { label: m.sortAscending, onSelect: () => sort(name, 'asc' as const) },
+                      { label: m.sortDescending, onSelect: () => sort(name, 'desc' as const) },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : []
+    if (!editable || state.locked) return [copy, ...filter]
+
     // Until the structure loads, nothing is assumed about NULL; the server has the last word.
     const info = props.columnInfo?.[name]
+    const temporal = temporalKindOf(dataType)
+    const now = () =>
+      setValue(
+        at,
+        column,
+        formatTemporal(temporalOf(new Date()), temporal!, /datetimeoffset/i.test(dataType)),
+      )
+    const set: MenuItem = {
+      label: m.setMenu,
+      icon: 'edit',
+      items: [
+        ...((info?.nullable ?? true) ? [{ label: 'NULL', onSelect: () => setValue(at, column, null) }] : []),
+        ...(info?.default
+          ? [{ label: 'DEFAULT', disabled: state.unset, onSelect: () => setValue(at, column, DEFAULT) }]
+          : []),
+        ...(temporal ? [{ label: temporal === 'date' ? m.today : m.now, onSelect: now }] : []),
+        ...(isUuidType(dataType)
+          ? [{ label: m.generateUuid, onSelect: () => setValue(at, column, crypto.randomUUID()) }]
+          : []),
+      ],
+    }
+    const deleted = 'row' in at && cellAt(edits, rows, columns, { row: id, column })?.deleted
+    const row: MenuItem[] =
+      'row' in at && (props.onDuplicateRow || props.onDeleteRow)
+        ? [
+            {
+              label: m.rowMenu,
+              icon: 'table',
+              items: [
+                ...(props.onDuplicateRow
+                  ? [{ label: m.duplicateRow, onSelect: () => props.onDuplicateRow!(at.row) }]
+                  : []),
+                ...(props.onDeleteRow
+                  ? [
+                      {
+                        label: deleted ? m.restoreRow : m.deleteRow,
+                        onSelect: () => props.onDeleteRow!(at.row),
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : []
+
     return [
+      { label: m.edit, onSelect: () => setEditing({ at, column }) },
       copy,
       { label: m.paste, onSelect: () => paste(at, column) },
-      { label: m.edit, onSelect: () => setEditing({ at, column }) },
-      ...((info?.nullable ?? true) ? [{ label: m.setNull, onSelect: () => setValue(at, column, null) }] : []),
-      ...(info?.default
-        ? [{ label: m.setDefault, disabled: state.unset, onSelect: () => setValue(at, column, DEFAULT) }]
-        : []),
-      ...(isUuidType(dataType)
-        ? [{ label: m.generateUuid, onSelect: () => setValue(at, column, crypto.randomUUID()) }]
-        : []),
+      ...(set.items!.length > 0 ? [set] : []),
+      ...filter,
+      ...row,
       ...('row' in at
         ? [
             {

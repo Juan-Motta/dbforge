@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addDocument,
   addRow,
+  addRowWith,
   cellAt,
   counts,
   DEFAULT,
@@ -173,5 +174,11 @@ describe('DEFAULT', () => {
 
   it('goes over the wire as a marker, not as the text DEFAULT', () => {
     expect(JSON.stringify({ a: DEFAULT, b: 'DEFAULT' })).toBe('{"a":{"kind":"default"},"b":"DEFAULT"}')
+  })
+
+  it('adds a row holding another row’s values', () => {
+    const edits = addRowWith(addRow(NO_EDITS), { name: 'Ann', email: null })
+    expect(edits.inserts[0]).toEqual({ id: 2, values: { name: 'Ann', email: null } })
+    expect(toChanges(edits)).toContainEqual({ kind: 'insert', values: { name: 'Ann', email: null } })
   })
 })
