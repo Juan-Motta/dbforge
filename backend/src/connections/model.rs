@@ -30,6 +30,19 @@ impl Engine {
     }
 }
 
+/// What an AI agent connected over MCP may do with a connection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentAccess {
+    /// Agents don't see the connection at all.
+    #[default]
+    None,
+    /// Agents may read, on a session the server keeps from writing.
+    Read,
+    /// Agents may also change data; tags that ask before changes make them ask the user.
+    Write,
+}
+
 /// A saved connection. The password is never part of it: it lives in the OS keychain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +67,9 @@ pub struct Connection {
     /// the servers and their port.
     #[serde(default)]
     pub srv: bool,
+    /// What agents may do with it over MCP; none for connections saved before agents could.
+    #[serde(default)]
+    pub agent_access: AgentAccess,
 }
 
 /// What the UI sends to create, update or test a connection.
@@ -77,6 +93,8 @@ pub struct ConnectionInput {
     pub allow_self_signed: bool,
     #[serde(default)]
     pub srv: bool,
+    #[serde(default)]
+    pub agent_access: AgentAccess,
 }
 
 impl ConnectionInput {
@@ -109,6 +127,7 @@ impl ConnectionInput {
             tls: self.tls || srv,
             allow_self_signed: (self.tls || srv) && self.allow_self_signed,
             srv,
+            agent_access: self.agent_access,
         };
         Ok((connection, self.password))
     }
@@ -132,7 +151,20 @@ mod tests {
             tls: false,
             allow_self_signed: false,
             srv: false,
+            agent_access: Default::default(),
         }
+    }
+
+    #[test]
+    fn agents_get_no_access_until_given_some() {
+        let saved = r#"{"id":"a","name":"n","engine":"postgres","environment":null,"host":"h","port":5432,"database":"","username":""}"#;
+        let connection: Connection = serde_json::from_str(saved).unwrap();
+        assert_eq!(connection.agent_access, AgentAccess::None);
+
+        let (connection, _) =
+            ConnectionInput { agent_access: AgentAccess::Write, ..input("n", None) }.into_parts().unwrap();
+        assert_eq!(connection.agent_access, AgentAccess::Write);
+        assert_eq!(serde_json::to_value(connection).unwrap()["agentAccess"], "write");
     }
 
     #[test]
@@ -158,6 +190,7 @@ mod tests {
             tls: true,
             allow_self_signed: true,
             srv: true,
+            agent_access: Default::default(),
             ..input("r", None)
         };
         let (connection, _) = redis.into_parts().unwrap();

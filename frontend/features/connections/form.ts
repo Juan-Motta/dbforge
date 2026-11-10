@@ -3,6 +3,7 @@ import {
   DEFAULT_PORTS,
   isFileEngine,
   TLS_ENGINES,
+  type AgentAccess,
   type Connection,
   type Engine,
 } from '../../domain/connection'
@@ -24,6 +25,7 @@ export interface ConnectionForm {
   tls: boolean
   allowSelfSigned: boolean
   srv: boolean
+  agentAccess: AgentAccess
 }
 
 export function emptyForm(): ConnectionForm {
@@ -39,6 +41,7 @@ export function emptyForm(): ConnectionForm {
     tls: false,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'none',
   }
 }
 

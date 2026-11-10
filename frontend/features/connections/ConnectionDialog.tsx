@@ -333,6 +333,18 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
             <UrlPreview form={form} m={m} />
           </>
         )}
+
+        <Select
+          label={m.agentAccess}
+          info={m.agentAccessInfo}
+          value={form.agentAccess}
+          options={[
+            { value: 'none', label: m.agentNone },
+            { value: 'read', label: m.agentRead },
+            { value: 'write', label: m.agentWrite },
+          ]}
+          onChange={(agentAccess) => update({ agentAccess })}
+        />
       </form>
 
       <footer className={styles.footer}>

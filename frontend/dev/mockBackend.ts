@@ -21,6 +21,7 @@ const connections: Connection[] = [
     tls: false,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'write',
   },
   {
     id: 'demo-sqlite',
@@ -34,6 +35,7 @@ const connections: Connection[] = [
     tls: false,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'read',
   },
   {
     id: 'demo-mysql',
@@ -47,6 +49,7 @@ const connections: Connection[] = [
     tls: false,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'none',
   },
   {
     id: 'demo-cosmos',
@@ -60,6 +63,7 @@ const connections: Connection[] = [
     tls: true,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'none',
   },
   {
     id: 'demo-redis',
@@ -73,6 +77,7 @@ const connections: Connection[] = [
     tls: false,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'none',
   },
 ]
 

@@ -65,6 +65,7 @@ describe('connectionAddress', () => {
     tls: false,
     allowSelfSigned: false,
     srv: false,
+    agentAccess: 'none',
   }
 
   it('shows user, host and port for servers', () => {

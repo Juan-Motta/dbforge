@@ -18,6 +18,7 @@ const postgres: Connection = {
   tls: false,
   allowSelfSigned: false,
   srv: false,
+  agentAccess: 'none',
 }
 
 function node(kind: TreeNode['kind'], path: string[], connection = postgres): TreeNode {

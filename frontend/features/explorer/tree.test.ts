@@ -28,6 +28,7 @@ const connection: Connection = {
   tls: false,
   allowSelfSigned: false,
   srv: false,
+  agentAccess: 'none',
 }
 
 const object = (name: string, kind: DbObject['kind'], rowEstimate: number | null = null): DbObject => ({

@@ -131,6 +131,7 @@ mod tests {
             tls: false,
             allow_self_signed: false,
             srv: false,
+            agent_access: Default::default(),
         }
     }
 

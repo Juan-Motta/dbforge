@@ -85,6 +85,7 @@ describe('toInput', () => {
       tls: false,
       allowSelfSigned: false,
       srv: false,
+      agentAccess: 'none' as const,
     }
     expect(toInput(formFromConnection(saved), saved.id)).toEqual({ ...saved, password: undefined })
   })
@@ -172,6 +173,7 @@ describe('TLS options', () => {
       tls: false,
       allowSelfSigned: false,
       srv: false,
+      agentAccess: 'none' as const,
     }
     expect(formFromConnection(saved)).toMatchObject({
       host: '127.0.0.1',
@@ -222,6 +224,7 @@ describe('TLS options', () => {
       tls: false,
       allowSelfSigned: false,
       srv: false,
+      agentAccess: 'none' as const,
     }
     expect(formFromConnection(saved).host).toBe('http://127.0.0.1:8081/')
     expect(formFromConnection({ ...saved, tls: true, port: 443 }).host).toBe('https://127.0.0.1:443/')

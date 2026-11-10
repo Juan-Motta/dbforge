@@ -20,7 +20,12 @@ export interface Connection {
   allowSelfSigned: boolean
   /** MongoDB: the host names a DNS seed list (`mongodb+srv://`). */
   srv: boolean
+  /** What AI agents connected over MCP may do with it. */
+  agentAccess: AgentAccess
 }
+
+/** What an agent connected over MCP may do: nothing, read, or also change data. */
+export type AgentAccess = 'none' | 'read' | 'write'
 
 /** Engines whose connections can use TLS from the form. */
 export const TLS_ENGINES: Engine[] = ['redis', 'mongodb', 'cosmosdb']

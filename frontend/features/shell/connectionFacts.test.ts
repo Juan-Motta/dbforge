@@ -16,6 +16,7 @@ const base: Connection = {
   tls: false,
   allowSelfSigned: false,
   srv: false,
+  agentAccess: 'none',
 }
 
 describe('connectionFacts', () => {
