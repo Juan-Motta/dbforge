@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Badge } from '../../components/Badge'
-import { Button } from '../../components/Button'
+import { Button, IconButton } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
 import { Icon } from '../../components/Icon'
+import { InfoTip } from '../../components/InfoTip'
 import { Modal } from '../../components/Modal'
+import { Select, type SelectOption } from '../../components/Select'
 import { TextField } from '../../components/TextField'
 import {
+  DEFAULT_PORTS,
   ENGINE_LABELS,
   isFileEngine,
   ACCOUNT_ENGINES,
@@ -16,6 +19,7 @@ import {
   type Connection,
   type Engine,
 } from '../../domain/connection'
+import { copyText } from '../../lib/clipboard'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { tagColor } from '../tags/tags'
@@ -33,6 +37,7 @@ import {
   type ConnectionForm,
 } from './form'
 import { messages, type ConnectionMessages } from './messages'
+import { connectionUrl } from './url'
 import styles from './ConnectionDialog.module.css'
 
 type TestState = { status: 'idle' } | { status: 'testing' } | { status: 'ok' | 'error'; message: string }
@@ -126,21 +131,26 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
     }
   }
 
-  const engineButton = (engine: Engine) => (
-    <button
-      key={engine}
-      type="button"
-      className={styles.engine}
-      aria-pressed={form.engine === engine}
-      onClick={() => {
-        setForm((current) => withEngine(current, engine))
-        setTest({ status: 'idle' })
-      }}
-    >
-      <EngineLogo engine={engine} size={20} />
-      {ENGINE_LABELS[engine]}
-    </button>
-  )
+  const engineOptions: SelectOption<Engine>[] = [
+    ...RELATIONAL_ENGINES.map((engine) => ({ engine, group: m.relational })),
+    ...NOSQL_ENGINES.map((engine) => ({ engine, group: m.nosql })),
+  ].map(({ engine, group }) => ({
+    value: engine,
+    label: ENGINE_LABELS[engine],
+    group,
+    icon: <EngineLogo engine={engine} size={16} />,
+  }))
+  // '' stands for no tag: a dropdown always has a value.
+  const tagOptions: SelectOption<string>[] = [
+    { value: '', label: m.noTag, icon: <span className={styles.dot} /> },
+    ...tags.map((tag) => ({
+      value: tag.id,
+      label: tag.name,
+      icon: <span className={styles.dot} style={{ background: tagColor(tag.color) }} />,
+    })),
+  ]
+  const srv = form.engine === 'mongodb' && form.srv
+  const database = databaseField(form.engine, m)
 
   return (
     <Modal
@@ -148,191 +158,182 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
       onClose={onClose}
       className={styles.dialog}
     >
-      <div className={styles.body}>
-        <nav className={styles.engines} aria-label={m.engine}>
-          <span className={styles.group}>{m.relational}</span>
-          {RELATIONAL_ENGINES.map(engineButton)}
-          <span className={styles.group}>{m.nosql}</span>
-          {NOSQL_ENGINES.map(engineButton)}
-        </nav>
-
-        <form
-          id="connection-form"
-          className={styles.form}
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (canSubmit(form)) void save()
-          }}
-        >
-          <TextField
-            label={m.name}
-            data-autofocus
-            required
-            value={form.name}
-            onChange={(e) => update({ name: e.target.value })}
+      <form
+        id="connection-form"
+        className={styles.form}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (canSubmit(form)) void save()
+        }}
+      >
+        <div className={styles.pair}>
+          <Select
+            label={m.engine}
+            info={m.engineInfo}
+            value={form.engine}
+            options={engineOptions}
+            onChange={(engine) => {
+              setForm((current) => withEngine(current, engine))
+              setTest({ status: 'idle' })
+              setFromUrl(null)
+            }}
           />
-          {/* Tags get a row of their own: the user may have many. */}
-          <div role="group" aria-labelledby="environment-label">
-            <span id="environment-label" className={styles.label}>
-              {m.environment}
-            </span>
-            <div className={styles.chips}>
-              {tags.map((tag) => (
-                <button
-                  key={tag.id}
-                  type="button"
-                  className={styles.chip}
-                  aria-pressed={form.environment === tag.id}
-                  onClick={() => update({ environment: form.environment === tag.id ? null : tag.id })}
-                >
-                  <span className={styles.dot} style={{ background: tagColor(tag.color) }} />
-                  {tag.name}
-                </button>
-              ))}
-            </div>
-          </div>
+          <Select
+            label={m.environment}
+            info={m.tagInfo}
+            value={form.environment ?? ''}
+            options={tagOptions}
+            onChange={(id) => update({ environment: id || null })}
+          />
+        </div>
 
-          {isFileEngine(form.engine) ? (
-            <>
-              <div className={styles.fileRow}>
+        <TextField
+          label={m.name}
+          help={m.nameHelp}
+          data-autofocus
+          required
+          value={form.name}
+          onChange={(e) => update({ name: e.target.value })}
+        />
+
+        {isFileEngine(form.engine) ? (
+          <div className={styles.fileRow}>
+            <TextField
+              label={m.databaseFile}
+              info={m.fileInfo}
+              help={m.fileHint}
+              mono
+              placeholder={m.databaseFilePlaceholder}
+              value={form.database}
+              onChange={(e) => update({ database: e.target.value })}
+            />
+            <Button onClick={browse}>{m.browse}</Button>
+          </div>
+        ) : (
+          <>
+            {account ? (
+              <TextField
+                label={m.accountUri}
+                info={m.uriInfo}
+                mono
+                placeholder={m.uriPlaceholder}
+                aria-invalid={form.host.trim() !== '' && !canTest(form)}
+                value={form.host}
+                onChange={(e) => update({ host: e.target.value })}
+                // A connection string fills the URI and the key.
+                onPaste={(e) => {
+                  if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
+                }}
+                onBlur={() => fillFromUrl(form.host)}
+              />
+            ) : (
+              <div className={styles.hostRow}>
                 <TextField
-                  label={m.databaseFile}
+                  label={m.host}
+                  info={hostInfoOf(form.engine, m)}
                   mono
-                  placeholder={m.databaseFilePlaceholder}
-                  value={form.database}
-                  onChange={(e) => update({ database: e.target.value })}
-                />
-                <Button onClick={browse}>{m.browse}</Button>
-              </div>
-              <p className={styles.hint}>{m.fileHint}</p>
-            </>
-          ) : (
-            <>
-              {account ? (
-                <TextField
-                  label={m.uri}
-                  mono
-                  placeholder={m.uriPlaceholder}
-                  aria-invalid={form.host.trim() !== '' && !canTest(form)}
+                  placeholder={hostHintOf(form.engine, m)}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
-                  // A connection string fills the URI and the key.
+                  // A connection URL, pasted or typed, fills the fields instead of staying in Host.
                   onPaste={(e) => {
                     if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
                   }}
                   onBlur={() => fillFromUrl(form.host)}
                 />
-              ) : (
-                <div className={styles.hostRow}>
-                  <TextField
-                    label={m.host}
-                    mono
-                    placeholder={hostHintOf(form.engine, m)}
-                    value={form.host}
-                    onChange={(e) => update({ host: e.target.value })}
-                    // A connection URL, pasted or typed, fills the fields instead of staying in Host.
-                    onPaste={(e) => {
-                      if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
-                    }}
-                    onBlur={() => fillFromUrl(form.host)}
-                  />
-                  <TextField
-                    label={m.port}
-                    mono
-                    inputMode="numeric"
-                    disabled={form.engine === 'mongodb' && form.srv}
-                    aria-invalid={!(form.engine === 'mongodb' && form.srv) && !isValidPort(form.port)}
-                    value={form.engine === 'mongodb' && form.srv ? '' : form.port}
-                    placeholder={form.engine === 'mongodb' && form.srv ? m.portFromDns : undefined}
-                    onChange={(e) => update({ port: e.target.value })}
-                  />
-                </div>
-              )}
-              {fromUrl && (
-                <p className={styles.hint} role="status">
-                  {account ? m.filledFromConnectionString : m.filledFromUrl}
-                  {fromUrl.length > 0 && (
-                    <span className={styles.ignored}>{m.notCarriedOver(fromUrl.join(', '))}</span>
-                  )}
-                </p>
-              )}
-
-              {form.engine !== 'redis' && !account && (
                 <TextField
-                  label={m.database}
+                  label={m.port}
+                  info={m.portInfo(DEFAULT_PORTS[form.engine])}
                   mono
-                  value={form.database}
-                  onChange={(e) => update({ database: e.target.value })}
-                />
-              )}
-
-              <div className={account ? undefined : styles.pair}>
-                {!account && (
-                  <TextField
-                    // Redis 6+ has ACL users; without ACLs the password alone is enough.
-                    label={form.engine === 'redis' ? m.redisUser : m.user}
-                    placeholder={form.engine === 'redis' ? 'default' : undefined}
-                    mono
-                    autoComplete="off"
-                    value={form.username}
-                    onChange={(e) => update({ username: e.target.value })}
-                  />
-                )}
-                <TextField
-                  label={account ? m.key : m.password}
-                  mono
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={connection ? m.unchanged : account ? m.keyPlaceholder : ''}
-                  value={form.password}
-                  onChange={(e) => update({ password: e.target.value })}
+                  inputMode="numeric"
+                  disabled={srv}
+                  aria-invalid={!srv && !isValidPort(form.port)}
+                  value={srv ? '' : form.port}
+                  placeholder={srv ? m.portFromDns : undefined}
+                  onChange={(e) => update({ port: e.target.value })}
                 />
               </div>
-              {/* The line is kept while the storage loads, so the form never moves. */}
-              <p className={styles.hint}>{storageNote(storage, account, m)}</p>
+            )}
+            {fromUrl && (
+              <p className={styles.hint} role="status">
+                {account ? m.filledFromConnectionString : m.filledFromUrl}
+                {fromUrl.length > 0 && (
+                  <span className={styles.ignored}>{m.notCarriedOver(fromUrl.join(', '))}</span>
+                )}
+              </p>
+            )}
 
-              {TLS_ENGINES.includes(form.engine) && (
-                <div className={styles.options}>
-                  {form.engine === 'mongodb' && (
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        checked={form.srv}
-                        onChange={(e) => update({ srv: e.target.checked, tls: form.tls || e.target.checked })}
-                      />
-                      {m.srv}
-                    </label>
-                  )}
-                  {!account && (
-                    <label className={styles.check}>
-                      <input
-                        type="checkbox"
-                        checked={form.tls || (form.engine === 'mongodb' && form.srv)}
-                        disabled={form.engine === 'mongodb' && form.srv}
-                        onChange={(e) => update({ tls: e.target.checked })}
-                      />
-                      {m.useTls}
-                    </label>
-                  )}
-                  <label className={styles.check}>
-                    <input
-                      type="checkbox"
-                      checked={form.allowSelfSigned}
-                      disabled={
-                        account
-                          ? !/^https:/i.test(form.host.trim())
-                          : !(form.tls || (form.engine === 'mongodb' && form.srv))
-                      }
-                      onChange={(e) => update({ allowSelfSigned: e.target.checked })}
-                    />
-                    {m.selfSigned}
-                  </label>
-                </div>
+            {database && (
+              <TextField
+                label={database.label}
+                help={database.help}
+                mono
+                value={form.database}
+                onChange={(e) => update({ database: e.target.value })}
+              />
+            )}
+
+            <div className={account ? undefined : styles.pair}>
+              {!account && (
+                <TextField
+                  // Redis 6+ has ACL users; without ACLs the password alone is enough.
+                  label={form.engine === 'redis' ? m.redisUser : m.user}
+                  info={userInfoOf(form.engine, m)}
+                  placeholder={form.engine === 'redis' ? 'default' : undefined}
+                  mono
+                  autoComplete="off"
+                  value={form.username}
+                  onChange={(e) => update({ username: e.target.value })}
+                />
               )}
-            </>
-          )}
-        </form>
-      </div>
+              <TextField
+                label={account ? m.key : m.password}
+                info={account ? m.keyInfo : m.passwordInfo}
+                mono
+                type="password"
+                autoComplete="new-password"
+                placeholder={connection ? m.unchanged : account ? m.keyPlaceholder : ''}
+                value={form.password}
+                onChange={(e) => update({ password: e.target.value })}
+              />
+            </div>
+            {/* The line is kept while the storage loads, so the form never moves. */}
+            <p className={styles.hint}>{storageNote(storage, account, m)}</p>
+
+            {TLS_ENGINES.includes(form.engine) && (
+              <fieldset className={styles.options}>
+                <legend className={styles.legend}>{m.security}</legend>
+                {form.engine === 'mongodb' && (
+                  <Option
+                    label={m.srv}
+                    help={m.srvHelp}
+                    checked={form.srv}
+                    onChange={(checked) => update({ srv: checked, tls: form.tls || checked })}
+                  />
+                )}
+                {!account && (
+                  <Option
+                    label={m.useTls}
+                    help={m.tlsHelp}
+                    checked={form.tls || srv}
+                    disabled={srv}
+                    onChange={(checked) => update({ tls: checked })}
+                  />
+                )}
+                <Option
+                  label={m.selfSigned}
+                  help={m.selfSignedHelp}
+                  checked={form.allowSelfSigned}
+                  disabled={account ? !/^https:/i.test(form.host.trim()) : !(form.tls || srv)}
+                  onChange={(checked) => update({ allowSelfSigned: checked })}
+                />
+              </fieldset>
+            )}
+
+            <UrlPreview form={form} m={m} />
+          </>
+        )}
+      </form>
 
       <footer className={styles.footer}>
         <Button onClick={runTest} disabled={test.status === 'testing' || !canTest(form)}>
@@ -353,6 +354,100 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
         </Button>
       </footer>
     </Modal>
+  )
+}
+
+/** The database field in each engine's terms; none for Redis, whose numbered databases are all listed. */
+function databaseField(engine: Engine, m: ConnectionMessages): { label: string; help: string } | null {
+  switch (engine) {
+    case 'redis':
+    case 'cosmosdb':
+    case 'sqlite':
+      return null
+    case 'postgres':
+      return { label: m.database, help: m.databaseHelp }
+    case 'sqlserver':
+      return { label: m.defaultDatabase, help: m.sqlServerDatabaseHelp }
+    case 'mongodb':
+      return { label: m.defaultDatabase, help: m.mongoDatabaseHelp }
+    case 'mysql':
+    case 'mariadb':
+      return { label: m.defaultDatabase, help: m.optionalDatabaseHelp }
+  }
+}
+
+function hostInfoOf(engine: Engine, m: ConnectionMessages): string {
+  if (engine === 'mongodb') return m.hostPasteInfo('mongodb://')
+  if (engine === 'redis') return m.hostPasteInfo('redis://')
+  return m.hostInfo
+}
+
+function userInfoOf(engine: Engine, m: ConnectionMessages): string {
+  if (engine === 'sqlserver') return m.sqlServerUserInfo
+  if (engine === 'redis') return m.redisUserInfo
+  return m.userInfo
+}
+
+/** A checkbox with what it does under its label. */
+function Option({
+  label,
+  help,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string
+  help: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className={styles.check}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        {label}
+        <span className={styles.optionHelp}>{help}</span>
+      </span>
+    </label>
+  )
+}
+
+/** Where the fields point, without the password, ready to copy. */
+function UrlPreview({ form, m }: { form: ConnectionForm; m: ConnectionMessages }) {
+  const [copied, setCopied] = useState(false)
+  // Until the fields could connect, there is nothing to point at; the row stays so the form never moves.
+  const url = canTest(form) ? connectionUrl({ ...toInput(form), id: '' }) : null
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  return (
+    <div>
+      <span className={styles.label}>
+        {m.connectionUrl}
+        <InfoTip text={m.connectionUrlInfo} />
+      </span>
+      <div className={styles.url}>
+        <code title={url ?? undefined}>{url ?? '—'}</code>
+        <IconButton
+          label={copied ? m.copied : m.copyUrl}
+          title={copied ? m.copied : m.copyUrl}
+          disabled={url === null}
+          onClick={() => url && void copyText(url).then(() => setCopied(true))}
+        >
+          <Icon name={copied ? 'check' : 'duplicate'} size={14} />
+        </IconButton>
+      </div>
+    </div>
   )
 }
 

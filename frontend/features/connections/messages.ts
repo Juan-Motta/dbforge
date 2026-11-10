@@ -3,6 +3,39 @@ import { defineMessages } from '../../lib/i18n/messages'
 export const messages = defineMessages({
   en: {
     newConnection: 'New connection',
+    engineInfo: 'The kind of database server. The fields below change to what it needs.',
+    nameHelp: 'How it shows in the explorer and the title bar.',
+    tagInfo:
+      'Marks the environment. Tags that ask before changes protect production data. Manage them in Settings → Tags.',
+    noTag: 'No tag',
+    hostInfo: 'The server’s name or IP address.',
+    hostPasteInfo: (scheme: string) =>
+      `The server’s name or IP address. Pasting a ${scheme} URL fills in every field.`,
+    portInfo: (port: number) => `The server’s TCP port; ${port} by default.`,
+    databaseHelp: 'Opened first; the explorer lists the others you can see.',
+    defaultDatabase: 'Default database',
+    optionalDatabaseHelp: 'Optional. The explorer lists every database you can see.',
+    sqlServerDatabaseHelp: 'Optional; master when empty. The explorer lists every database you can see.',
+    mongoDatabaseHelp: 'Optional. Users sign in against admin; the explorer lists every database.',
+    userInfo: 'The account to sign in with.',
+    sqlServerUserInfo: 'A SQL Server login (SQL authentication), such as sa.',
+    redisUserInfo: 'Redis 6+ ACL user. Leave empty when the server only has a password.',
+    passwordInfo: 'Saved where Settings → Passwords says; never shown again.',
+    accountUri: 'Account URI',
+    uriInfo:
+      'Your account’s endpoint from the Azure portal (Keys page), or http://localhost:8081/ for the emulator. Pasting a connection string fills in the key too.',
+    keyInfo: 'The account’s primary or secondary key, from the Azure portal’s Keys page.',
+    fileInfo: 'A SQLite database file on this computer.',
+    security: 'Security',
+    srvHelp: 'The host names a DNS seed list that gives the servers and the port.',
+    tlsHelp: 'Encrypts traffic to the server.',
+    selfSignedHelp:
+      'Trusts a certificate no authority signed, as test servers use. Only on servers you trust.',
+    connectionUrl: 'Connection URL',
+    connectionUrlInfo:
+      'What these fields point at, without the password. Paste it into another tool, or back into Host.',
+    copyUrl: 'Copy connection URL',
+    copied: 'Copied',
     editConnection: 'Edit connection',
     engine: 'Database engine',
     relational: 'Relational',
@@ -54,6 +87,41 @@ export const messages = defineMessages({
   },
   es: {
     newConnection: 'Nueva conexión',
+    engineInfo: 'El tipo de servidor de base de datos. Los campos de abajo cambian a lo que necesita.',
+    nameHelp: 'Cómo aparece en el explorador y en la barra de título.',
+    tagInfo:
+      'Marca el entorno. Las etiquetas que piden confirmación protegen los datos de producción. Adminístralas en Configuración → Etiquetas.',
+    noTag: 'Sin etiqueta',
+    hostInfo: 'El nombre o la dirección IP del servidor.',
+    hostPasteInfo: (scheme: string) =>
+      `El nombre o la dirección IP del servidor. Pegar una URL ${scheme} completa todos los campos.`,
+    portInfo: (port: number) => `El puerto TCP del servidor; ${port} por defecto.`,
+    databaseHelp: 'Se abre primero; el explorador lista las demás que puedes ver.',
+    defaultDatabase: 'Base de datos por defecto',
+    optionalDatabaseHelp: 'Opcional. El explorador lista todas las bases de datos que puedes ver.',
+    sqlServerDatabaseHelp:
+      'Opcional; master si está vacía. El explorador lista todas las bases de datos que puedes ver.',
+    mongoDatabaseHelp:
+      'Opcional. Los usuarios inician sesión contra admin; el explorador lista todas las bases.',
+    userInfo: 'La cuenta con la que se inicia sesión.',
+    sqlServerUserInfo: 'Un login de SQL Server (autenticación SQL), como sa.',
+    redisUserInfo: 'Usuario ACL de Redis 6+. Déjalo vacío si el servidor solo tiene contraseña.',
+    passwordInfo: 'Se guarda donde indica Configuración → Contraseñas; nunca se vuelve a mostrar.',
+    accountUri: 'URI de la cuenta',
+    uriInfo:
+      'El endpoint de tu cuenta en el portal de Azure (página Claves), o http://localhost:8081/ para el emulador. Pegar una cadena de conexión completa también la clave.',
+    keyInfo: 'La clave principal o secundaria de la cuenta, de la página Claves del portal de Azure.',
+    fileInfo: 'Un archivo de base de datos SQLite en este equipo.',
+    security: 'Seguridad',
+    srvHelp: 'El host es una lista semilla DNS que indica los servidores y el puerto.',
+    tlsHelp: 'Cifra el tráfico con el servidor.',
+    selfSignedHelp:
+      'Confía en un certificado que ninguna autoridad firmó, como usan los servidores de prueba. Solo en servidores de confianza.',
+    connectionUrl: 'URL de conexión',
+    connectionUrlInfo:
+      'A dónde apuntan estos campos, sin la contraseña. Pégala en otra herramienta, o de vuelta en Host.',
+    copyUrl: 'Copiar URL de conexión',
+    copied: 'Copiada',
     editConnection: 'Editar conexión',
     engine: 'Motor de base de datos',
     relational: 'Relacionales',
