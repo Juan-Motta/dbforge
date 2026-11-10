@@ -14,4 +14,4 @@ mod tools;
 
 pub use approvals::Approvals;
 pub use server::McpServer;
-pub use settings::SettingsFile;
+pub use settings::{McpSettings, SettingsFile};

@@ -24,6 +24,11 @@ impl ToolPaths {
         Ok(Self { file, paths: Mutex::new(paths) })
     }
 
+    /// Every choice, by tool name.
+    pub fn all(&self) -> BTreeMap<String, PathBuf> {
+        self.lock().clone()
+    }
+
     /// The path chosen for tool `name`, if any.
     pub fn get(&self, name: &str) -> Option<PathBuf> {
         self.lock().get(name).cloned()

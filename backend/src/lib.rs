@@ -1,4 +1,5 @@
 mod admin;
+mod backup;
 mod connections;
 mod credentials;
 mod cursor;
@@ -93,6 +94,9 @@ pub fn run() {
             mcp::commands::mcp_token,
             mcp::commands::regenerate_mcp_token,
             mcp::commands::answer_mcp_approval,
+            backup::commands::export_backup,
+            backup::commands::read_backup,
+            backup::commands::import_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");
