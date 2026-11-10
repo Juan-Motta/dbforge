@@ -350,10 +350,10 @@ mod tests {
 
         statement_log::scoped(&log, "redis", Origin::Edit, async {
             let edit = KeyEdit::SetString { value: r#"it's "x""#.into() };
-            edit_key(&connection, PASSWORD, 11, "k", "string", &edit).await.unwrap();
+            edit_key(&connection, PASSWORD, 11, &"k".into(), "string", &edit).await.unwrap();
             scan(&connection, PASSWORD, 11, "cart:*", None, "0", 10).await.unwrap();
-            read_key(&connection, PASSWORD, 11, "nothing", None, "", 10).await.unwrap_err();
-            edit_key(&connection, PASSWORD, 11, "cart:1", "hash", &edit).await.unwrap_err();
+            read_key(&connection, PASSWORD, 11, &"nothing".into(), None, "", 10).await.unwrap_err();
+            edit_key(&connection, PASSWORD, 11, &"cart:1".into(), "hash", &edit).await.unwrap_err();
         })
         .await;
 

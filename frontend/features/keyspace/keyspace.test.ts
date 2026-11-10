@@ -15,7 +15,12 @@ import {
 import { messages } from './messages'
 import type { KeyInfo } from './api'
 
-const key = (name: string, kind = 'string', ttlMs: number | null = null): KeyInfo => ({ name, kind, ttlMs })
+const key = (name: string, kind = 'string', ttlMs: number | null = null): KeyInfo => ({
+  name,
+  binary: false,
+  kind,
+  ttlMs,
+})
 
 describe('keyTree', () => {
   it('groups keys by their `:` prefixes, folders first, with key counts', () => {

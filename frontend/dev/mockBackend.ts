@@ -1,5 +1,6 @@
 // In-memory stand-in for the Rust backend, used only by `pnpm dev` in a plain
 // browser so the UI can be developed without launching the desktop app.
+import type { Text } from '../features/keyspace/api'
 import { emit } from '@tauri-apps/api/event'
 import { clearRecordedStatements, recordMock, recordedStatements } from './mockStatements'
 import { mockBackup } from './mockBackup'
@@ -259,9 +260,9 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
         ),
       )
     case 'redis_read_key':
-      return delay(redis.readKey(String(payload.key), String(payload.filter)))
+      return delay(redis.readKey((payload.key as Text).text, String(payload.filter)))
     case 'redis_edit_key':
-      return delay(redis.editKey(String(payload.key), String(payload.kind), payload.edit as never))
+      return delay(redis.editKey((payload.key as Text).text, String(payload.kind), payload.edit as never))
     case 'redis_create_key':
       return delay(redis.createKey(payload.key as never))
     case 'run_query': {

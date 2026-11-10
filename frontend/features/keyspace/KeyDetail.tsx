@@ -5,7 +5,7 @@ import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
-import { keyspaceApi, type Entry, type KeyEdit, type KeyValue } from './api'
+import { keyspaceApi, typed, type Entry, type KeyEdit, type KeyValue, type Text } from './api'
 import { FormDialog, type FormField } from './FormDialog'
 import {
   asHex,
@@ -42,7 +42,9 @@ type Dialog = 'ttl' | 'rename' | 'add' | 'delete' | null
 interface KeyDetailProps {
   connectionId: string
   db: number
+  /** The key's name as shown, and whether that is the hex of bytes that aren't text. */
   name: string
+  binary: boolean
   /** Changes when the CLI ran something, to read the key again. */
   reloadToken: number
   /** Keys were added, renamed or removed: the list scans again. */
@@ -56,11 +58,13 @@ export function KeyDetail({
   connectionId,
   db,
   name,
+  binary,
   reloadToken,
   onKeysChanged,
   initialDialog,
 }: KeyDetailProps) {
   const m = useMessages(messages)
+  const key: Text = { text: name, binary }
   const [value, setValue] = useState<KeyValue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -71,16 +75,15 @@ export function KeyDetail({
 
   /** Removes one field, item, member or stream entry of the key. */
   const removeEntry = (kind: string, entry: Entry) => {
-    if (kind === 'hash') return edit({ kind: 'removeField', field: entry.key!.text })
-    if (kind === 'list')
-      return edit({ kind: 'removeItem', index: Number(entry.key!.text), old: entry.value.text })
+    if (kind === 'hash') return edit({ kind: 'removeField', field: entry.key! })
+    if (kind === 'list') return edit({ kind: 'removeItem', index: Number(entry.key!.text), old: entry.value })
     if (kind === 'stream') return edit({ kind: 'removeEntry', id: entry.key!.text })
-    return edit({ kind: 'removeMember', member: entry.value.text })
+    return edit({ kind: 'removeMember', member: entry.value })
   }
 
   const load = async () => {
     try {
-      const read = await keyspaceApi.readKey(connectionId, db, name, null, filter, PAGE)
+      const read = await keyspaceApi.readKey(connectionId, db, key, null, filter, PAGE)
       setValue(read)
       setError(null)
       setPicked((current) => Math.min(current, Math.max(read.entries.length - 1, 0)))
@@ -94,21 +97,21 @@ export function KeyDetail({
     void load()
     // `load` reads the values these name.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, db, name, filter, reloadToken])
+  }, [connectionId, db, name, binary, filter, reloadToken])
 
   if (error) return <p className={`${styles.detailEmpty} ${styles.error}`}>{error}</p>
   if (!value) return <p className={styles.detailEmpty}>{m.loadingKey(name)}</p>
 
   const shape = shapes(m)[value.kind]
   const edit = async (change: KeyEdit) => {
-    await keyspaceApi.editKey(connectionId, db, name, value.kind, change)
+    await keyspaceApi.editKey(connectionId, db, key, value.kind, change)
     await load()
   }
   const loadMore = async () => {
     if (!value.next) return
     setLoadingMore(true)
     try {
-      const more = await keyspaceApi.readKey(connectionId, db, name, value.next, filter, PAGE)
+      const more = await keyspaceApi.readKey(connectionId, db, key, value.next, filter, PAGE)
       setValue({ ...more, entries: [...value.entries, ...more.entries] })
     } catch (failure) {
       setError(errorMessage(failure))
@@ -259,17 +262,16 @@ export function KeyDetail({
                   (value.kind === 'hash' || value.kind === 'list' || value.kind === 'zset')
                 }
                 onSave={(text) => {
-                  if (value.kind === 'hash')
-                    return edit({ kind: 'setField', field: entry.key!.text, value: text })
+                  if (value.kind === 'hash') return edit({ kind: 'setField', field: entry.key!, value: text })
                   if (value.kind === 'list') {
                     return edit({
                       kind: 'setItem',
                       index: Number(entry.key!.text),
-                      old: entry.value.text,
+                      old: entry.value,
                       value: text,
                     })
                   }
-                  return edit({ kind: 'addMember', member: entry.value.text, score: parseScore(text, m) })
+                  return edit({ kind: 'addMember', member: entry.value, score: parseScore(text, m) })
                 }}
                 onRemove={() => removeEntry(value.kind, entry)}
               />
@@ -309,7 +311,7 @@ export function KeyDetail({
           submitLabel={m.rename}
           fields={[{ name: 'to', label: m.newName, initial: name }]}
           onSubmit={async ({ to }) => {
-            await keyspaceApi.editKey(connectionId, db, name, value.kind, { kind: 'rename', to })
+            await keyspaceApi.editKey(connectionId, db, key, value.kind, { kind: 'rename', to })
             onKeysChanged(to)
           }}
           onClose={() => setDialog(null)}
@@ -322,7 +324,7 @@ export function KeyDetail({
           danger
           fields={[]}
           onSubmit={async () => {
-            await keyspaceApi.editKey(connectionId, db, name, value.kind, { kind: 'delete' })
+            await keyspaceApi.editKey(connectionId, db, key, value.kind, { kind: 'delete' })
             onKeysChanged(null)
           }}
           onClose={() => setDialog(null)}
@@ -390,15 +392,15 @@ function addEdit(kind: string, form: Record<string, string>, m: KeyspaceMessages
   switch (kind) {
     case 'hash':
       if (!form.field) throw m.enterFieldName
-      return { kind: 'setField', field: form.field, value: form.value }
+      return { kind: 'setField', field: typed(form.field), value: form.value }
     case 'list':
       return { kind: 'pushItem', value: form.value, head: form.end === 'head' }
     case 'zset':
-      return { kind: 'addMember', member: form.member, score: parseScore(form.score, m) }
+      return { kind: 'addMember', member: typed(form.member), score: parseScore(form.score, m) }
     case 'stream':
       return { kind: 'addEntry', fields: parseFields(form.fields, m) }
     default:
-      return { kind: 'addMember', member: form.member, score: null }
+      return { kind: 'addMember', member: typed(form.member), score: null }
   }
 }
 

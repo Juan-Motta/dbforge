@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::connections::model::Engine;
 use crate::connections::store::ConnectionStore;
-use crate::drivers::redis::{self, KeyEdit, KeyValue, NewKey, Overview, ScanPage};
+use crate::drivers::redis::{self, KeyEdit, KeyValue, NewKey, Overview, ScanPage, Text};
 use crate::error::{AppError, Result};
 use crate::statement_log::{self, Origin, StatementLog};
 
@@ -68,7 +68,7 @@ pub async fn redis_read_key(
     log: State<'_, StatementLog>,
     connection_id: String,
     db: i64,
-    key: String,
+    key: Text,
     cursor: Option<String>,
     filter: String,
     limit: usize,
@@ -91,7 +91,7 @@ pub async fn redis_edit_key(
     log: State<'_, StatementLog>,
     connection_id: String,
     db: i64,
-    key: String,
+    key: Text,
     kind: String,
     edit: KeyEdit,
 ) -> Result<()> {

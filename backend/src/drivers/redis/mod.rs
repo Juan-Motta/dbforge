@@ -19,7 +19,7 @@ use serde::Serialize;
 pub use admin::create_user;
 pub use cli::{Session, cancel, open_session};
 pub use edit::{KeyEdit, NewKey, create_key, edit_key};
-pub use keys::{KeyValue, ScanPage, read_key, scan};
+pub use keys::{KeyValue, ScanPage, Text, read_key, scan};
 use logged::LoggedConnection;
 pub use read_only::run_read_only;
 

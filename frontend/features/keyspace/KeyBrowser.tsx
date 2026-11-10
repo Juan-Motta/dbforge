@@ -3,7 +3,7 @@ import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
-import { keyspaceApi, type Overview } from './api'
+import { keyspaceApi, typed, type Overview, type Text } from './api'
 import { CliPanel } from './CliPanel'
 import { FormDialog } from './FormDialog'
 import { KeyDetail } from './KeyDetail'
@@ -26,7 +26,8 @@ interface KeyBrowserProps {
 export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowserProps) {
   const m = useMessages(messages)
   const db = Number(database.replace(/^db/, '')) || 0
-  const [selected, setSelected] = useState<string | null>(null)
+  // The selected key, as the list names it; a new or renamed one is text.
+  const [selected, setSelected] = useState<Text | null>(null)
   // A key's menu opens one of its detail's dialogs. The request is for that one
   // mount of the detail: `mounts` mounts it again, and choosing a key drops it,
   // so the dialog can't open again on the next key.
@@ -60,7 +61,7 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
   }, [connectionId, db])
 
   const keysChanged = (next: string | null) => {
-    setSelected(next)
+    setSelected(next === null ? null : typed(next))
     setRequest(null)
     setKeysToken((n) => n + 1)
     void refreshOverview()
@@ -71,15 +72,15 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
       <KeyList
         connectionId={connectionId}
         db={db}
-        selected={selected}
+        selected={selected?.text ?? null}
         onSelect={(key) => {
-          setSelected(key.name)
+          setSelected({ text: key.name, binary: key.binary })
           setRequest(null)
         }}
         onAddKey={() => setAdding(true)}
         reloadToken={keysToken}
         onKeyAction={(key, action) => {
-          setSelected(key.name)
+          setSelected({ text: key.name, binary: key.binary })
           setRequest(action)
           setMounts((n) => n + 1)
         }}
@@ -115,11 +116,12 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
           {selected ? (
             <KeyDetail
               // A new key starts with its first element picked.
-              key={`${selected}#${mounts}`}
+              key={`${selected.text}#${mounts}`}
               initialDialog={request ?? undefined}
               connectionId={connectionId}
               db={db}
-              name={selected}
+              name={selected.text}
+              binary={selected.binary}
               reloadToken={valueToken}
               onKeysChanged={keysChanged}
             />

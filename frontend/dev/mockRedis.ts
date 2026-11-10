@@ -118,7 +118,7 @@ export function scan(pattern: string, kind: string | null, cursor: string, limit
   const start = Number(cursor)
   const keys: KeyInfo[] = all
     .slice(start, start + limit)
-    .map(([name, stored]) => ({ name, kind: stored.data.kind, ttlMs: ttlOf(stored) }))
+    .map(([name, stored]) => ({ name, binary: false, kind: stored.data.kind, ttlMs: ttlOf(stored) }))
   return { keys, cursor: start + limit >= all.length ? '0' : String(start + limit) }
 }
 
@@ -187,6 +187,7 @@ export function readKey(name: string, filter: string): KeyValue {
   }
   return {
     name,
+    binary: false,
     kind: data.kind,
     ttlMs: ttlOf(stored),
     length,
@@ -206,10 +207,10 @@ export function editKey(name: string, kind: string, edit: KeyEdit) {
       if (data.kind === 'string') data.value = edit.value
       break
     case 'setField':
-      if (data.kind === 'hash') data.value.set(edit.field, edit.value)
+      if (data.kind === 'hash') data.value.set(edit.field.text, edit.value)
       break
     case 'removeField':
-      if (data.kind === 'hash') data.value.delete(edit.field)
+      if (data.kind === 'hash') data.value.delete(edit.field.text)
       break
     case 'setItem':
       if (data.kind === 'list') data.value[edit.index] = edit.value
@@ -224,11 +225,11 @@ export function editKey(name: string, kind: string, edit: KeyEdit) {
       if (data.kind === 'list') data.value.splice(edit.index, 1)
       break
     case 'addMember':
-      if (data.kind === 'set') data.value.add(edit.member)
-      if (data.kind === 'zset') data.value.set(edit.member, edit.score ?? 0)
+      if (data.kind === 'set') data.value.add(edit.member.text)
+      if (data.kind === 'zset') data.value.set(edit.member.text, edit.score ?? 0)
       break
     case 'removeMember':
-      if (data.kind === 'set' || data.kind === 'zset') data.value.delete(edit.member)
+      if (data.kind === 'set' || data.kind === 'zset') data.value.delete(edit.member.text)
       break
     case 'addEntry':
       if (data.kind === 'stream') data.value.push([`${Date.now()}-0`, Object.fromEntries(edit.fields)])

@@ -2,7 +2,7 @@
 //! live, and the value of one key read a page at a time. Keys and values are
 //! bytes; they are shown as text when they are UTF-8, else as hex.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::browse;
 use super::logged::LoggedConnection;
@@ -20,7 +20,9 @@ const MAX_STRING_BYTES: i64 = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyInfo {
+    /// The name as [`text`] shows it; with `binary`, it names the key again as a [`Text`].
     pub name: String,
+    pub binary: bool,
     /// `string`, `hash`, `list`, `set`, `zset`, `stream`, or a module's type.
     pub kind: String,
     /// Milliseconds left; `None` when the key never expires.
@@ -75,18 +77,45 @@ pub async fn scan(
         .zip(details)
         // `none` / -2: deleted between SCAN and TYPE.
         .filter(|(_, (kind, ttl))| kind != "none" && *ttl != -2)
-        .map(|(name, (kind, ttl))| KeyInfo { name: text(name).text, kind, ttl_ms: (ttl >= 0).then_some(ttl) })
+        .map(|(name, (kind, ttl))| {
+            let Text { text: name, binary } = text(name);
+            KeyInfo { name, binary, kind, ttl_ms: (ttl >= 0).then_some(ttl) }
+        })
         .collect();
     keys.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(ScanPage { keys, cursor })
 }
 
-/// Bytes for display: the text when it is UTF-8, else lowercase hex.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// Bytes for display: the text when it is UTF-8, else lowercase hex. The
+/// browser sends the same pair back to name a key, field, item or member, so
+/// one that isn't text is still found by its bytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Text {
     pub text: String,
     pub binary: bool,
+}
+
+impl Text {
+    /// The bytes this stands for: [`text`]'s way back.
+    pub fn bytes(&self) -> Result<Vec<u8>> {
+        if !self.binary {
+            return Ok(self.text.clone().into_bytes());
+        }
+        let (pairs, rest) = self.text.as_bytes().as_chunks::<2>();
+        pairs
+            .iter()
+            .map(|pair| std::str::from_utf8(pair).ok().and_then(|pair| u8::from_str_radix(pair, 16).ok()))
+            .collect::<Option<Vec<u8>>>()
+            .filter(|_| rest.is_empty())
+            .ok_or_else(|| AppError::Invalid(format!("{} isn't the hex of a binary name.", self.text)))
+    }
+}
+
+impl From<&str> for Text {
+    fn from(text: &str) -> Self {
+        Self { text: text.to_string(), binary: false }
+    }
 }
 
 pub fn text(bytes: &[u8]) -> Text {
@@ -113,6 +142,7 @@ pub struct Entry {
 #[serde(rename_all = "camelCase")]
 pub struct KeyValue {
     pub name: String,
+    pub binary: bool,
     pub kind: String,
     pub ttl_ms: Option<i64>,
     /// Fields, items, members or entries; a string's length in bytes.
@@ -133,16 +163,19 @@ pub async fn read_key(
     connection: &Connection,
     password: Option<&str>,
     db: i64,
-    key: &str,
+    key: &Text,
     cursor: Option<&str>,
     filter: &str,
     limit: usize,
 ) -> Result<KeyValue> {
+    let Text { text: shown, binary } = key;
+    let key = key.bytes()?;
+    let key = key.as_slice();
     let mut conn = browse(connection, password, Some(db)).await?;
     let (kind, ttl): (String, i64) =
         redis::pipe().cmd("TYPE").arg(key).cmd("PTTL").arg(key).query_async(&mut conn).await?;
     if kind == "none" {
-        return Err(AppError::Invalid(format!("The key {key} no longer exists.")));
+        return Err(AppError::Invalid(format!("The key {shown} no longer exists.")));
     }
     let bytes: Option<i64> = redis::cmd("MEMORY").arg("USAGE").arg(key).query_async(&mut conn).await.ok();
     let encoding: Option<String> = redis::cmd("OBJECT").arg("ENCODING").arg(key).query_async(&mut conn).await.ok();
@@ -258,7 +291,8 @@ pub async fn read_key(
         _ => (0, Vec::new(), None),
     };
     Ok(KeyValue {
-        name: key.to_string(),
+        name: shown.clone(),
+        binary: *binary,
         kind,
         ttl_ms: (ttl >= 0).then_some(ttl),
         length,
@@ -273,7 +307,7 @@ fn member(name: &[u8], score: f64) -> Entry {
     Entry { key: None, size: name.len(), value: text(name), score: Some(score) }
 }
 
-async fn count(conn: &mut LoggedConnection, command: &str, key: &str) -> Result<i64> {
+async fn count(conn: &mut LoggedConnection, command: &str, key: &[u8]) -> Result<i64> {
     Ok(redis::cmd(command).arg(key).query_async(conn).await?)
 }
 
@@ -282,7 +316,7 @@ async fn count(conn: &mut LoggedConnection, command: &str, key: &str) -> Result<
 async fn scan_value(
     conn: &mut LoggedConnection,
     command: &str,
-    key: &str,
+    key: &[u8],
     cursor: Option<&str>,
     pattern: &str,
     limit: usize,
@@ -374,7 +408,7 @@ mod tests {
         .await;
         let read = |key: &'static str, cursor: Option<&'static str>, filter: &'static str, limit| {
             let connection = connection.clone();
-            async move { read_key(&connection, PASSWORD, 3, key, cursor, filter, limit).await.unwrap() }
+            async move { read_key(&connection, PASSWORD, 3, &key.into(), cursor, filter, limit).await.unwrap() }
         };
 
         let string = read("s", None, "", 100).await;
@@ -401,13 +435,13 @@ mod tests {
         let stream = read("st", None, "", 1).await;
         assert_eq!(values(&stream), [(Some("1-1"), r#"{"event":"login"}"#, None)]);
         let next = stream.next.clone().unwrap();
-        let more = read_key(&connection, PASSWORD, 3, "st", Some(&next), "", 1).await.unwrap();
+        let more = read_key(&connection, PASSWORD, 3, &"st".into(), Some(&next), "", 1).await.unwrap();
         assert_eq!(values(&more)[0].0, Some("2-1"));
 
         let binary = read("bin", None, "", 1).await;
         assert_eq!(binary.entries[0].value, Text { text: "\u{1}".into(), binary: false });
 
-        let error = read_key(&connection, PASSWORD, 3, "gone", None, "", 10).await.unwrap_err();
+        let error = read_key(&connection, PASSWORD, 3, &"gone".into(), None, "", 10).await.unwrap_err();
         assert_eq!(error.to_string(), "The key gone no longer exists.");
     }
 
