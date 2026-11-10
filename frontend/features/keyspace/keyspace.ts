@@ -11,6 +11,7 @@ export type KeyNode =
  * name them (`session:7f3a:roles`). Folders come first; each counts the keys under it.
  */
 export function keyTree(keys: KeyInfo[], prefix = ''): KeyNode[] {
+  // One pass: a key joins its folder's list, which is never copied.
   const folders = new Map<string, KeyInfo[]>()
   const leaves: KeyNode[] = []
   for (const key of keys) {
@@ -20,7 +21,9 @@ export function keyTree(keys: KeyInfo[], prefix = ''): KeyNode[] {
       leaves.push({ kind: 'key', label: key.name, key })
     } else {
       const folder = prefix + rest.slice(0, cut + 1)
-      folders.set(folder, [...(folders.get(folder) ?? []), key])
+      const inside = folders.get(folder)
+      if (inside) inside.push(key)
+      else folders.set(folder, [key])
     }
   }
   const byLabel = (a: KeyNode, b: KeyNode) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)

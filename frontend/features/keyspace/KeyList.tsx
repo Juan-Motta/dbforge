@@ -1,7 +1,8 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { Button, IconButton } from '../../components/Button'
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { Icon } from '../../components/Icon'
+import { useWindowedRows } from '../../components/useWindowedRows'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { keyspaceApi, type KeyInfo } from './api'
@@ -11,6 +12,8 @@ import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
 
 const PAGE = 500
+/** A row's height in the style sheet: only the rows in sight are drawn. */
+const ROW_HEIGHT = 28
 const KINDS = ['string', 'hash', 'list', 'set', 'zset', 'stream']
 
 interface KeyListProps {
@@ -57,15 +60,24 @@ export function KeyList({
   })
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
+  // The scan in course: a page that arrives after another scan started is for a list that is gone.
+  const scan = useRef(0)
   const load = async (from: string, append: boolean) => {
+    const id = ++scan.current
     setState({ loading: true, error: null })
     try {
       const page = await keyspaceApi.scan(connectionId, db, pattern, kind || null, from, PAGE)
-      setKeys((current) => (append ? [...current, ...page.keys] : page.keys))
+      if (id !== scan.current) return
+      // SCAN may return a key twice across pages.
+      setKeys((current) => {
+        if (!append) return page.keys
+        const known = new Set(current.map((key) => key.name))
+        return [...current, ...page.keys.filter((key) => !known.has(key.name))]
+      })
       setCursor(page.cursor)
       setState({ loading: false, error: null })
     } catch (error) {
-      setState({ loading: false, error: errorMessage(error) })
+      if (id === scan.current) setState({ loading: false, error: errorMessage(error) })
     }
   }
 
@@ -75,11 +87,16 @@ export function KeyList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionId, db, pattern, kind, reloadToken])
 
-  const tree = keyTree(keys)
-  const rows =
-    view === 'tree'
-      ? visibleKeyRows(tree, (prefix) => expanded.has(prefix))
-      : keys.map((key) => ({ node: { kind: 'key' as const, label: key.name, key }, depth: 0 }))
+  // Built when the keys change, not on each key typed in the pattern or each menu opened.
+  const tree = useMemo(() => keyTree(keys), [keys])
+  const rows = useMemo(
+    () =>
+      view === 'tree'
+        ? visibleKeyRows(tree, (prefix) => expanded.has(prefix))
+        : keys.map((key) => ({ node: { kind: 'key' as const, label: key.name, key }, depth: 0 })),
+    [view, tree, keys, expanded],
+  )
+  const shown = useWindowedRows(rows.length, ROW_HEIGHT)
   const toggle = (prefix: string) =>
     setExpanded((current) => {
       const next = new Set(current)
@@ -144,12 +161,19 @@ export function KeyList({
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-      <div className={styles.keyRows} role="tree" aria-label={m.keys}>
+      <div
+        ref={shown.ref}
+        onScroll={shown.onScroll}
+        className={styles.keyRows}
+        role="tree"
+        aria-label={m.keys}
+      >
         {state.error && <p className={styles.error}>{state.error}</p>}
         {!state.error && !state.loading && keys.length === 0 && (
           <p className={styles.muted}>{m.noKeysMatch}</p>
         )}
-        {rows.map(({ node, depth }) =>
+        <div style={{ height: shown.before }} />
+        {rows.slice(shown.start, shown.end).map(({ node, depth }) =>
           node.kind === 'folder' ? (
             <button
               key={'folder:' + node.prefix}
@@ -220,6 +244,7 @@ export function KeyList({
             </button>
           ),
         )}
+        <div style={{ height: shown.after }} />
         {cursor !== '0' && (
           <Button
             variant="ghost"
