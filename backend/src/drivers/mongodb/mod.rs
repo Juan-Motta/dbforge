@@ -10,6 +10,7 @@ mod admin;
 mod edit;
 mod explain;
 mod logged;
+mod read_only;
 mod session;
 mod shell;
 mod structure;
@@ -17,6 +18,7 @@ mod structure;
 pub use admin::create_object;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
+pub use read_only::run_read_only;
 pub use session::{Session, cancel, open_session};
 pub use structure::table_structure;
 

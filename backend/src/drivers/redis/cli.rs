@@ -17,7 +17,8 @@ use crate::error::{AppError, Result};
 
 /// Commands that turn the connection into a stream of pushes, which a panel
 /// that prints one reply per command can't show.
-const STREAMING: [&str; 7] = ["SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "MONITOR", "SYNC", "PSYNC", "SHUTDOWN"];
+pub(super) const STREAMING: [&str; 7] =
+    ["SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "MONITOR", "SYNC", "PSYNC", "SHUTDOWN"];
 
 pub struct Session {
     conn: LoggedConnection,
@@ -51,32 +52,7 @@ impl Session {
         }
         let mut results = Vec::new();
         for words in commands {
-            let name = String::from_utf8_lossy(&words[0]).to_ascii_uppercase();
-            let lines = if STREAMING.contains(&name.as_str()) {
-                vec![format!("(error) {name} isn't supported in the CLI panel.")]
-            } else {
-                let mut command = redis::cmd(&name);
-                command.arg(&words[1..]);
-                match command.query_async::<Value>(&mut self.conn).await {
-                    Ok(reply) => format(&reply),
-                    // The server refused the command: printed, and the script goes on.
-                    Err(error) if error.code().is_some() => vec![format!("(error) {}", AppError::from(error))],
-                    Err(error) => return Err(error.into()),
-                }
-            };
-            let column = Column {
-                name: "reply".into(),
-                data_type: "redis".into(),
-                primary_key: false,
-                generated: false,
-                default: None,
-            };
-            results.push(StatementResult {
-                columns: vec![column],
-                rows: lines.into_iter().map(|line| vec![Some(line)]).collect(),
-                truncated: false,
-                rows_affected: 1,
-            });
+            results.push(run_command(&mut self.conn, &words).await?);
         }
         Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
     }
@@ -84,6 +60,33 @@ impl Session {
     pub async fn is_alive(&mut self) -> bool {
         redis::cmd("PING").query_async::<String>(&mut self.conn).await.is_ok()
     }
+}
+
+/// Runs one command, given as its words, and returns its reply as lines in a
+/// one-column result named `reply`, as redis-cli prints it. An error the server
+/// replies with is printed too; only a lost connection is an `Err`.
+pub(super) async fn run_command(conn: &mut LoggedConnection, words: &[Vec<u8>]) -> Result<StatementResult> {
+    let name = String::from_utf8_lossy(&words[0]).to_ascii_uppercase();
+    let lines = if STREAMING.contains(&name.as_str()) {
+        vec![format!("(error) {name} isn't supported in the CLI panel.")]
+    } else {
+        let mut command = redis::cmd(&name);
+        command.arg(&words[1..]);
+        match command.query_async::<Value>(conn).await {
+            Ok(reply) => format(&reply),
+            // The server refused the command: printed, and a script goes on.
+            Err(error) if error.code().is_some() => vec![format!("(error) {}", AppError::from(error))],
+            Err(error) => return Err(error.into()),
+        }
+    };
+    let column =
+        Column { name: "reply".into(), data_type: "redis".into(), primary_key: false, generated: false, default: None };
+    Ok(StatementResult {
+        columns: vec![column],
+        rows: lines.into_iter().map(|line| vec![Some(line)]).collect(),
+        truncated: false,
+        rows_affected: 1,
+    })
 }
 
 /// Ends a blocking command (`BLPOP`, `XREAD BLOCK`, …) the session is waiting

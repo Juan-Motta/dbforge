@@ -58,27 +58,35 @@ impl Session {
         }
         let mut results = Vec::new();
         for statement in statements {
-            let result = match statement {
-                Statement::Use(name) => {
-                    self.database = name;
-                    StatementResult::default()
-                }
-                Statement::Call { collection, method, chain } => {
-                    let database = self.client.database(&self.database).tagged(&self.tag);
-                    let call = Call { row_limit };
-                    let outcome = match collection {
-                        Some(name) => call.collection(database.collection(&name), method, chain).await,
-                        None => call.database(database, method, chain).await,
-                    };
-                    outcome.map_err(|error| match error {
-                        AppError::MongoDb(error) if interrupted(&error) => AppError::Invalid("Query cancelled.".into()),
-                        other => other,
-                    })?
-                }
-            };
-            results.push(result);
+            results.push(self.execute(statement, row_limit).await?);
         }
         Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+    }
+
+    /// Runs one parsed statement.
+    pub(super) async fn execute(&mut self, statement: Statement, row_limit: usize) -> Result<StatementResult> {
+        match statement {
+            Statement::Use(name) => {
+                self.database = name;
+                Ok(StatementResult::default())
+            }
+            Statement::Call { collection, method, chain } => {
+                let database = self.client.database(&self.database).tagged(&self.tag);
+                let call = Call { row_limit };
+                let outcome = match collection {
+                    Some(name) => call.collection(database.collection(&name), method, chain).await,
+                    None => call.database(database, method, chain).await,
+                };
+                outcome.map_err(|error| match error {
+                    AppError::MongoDb(error) if interrupted(&error) => AppError::Invalid("Query cancelled.".into()),
+                    other => other,
+                })
+            }
+        }
+    }
+
+    pub(super) async fn close(self) {
+        self.client.shutdown().await;
     }
 
     pub async fn is_alive(&mut self) -> bool {

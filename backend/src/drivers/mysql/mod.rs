@@ -8,19 +8,22 @@ mod admin;
 mod diagram;
 mod edit;
 mod explain;
+mod read_only;
 mod structure;
 
 pub use admin::create_object;
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
+pub use read_only::run_read_only;
 pub use structure::table_structure;
 
 use std::time::Instant;
 
 use either::Either;
 use futures_util::TryStreamExt;
-use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlRow};
+use futures_util::stream::BoxStream;
+use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlQueryResult, MySqlRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
 use super::logged::Logged;
@@ -244,33 +247,7 @@ impl Session {
     /// but only the first `row_limit` of each result are kept.
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
-        let mut results = Vec::new();
-        let mut current = StatementResult::default();
-        // Rows the current statement returned, kept or not.
-        let mut returned = 0u64;
-        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn);
-        while let Some(item) = stream.try_next().await? {
-            match item {
-                Either::Right(row) => {
-                    returned += 1;
-                    if current.columns.is_empty() {
-                        current.columns = columns_of(&row);
-                    }
-                    if current.rows.len() < row_limit {
-                        current.rows.push(text_values(&row));
-                    } else {
-                        current.truncated = true;
-                    }
-                }
-                // Marks the end of one statement.
-                Either::Left(done) => {
-                    // A SELECT reports no affected rows; count what it returned instead.
-                    current.rows_affected = if current.columns.is_empty() { done.rows_affected() } else { returned };
-                    results.push(std::mem::take(&mut current));
-                    returned = 0;
-                }
-            }
-        }
+        let results = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await?;
         let elapsed_ms = started.elapsed().as_millis() as u64;
         Ok(QueryOutcome { results, elapsed_ms })
     }
@@ -278,6 +255,42 @@ impl Session {
     pub async fn is_alive(&mut self) -> bool {
         self.conn.ping().await.is_ok()
     }
+}
+
+/// Reads what the text protocol returns, one result per statement. All rows
+/// are read so every statement completes, but only the first `row_limit` of
+/// each result are kept.
+async fn read_results(
+    mut stream: BoxStream<'_, sqlx::Result<Either<MySqlQueryResult, MySqlRow>>>,
+    row_limit: usize,
+) -> Result<Vec<StatementResult>> {
+    let mut results = Vec::new();
+    let mut current = StatementResult::default();
+    // Rows the current statement returned, kept or not.
+    let mut returned = 0u64;
+    while let Some(item) = stream.try_next().await? {
+        match item {
+            Either::Right(row) => {
+                returned += 1;
+                if current.columns.is_empty() {
+                    current.columns = columns_of(&row);
+                }
+                if current.rows.len() < row_limit {
+                    current.rows.push(text_values(&row));
+                } else {
+                    current.truncated = true;
+                }
+            }
+            // Marks the end of one statement.
+            Either::Left(done) => {
+                // A SELECT reports no affected rows; count what it returned instead.
+                current.rows_affected = if current.columns.is_empty() { done.rows_affected() } else { returned };
+                results.push(std::mem::take(&mut current));
+                returned = 0;
+            }
+        }
+    }
+    Ok(results)
 }
 
 /// Stops what connection `id` is running; the connection itself stays open.

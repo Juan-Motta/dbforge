@@ -9,11 +9,13 @@ mod admin;
 mod edit;
 mod explain;
 mod logged;
+mod read_only;
 mod structure;
 
 pub use admin::create_object;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
+pub use read_only::run_read_only;
 pub use structure::{schema_diagram, table_structure};
 
 use std::sync::Arc;

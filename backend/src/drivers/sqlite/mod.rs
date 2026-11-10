@@ -4,9 +4,11 @@
 //! `main`, SQLite's name for the file's own schema, as database and schema.
 
 mod edit;
+mod read_only;
 mod structure;
 
 pub use edit::{apply_changes, preview_changes};
+pub use read_only::run_read_only;
 pub use structure::{schema_diagram, table_structure};
 
 use std::collections::BTreeMap;
@@ -14,8 +16,9 @@ use std::time::Instant;
 
 use either::Either;
 use futures_util::TryStreamExt;
+use futures_util::stream::BoxStream;
 use serde_json::{Value, json};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteRow};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteQueryResult, SqliteRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
 use super::logged::Logged;
@@ -35,10 +38,18 @@ pub(super) type Conn = Logged<SqliteConnection>;
 
 /// Opens the file, which must already exist: a typo must not create an empty database.
 async fn connect(connection: &Connection) -> Result<Conn> {
+    connect_with(connection, |options| options).await
+}
+
+/// [`connect`], with `adjust` applied to the options first, e.g. to open the file read-only.
+async fn connect_with(
+    connection: &Connection,
+    adjust: impl FnOnce(SqliteConnectOptions) -> SqliteConnectOptions,
+) -> Result<Conn> {
     if connection.database.is_empty() {
         return Err(AppError::Invalid("Choose the SQLite database file.".into()));
     }
-    let options = SqliteConnectOptions::new().filename(&connection.database).create_if_missing(false);
+    let options = adjust(SqliteConnectOptions::new().filename(&connection.database).create_if_missing(false));
     let conn = SqliteConnection::connect_with(&options).await.map_err(|error| match error {
         sqlx::Error::Database(_) => AppError::Invalid(format!("Could not open {}: {error}", connection.database)),
         other => AppError::from(other),
@@ -176,40 +187,48 @@ pub async fn open_session(connection: &Connection) -> Result<Session> {
 }
 
 impl Session {
-    /// Runs every statement of a script; all rows are read, the first `row_limit`
-    /// of each result are kept.
+    /// Runs every statement of a script.
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
-        let mut results = Vec::new();
-        let mut current = StatementResult::default();
-        let mut returned = 0u64;
-        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn);
-        while let Some(item) = stream.try_next().await? {
-            match item {
-                Either::Right(row) => {
-                    returned += 1;
-                    if current.columns.is_empty() {
-                        current.columns = columns_of(&row);
-                    }
-                    if current.rows.len() < row_limit {
-                        current.rows.push(text_values(&row));
-                    } else {
-                        current.truncated = true;
-                    }
-                }
-                Either::Left(done) => {
-                    current.rows_affected = if current.columns.is_empty() { done.rows_affected() } else { returned };
-                    results.push(std::mem::take(&mut current));
-                    returned = 0;
-                }
-            }
-        }
+        let results = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await?;
         Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
     }
 
     pub async fn is_alive(&mut self) -> bool {
         self.conn.ping().await.is_ok()
     }
+}
+
+/// Reads the result of every statement of a script; all rows are read, the
+/// first `row_limit` of each result are kept.
+async fn read_results(
+    mut stream: BoxStream<'_, sqlx::Result<Either<SqliteQueryResult, SqliteRow>>>,
+    row_limit: usize,
+) -> Result<Vec<StatementResult>> {
+    let mut results = Vec::new();
+    let mut current = StatementResult::default();
+    let mut returned = 0u64;
+    while let Some(item) = stream.try_next().await? {
+        match item {
+            Either::Right(row) => {
+                returned += 1;
+                if current.columns.is_empty() {
+                    current.columns = columns_of(&row);
+                }
+                if current.rows.len() < row_limit {
+                    current.rows.push(text_values(&row));
+                } else {
+                    current.truncated = true;
+                }
+            }
+            Either::Left(done) => {
+                current.rows_affected = if current.columns.is_empty() { done.rows_affected() } else { returned };
+                results.push(std::mem::take(&mut current));
+                returned = 0;
+            }
+        }
+    }
+    Ok(results)
 }
 
 /// `EXPLAIN QUERY PLAN` as a tree: SQLite reports how it reads each table, with

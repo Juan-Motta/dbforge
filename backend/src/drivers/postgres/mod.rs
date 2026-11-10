@@ -2,17 +2,20 @@ use std::time::Instant;
 
 use either::Either;
 use futures_util::TryStreamExt;
-use sqlx::postgres::{PgConnectOptions, PgConnection, PgRow};
+use futures_util::stream::BoxStream;
+use sqlx::postgres::{PgConnectOptions, PgConnection, PgQueryResult, PgRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo, ValueRef};
 
 mod admin;
 mod diagram;
 mod edit;
+mod read_only;
 mod structure;
 
 pub use admin::create_object;
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, preview_changes};
+pub use read_only::run_read_only;
 pub use structure::table_structure;
 
 use super::logged::Logged;
@@ -31,6 +34,16 @@ pub(super) type Conn = Logged<PgConnection>;
 /// Opens a connection, optionally to a database other than the configured one.
 /// PostgreSQL can only read a database's schemas from a connection to that database.
 async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Conn> {
+    connect_with(connection, password, database, |options| options).await
+}
+
+/// [`connect`], with `adjust` applied to the options first, e.g. to set session parameters.
+async fn connect_with(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+    adjust: impl FnOnce(PgConnectOptions) -> PgConnectOptions,
+) -> Result<Conn> {
     let mut options =
         PgConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username);
     let database = database.unwrap_or(&connection.database);
@@ -40,7 +53,7 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
     if let Some(password) = password {
         options = options.password(password);
     }
-    Ok(Logged::new(PgConnection::connect_with(&options).await?, Some(database)))
+    Ok(Logged::new(PgConnection::connect_with(&adjust(options)).await?, Some(database)))
 }
 
 /// Whether the server has a database named `name`.
@@ -298,28 +311,7 @@ impl Session {
     /// script completes, but only the first `row_limit` of each result are kept.
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
-        let mut results = Vec::new();
-        let mut current = StatementResult::default();
-        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn);
-        while let Some(item) = stream.try_next().await? {
-            match item {
-                Either::Right(row) => {
-                    if current.columns.is_empty() {
-                        current.columns = columns_of(&row);
-                    }
-                    if current.rows.len() < row_limit {
-                        current.rows.push(text_values(&row)?);
-                    } else {
-                        current.truncated = true;
-                    }
-                }
-                // Marks the end of one statement.
-                Either::Left(done) => {
-                    current.rows_affected = done.rows_affected();
-                    results.push(std::mem::take(&mut current));
-                }
-            }
-        }
+        let results = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await?;
         let elapsed_ms = started.elapsed().as_millis() as u64;
         Ok(QueryOutcome { results, elapsed_ms })
     }
@@ -327,6 +319,37 @@ impl Session {
     pub async fn is_alive(&mut self) -> bool {
         self.conn.ping().await.is_ok()
     }
+}
+
+/// Reads what the simple query protocol returns, one result per statement.
+/// All rows are read so every statement completes, but only the first
+/// `row_limit` of each result are kept.
+async fn read_results(
+    mut stream: BoxStream<'_, sqlx::Result<Either<PgQueryResult, PgRow>>>,
+    row_limit: usize,
+) -> Result<Vec<StatementResult>> {
+    let mut results = Vec::new();
+    let mut current = StatementResult::default();
+    while let Some(item) = stream.try_next().await? {
+        match item {
+            Either::Right(row) => {
+                if current.columns.is_empty() {
+                    current.columns = columns_of(&row);
+                }
+                if current.rows.len() < row_limit {
+                    current.rows.push(text_values(&row)?);
+                } else {
+                    current.truncated = true;
+                }
+            }
+            // Marks the end of one statement.
+            Either::Left(done) => {
+                current.rows_affected = done.rows_affected();
+                results.push(std::mem::take(&mut current));
+            }
+        }
+    }
+    Ok(results)
 }
 
 /// The server's plan for one statement, as `EXPLAIN (FORMAT JSON)` returns it.

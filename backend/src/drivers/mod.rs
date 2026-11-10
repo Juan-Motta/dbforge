@@ -604,6 +604,40 @@ pub async fn explain(
     }
 }
 
+/// Runs one statement that may only read, in the engine's language (SQL,
+/// mongosh, a redis-cli line, Cosmos SQL), on a fresh connection that is
+/// closed afterwards. Anything that could change data is refused or fails.
+///
+/// Each engine enforces it as far as its server allows; its `read_only` module
+/// says how, and what it can't prevent. Only connecting has a time limit, as
+/// for the console.
+#[allow(dead_code, reason = "called by the MCP server's query tool, which is built alongside")]
+pub async fn run_read_only(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+    container: Option<&str>,
+    statement: &str,
+    row_limit: usize,
+) -> Result<QueryOutcome> {
+    if statement.trim().is_empty() {
+        return Err(AppError::Invalid("Nothing to run.".into()));
+    }
+    match connection.engine {
+        Engine::Postgres => postgres::run_read_only(connection, password, database, statement, row_limit).await,
+        Engine::Sqlite => sqlite::run_read_only(connection, statement, row_limit).await,
+        Engine::Mysql | Engine::Mariadb => {
+            mysql::run_read_only(connection, password, database, statement, row_limit).await
+        }
+        Engine::Sqlserver => sqlserver::run_read_only(connection, password, database, statement, row_limit).await,
+        Engine::Mongodb => mongodb::run_read_only(connection, password, database, statement, row_limit).await,
+        Engine::Redis => redis::run_read_only(connection, password, database, statement, row_limit).await,
+        Engine::Cosmosdb => {
+            cosmos::run_read_only(connection, password, database, container, statement, row_limit).await
+        }
+    }
+}
+
 /// Stops the query a session is running. Harmless when it is idle.
 pub async fn cancel(
     connection: &Connection,
