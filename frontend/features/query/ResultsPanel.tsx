@@ -19,19 +19,26 @@ interface ResultsPanelProps {
   onExport: (result: StatementResult) => void
 }
 
-/** Results of one run: a tab per statement, showing the last one first. */
+/**
+ * Results of one run: a tab per statement, showing the last one first. A
+ * script that stopped partway shows its error last, and first, after the
+ * statements that ran before it.
+ */
 export function ResultsPanel({ outcome, onExport }: ResultsPanelProps) {
   const m = useMessages(messages)
-  const { results, elapsedMs } = outcome
-  const [selected, setSelected] = useState(results.length - 1)
+  const { results, elapsedMs, error } = outcome
+  // The error's tab comes after the results.
+  const tabs = results.length + (error ? 1 : 0)
+  const [selected, setSelected] = useState(tabs - 1)
   const result = results[selected]
+  const showingError = error !== null && selected === results.length
 
-  if (!result) return <p className={styles.placeholder}>{m.noStatements}</p>
+  if (!result && !showingError) return <p className={styles.placeholder}>{m.noStatements}</p>
 
   return (
     <>
       <div className={styles.resultsBar}>
-        {results.length > 1 && (
+        {tabs > 1 && (
           <div role="tablist" className={styles.resultTabs}>
             {results.map((_, i) => (
               <button
@@ -44,11 +51,22 @@ export function ResultsPanel({ outcome, onExport }: ResultsPanelProps) {
                 {m.result(i + 1)}
               </button>
             ))}
+            {error !== null && (
+              <button
+                type="button"
+                role="tab"
+                className={styles.errorTab}
+                aria-selected={showingError}
+                onClick={() => setSelected(results.length)}
+              >
+                {m.stoppedTab}
+              </button>
+            )}
           </div>
         )}
-        <Badge tone="ok">{summary(result, m)}</Badge>
+        {result && <Badge tone="ok">{summary(result, m)}</Badge>}
         <span className="muted">{elapsedMs} ms</span>
-        {result.columns.length > 0 && (
+        {result && result.columns.length > 0 && (
           <Button variant="ghost" className={styles.export} onClick={() => onExport(result)}>
             <Icon name="download" />
             {m.export}
@@ -56,7 +74,13 @@ export function ResultsPanel({ outcome, onExport }: ResultsPanelProps) {
         )}
       </div>
       <div className={styles.grid}>
-        {result.columns.length > 0 ? (
+        {showingError ? (
+          <p className={styles.error}>
+            {m.stoppedAfter(results.length)}
+            {'\n'}
+            {error}
+          </p>
+        ) : result.columns.length > 0 ? (
           <DataGrid columns={result.columns} rows={result.rows} />
         ) : (
           <p className={styles.placeholder}>{m.statementExecuted}</p>

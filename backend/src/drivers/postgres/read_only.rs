@@ -45,14 +45,16 @@ pub async fn run_read_only(
         // Parsed as a prepared statement only to have the server refuse several.
         (&mut transaction).prepare(AssertSqlSafe(statement.to_owned()).into_sql_str()).await?;
         // The simple protocol returns every value as text, as the console shows it.
-        read_results(sqlx::raw_sql(AssertSqlSafe(statement)).fetch_many(&mut transaction), row_limit).await
+        read_results(sqlx::raw_sql(AssertSqlSafe(statement)).fetch_many(&mut transaction), row_limit)
+            .await
+            .into_result()
     }
     .await;
     let rolled_back = transaction.rollback().await;
     let results = results?;
     rolled_back?;
     conn.close().await?;
-    Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+    Ok(QueryOutcome::complete(results, started))
 }
 
 #[cfg(test)]

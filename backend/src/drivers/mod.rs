@@ -18,7 +18,7 @@ mod sqlx_results;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -203,6 +203,58 @@ pub struct StatementResult {
 pub struct QueryOutcome {
     pub results: Vec<StatementResult>,
     pub elapsed_ms: u64,
+    /// Why the script stopped before its end, after the statements in `results` ran.
+    pub error: Option<String>,
+}
+
+impl QueryOutcome {
+    /// A console run: what the script's statements returned, and the error
+    /// that stopped it, if one did. A script that failed before any statement
+    /// ran is that error alone; one that failed later keeps what already ran,
+    /// since those statements took effect.
+    pub fn of(ran: Ran, started: Instant) -> Result<Self> {
+        match ran.failure {
+            Some(error) if ran.results.is_empty() => Err(error),
+            failure => Ok(Self {
+                results: ran.results,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                error: failure.map(|error| error.to_string()),
+            }),
+        }
+    }
+
+    /// A run that read one statement, or none that failed.
+    pub fn complete(results: Vec<StatementResult>, started: Instant) -> Self {
+        Self { results, elapsed_ms: started.elapsed().as_millis() as u64, error: None }
+    }
+}
+
+/// What a script returned up to where it stopped: each statement that ran,
+/// and the error that stopped it, if any.
+#[derive(Debug, Default)]
+pub struct Ran {
+    pub results: Vec<StatementResult>,
+    pub failure: Option<AppError>,
+}
+
+impl Ran {
+    /// Adds what one statement returned; false once one failed, when the script stops.
+    pub fn add(&mut self, result: Result<StatementResult>) -> bool {
+        match result {
+            Ok(result) => self.results.push(result),
+            Err(error) => self.failure = Some(error),
+        }
+        self.failure.is_none()
+    }
+
+    /// The results when every statement ran; otherwise the error, for callers
+    /// that run one statement and report it whole (agents' reads).
+    pub fn into_result(self) -> Result<Vec<StatementResult>> {
+        match self.failure {
+            Some(error) => Err(error),
+            None => Ok(self.results),
+        }
+    }
 }
 
 /// Everything the structure view shows about a table or view.

@@ -116,7 +116,11 @@ pub async fn run_query(
         },
         statements: outcome.as_ref().map_or(0, |o| o.results.len()),
         rows: outcome.as_ref().ok().and_then(|o| o.results.last()).map_or(0, |r| r.rows_affected),
-        error: outcome.as_ref().err().map(ToString::to_string),
+        // A script that stopped partway failed too, after its first statements ran.
+        error: match &outcome {
+            Ok(outcome) => outcome.error.clone(),
+            Err(error) => Some(error.to_string()),
+        },
         sql,
     };
     // Losing a history line must never fail the query itself.
@@ -150,7 +154,8 @@ async fn run_in_session(
         .map_err(|_| AppError::Invalid("A query is already running in this console".into()))?;
     let outcome = driver.run(sql, ROW_LIMIT).await;
     // A dropped connection can't be reused; the next run opens a new one.
-    if outcome.is_err() && !driver.is_alive().await {
+    let failed = outcome.as_ref().map_or(true, |outcome| outcome.error.is_some());
+    if failed && !driver.is_alive().await {
         sessions.remove(session_id, &session);
     }
     outcome

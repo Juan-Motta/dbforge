@@ -46,7 +46,7 @@ pub async fn run_read_only(
     let (name, flags) = command_flags(&mut conn, &words).await?;
     check_flags(&name, &flags)?;
     let result = run_command(&mut conn, &words, row_limit).await?;
-    Ok(QueryOutcome { results: vec![result], elapsed_ms: started.elapsed().as_millis() as u64 })
+    Ok(QueryOutcome::complete(vec![result], started))
 }
 
 /// The words of the one command in `statement`.

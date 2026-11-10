@@ -29,10 +29,10 @@ use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
-    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
-    hex, with_timeout,
+    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, TableRef, hex, with_timeout,
 };
 use crate::connections::model::{Connection, Engine};
+use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 
 /// A MySQL or MariaDB connection whose statements are recorded in the statement log.
@@ -298,9 +298,8 @@ impl Session {
     /// but only the first `row_limit` of each result are kept.
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
-        let results = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await?;
-        let elapsed_ms = started.elapsed().as_millis() as u64;
-        Ok(QueryOutcome { results, elapsed_ms })
+        let ran = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await;
+        QueryOutcome::of(ran, started)
     }
 
     pub async fn is_alive(&mut self) -> bool {
@@ -338,7 +337,7 @@ fn text_values(row: &MySqlRow) -> Vec<Option<String>> {
 async fn read_results(
     stream: BoxStream<'_, sqlx::Result<Either<MySqlQueryResult, MySqlRow>>>,
     row_limit: usize,
-) -> Result<Vec<StatementResult>> {
+) -> Ran {
     super::sqlx_results::read_results::<sqlx::MySql>(stream, row_limit, |row| Ok(text_values(row))).await
 }
 

@@ -273,15 +273,25 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
         return delay({
           elapsedMs: 1,
           results: [{ columns: [column], rows, truncated: false, rowsAffected: 1 }],
+          error: null,
         })
       }
-      if (/error/i.test(sql)) throw 'syntax error at or near "error"'
+      if (/^\s*error/i.test(sql)) throw 'syntax error at or near "error"'
+      // A later statement failing: what ran before it is shown with the error.
+      if (/error/i.test(sql)) {
+        return delay({
+          elapsedMs: 12,
+          results: [{ columns: [], rows: [], truncated: false, rowsAffected: 3 }],
+          error: 'syntax error at or near "error"',
+        })
+      }
       if (/pg_sleep/i.test(sql)) {
         await new Promise<void>((resolve) => sleeping.set(String(payload.sessionId), resolve))
         throw 'canceling statement due to user request'
       }
       return delay({
         elapsedMs: 38,
+        error: null,
         results: [
           { columns: [], rows: [], truncated: false, rowsAffected: 0 },
           {

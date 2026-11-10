@@ -98,7 +98,7 @@ pub async fn run_read_only(
     let mut client = with_timeout(connect(connection, password, database)).await?;
     let results = run_rolled_back(&mut client, statement, row_limit).await;
     client.close().await?;
-    Ok(QueryOutcome { results: results?, elapsed_ms: started.elapsed().as_millis() as u64 })
+    Ok(QueryOutcome::complete(results?, started))
 }
 
 async fn run_rolled_back(client: &mut Client, statement: &str, row_limit: usize) -> Result<Vec<StatementResult>> {

@@ -24,10 +24,10 @@ use sqlx::{AssertSqlSafe, Connection as _, Row};
 use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
-    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
-    with_timeout,
+    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout,
 };
 use crate::connections::model::Connection;
+use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 
 /// SQLite's name for the schema of the opened file.
@@ -190,8 +190,8 @@ impl Session {
     /// Runs every statement of a script.
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
-        let results = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await?;
-        Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+        let ran = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await;
+        QueryOutcome::of(ran, started)
     }
 
     pub async fn is_alive(&mut self) -> bool {
@@ -301,7 +301,7 @@ fn text_values(row: &SqliteRow) -> Vec<Option<String>> {
 async fn read_results(
     stream: BoxStream<'_, sqlx::Result<Either<SqliteQueryResult, SqliteRow>>>,
     row_limit: usize,
-) -> Result<Vec<StatementResult>> {
+) -> Ran {
     super::sqlx_results::read_results::<sqlx::Sqlite>(stream, row_limit, |row| Ok(text_values(row))).await
 }
 
@@ -351,6 +351,20 @@ mod tests {
         CREATE VIEW big_orders AS SELECT * FROM orders WHERE total > 100;
         INSERT INTO customers VALUES (1, 'Ann'), (2, 'Bo');
         INSERT INTO orders (id, customer_id, total, note) VALUES (3, 1, 150.5, x'00ff'), (1, 2, 20, NULL), (2, 1, 5, 'hi');";
+
+    #[tokio::test]
+    async fn a_script_that_fails_partway_keeps_what_already_ran() {
+        let (_dir, connection) = database("CREATE TABLE t (a INTEGER PRIMARY KEY);").await;
+        let mut session = open_session(&connection).await.unwrap();
+        let outcome = session.run("INSERT INTO t VALUES (1); SELECT * FROM t; INSERT INTO t VALUES (1); SELECT 2", 10);
+        let outcome = outcome.await.unwrap();
+        assert_eq!(outcome.results.len(), 2, "{outcome:?}");
+        assert_eq!(outcome.results[1].rows, [vec![Some("1".into())]]);
+        assert!(outcome.error.as_deref().is_some_and(|e| e.contains("UNIQUE")), "{outcome:?}");
+        // The first insert took effect; a script failing at its first statement is just the error.
+        let error = session.run("INSERT INTO t VALUES (1); SELECT 1", 10).await.unwrap_err();
+        assert!(error.to_string().contains("UNIQUE"), "{error}");
+    }
 
     #[tokio::test]
     async fn opens_existing_files_only() {

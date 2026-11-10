@@ -37,10 +37,11 @@ async fn run_within(
     let deadline = started + limit;
     let mut conn = with_timeout(connect_with(connection, |options| options.read_only(true))).await?;
     conn.set_progress_handler(PROGRESS_STEPS, move || Instant::now() < deadline).await?;
-    let results = read_results(sqlx::raw_sql(AssertSqlSafe(statement)).fetch_many(&mut conn), row_limit).await;
+    let results =
+        read_results(sqlx::raw_sql(AssertSqlSafe(statement)).fetch_many(&mut conn), row_limit).await.into_result();
     conn.close().await?;
     let results = results.map_err(|error| if Instant::now() >= deadline { read_only_timed_out() } else { error })?;
-    Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+    Ok(QueryOutcome::complete(results, started))
 }
 
 /// SQLite's virtual machine steps between checks of the time limit.

@@ -22,6 +22,11 @@ export const messages = defineMessages({
     rowsShowingFirst: (n: number, shown: number) => `${n.toLocaleString('en')} rows · showing first ${shown}`,
     noStatements: 'The script had no statements.',
     result: (n: number) => `Result ${n}`,
+    stoppedTab: 'Error',
+    stoppedAfter: (n: number) =>
+      n === 1
+        ? 'The script stopped after its first statement, which took effect:'
+        : `The script stopped after ${n} statements, which took effect:`,
     export: 'Export',
     statementExecuted: 'Statement executed.',
     execution: 'Execution',
@@ -69,6 +74,11 @@ export const messages = defineMessages({
       `${n.toLocaleString('en')} filas · se muestran las primeras ${shown}`,
     noStatements: 'El script no tenía sentencias.',
     result: (n: number) => `Resultado ${n}`,
+    stoppedTab: 'Error',
+    stoppedAfter: (n: number) =>
+      n === 1
+        ? 'El script se detuvo después de su primera sentencia, que se aplicó:'
+        : `El script se detuvo después de ${n} sentencias, que se aplicaron:`,
     export: 'Exportar',
     statementExecuted: 'Sentencia ejecutada.',
     execution: 'Ejecución',

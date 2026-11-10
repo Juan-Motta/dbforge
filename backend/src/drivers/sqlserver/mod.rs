@@ -35,6 +35,7 @@ use super::{
     hex, with_timeout,
 };
 use crate::connections::model::Connection;
+use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 
 /// A SQL Server client whose statements are recorded in the statement log.
@@ -350,10 +351,10 @@ impl Session {
         cancelled.as_mut().enable();
 
         let finished = tokio::select! {
-            results = run_batches(&mut self.client, sql, row_limit) => Some(results),
+            ran = run_batches(&mut self.client, sql, row_limit) => Some(ran),
             () = &mut cancelled => None,
         };
-        let Some(results) = finished else {
+        let Some(ran) = finished else {
             // Tells the server to stop. Its acknowledgement isn't fully read
             // (see `reset`), so the error is expected and the session is retired.
             let _ = self.client.cancel_query().await;
@@ -364,7 +365,7 @@ impl Session {
                     .into(),
             ));
         };
-        Ok(QueryOutcome { results: results?, elapsed_ms: started.elapsed().as_millis() as u64 })
+        QueryOutcome::of(ran, started)
     }
 
     pub async fn is_alive(&mut self) -> bool {
@@ -372,15 +373,26 @@ impl Session {
     }
 }
 
-async fn run_batches(client: &mut Client, sql: &str, row_limit: usize) -> Result<Vec<StatementResult>> {
-    let mut results = Vec::new();
+/// Each batch's results, up to the batch that fails: those before it ran.
+async fn run_batches(client: &mut Client, sql: &str, row_limit: usize) -> Ran {
+    let mut ran = Ran::default();
     for batch in batches(sql) {
-        let mut batch_results = read_results(client, &batch, row_limit).await?;
-        if batch_results.is_empty() {
-            let count = strings(client, query("SELECT @@ROWCOUNT", &[])).await?.concat();
-            batch_results.push(StatementResult { rows_affected: count.parse().unwrap_or(0), ..Default::default() });
+        match run_batch(client, &batch, row_limit).await {
+            Ok(mut results) => ran.results.append(&mut results),
+            Err(error) => {
+                ran.failure = Some(error);
+                break;
+            }
         }
-        results.append(&mut batch_results);
+    }
+    ran
+}
+
+async fn run_batch(client: &mut Client, batch: &str, row_limit: usize) -> Result<Vec<StatementResult>> {
+    let mut results = read_results(client, batch, row_limit).await?;
+    if results.is_empty() {
+        let count = strings(client, query("SELECT @@ROWCOUNT", &[])).await?.concat();
+        results.push(StatementResult { rows_affected: count.parse().unwrap_or(0), ..Default::default() });
     }
     Ok(results)
 }

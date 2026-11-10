@@ -12,6 +12,7 @@ use redis::Value;
 use super::connect;
 use super::logged::{LoggedConnection, quote};
 use crate::connections::model::Connection;
+use crate::drivers::Ran;
 use crate::drivers::{Column, QueryOutcome, StatementResult};
 use crate::error::{AppError, Result};
 
@@ -50,11 +51,13 @@ impl Session {
         if commands.is_empty() {
             return Err(AppError::Invalid("Nothing to run.".into()));
         }
-        let mut results = Vec::new();
+        let mut ran = Ran::default();
         for words in commands {
-            results.push(run_command(&mut self.conn, &words, row_limit).await?);
+            if !ran.add(run_command(&mut self.conn, &words, row_limit).await) {
+                break;
+            }
         }
-        Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+        QueryOutcome::of(ran, started)
     }
 
     pub async fn is_alive(&mut self) -> bool {

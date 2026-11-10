@@ -13,6 +13,7 @@ use super::client::Client;
 use super::query::{Feed, documents, split_top_level};
 use super::{containers, row, shared_type, text, typed};
 use crate::connections::model::Connection;
+use crate::drivers::Ran;
 use crate::drivers::{Column, QueryOutcome, StatementResult};
 use crate::error::{AppError, Result};
 
@@ -56,17 +57,19 @@ impl Session {
             return Err(AppError::Invalid("Nothing to run.".into()));
         }
         let run = async {
-            let mut results = Vec::new();
+            let mut ran = Ran::default();
             for query in &queries {
-                results.push(read(&self.client, &self.database, &self.container, query, row_limit).await?);
+                if !ran.add(read(&self.client, &self.database, &self.container, query, row_limit).await) {
+                    break;
+                }
             }
-            Ok::<_, AppError>(results)
+            ran
         };
-        let results = tokio::select! {
-            results = run => results?,
+        let ran = tokio::select! {
+            ran = run => ran,
             () = &mut cancelled => return Err(AppError::Invalid("Query cancelled.".into())),
         };
-        Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+        QueryOutcome::of(ran, started)
     }
 
     /// Every request opens its own connection, so a session never goes stale.

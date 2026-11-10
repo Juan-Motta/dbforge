@@ -152,3 +152,8 @@
 .export {
   margin-left: auto;
 }
+
+/* The tab of the error that stopped a script, after its results. */
+.resultTabs .errorTab {
+  color: var(--err);
+}

@@ -68,7 +68,7 @@ pub async fn run_read_only(
     let mut session = with_timeout(open_session(connection, password, database)).await?;
     let result = session.execute(statement, row_limit).await;
     session.close().await;
-    Ok(QueryOutcome { results: vec![result?], elapsed_ms: started.elapsed().as_millis() as u64 })
+    Ok(QueryOutcome::complete(vec![result?], started))
 }
 
 /// The one statement in `text`, once it is known to only read.

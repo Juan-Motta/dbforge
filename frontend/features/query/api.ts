@@ -14,6 +14,8 @@ export interface StatementResult {
 export interface QueryOutcome {
   results: StatementResult[]
   elapsedMs: number
+  /** Why the script stopped before its end, after the statements in `results` ran. */
+  error: string | null
 }
 
 /**

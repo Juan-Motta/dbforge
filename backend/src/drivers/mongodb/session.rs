@@ -17,6 +17,7 @@ use super::logged::{Documents, Find, LoggedClient, LoggedCollection, LoggedDatab
 use super::shell::{self, Method, Statement};
 use super::{columns_of, connect, default_database, row, text};
 use crate::connections::model::Connection;
+use crate::drivers::Ran;
 use crate::drivers::{QueryOutcome, StatementResult};
 use crate::error::{AppError, Result};
 
@@ -56,11 +57,13 @@ impl Session {
         if statements.is_empty() {
             return Err(AppError::Invalid("Nothing to run.".into()));
         }
-        let mut results = Vec::new();
+        let mut ran = Ran::default();
         for statement in statements {
-            results.push(self.execute(statement, row_limit).await?);
+            if !ran.add(self.execute(statement, row_limit).await) {
+                break;
+            }
         }
-        Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
+        QueryOutcome::of(ran, started)
     }
 
     /// Runs one parsed statement.
@@ -464,8 +467,10 @@ mod tests {
                       db.runCommand({ping: 1})
                       db.orders.insertOne({_id: 1})";
 
-        let error = statement_log::scoped(&log, "mongo", Origin::Console, session.run(script, 1)).await.unwrap_err();
-        assert!(error.to_string().contains("duplicate key"), "{error}");
+        let outcome = statement_log::scoped(&log, "mongo", Origin::Console, session.run(script, 1)).await.unwrap();
+        // The four statements before the failing insert ran, and are shown with its error.
+        assert_eq!(outcome.results.len(), 4);
+        assert!(outcome.error.as_deref().is_some_and(|e| e.contains("duplicate key")), "{outcome:?}");
 
         let entries = log.entries();
         let recorded: Vec<_> = entries.iter().map(|e| (e.text.as_str(), e.rows, e.error.is_some())).collect();

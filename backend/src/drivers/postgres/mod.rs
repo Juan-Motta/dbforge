@@ -21,10 +21,10 @@ pub use structure::table_structure;
 use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
-    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
-    with_timeout,
+    Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout,
 };
 use crate::connections::model::Connection;
+use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 use crate::statement_log;
 
@@ -309,11 +309,13 @@ impl Session {
     /// Runs `sql` with the simple query protocol, which allows several statements
     /// and returns every value in its text form. All rows are read so the whole
     /// script completes, but only the first `row_limit` of each result are kept.
+    ///
+    /// The server runs such a script as one transaction: when a statement fails,
+    /// those before it are rolled back too, so the error is all there is to show.
     pub async fn run(&mut self, sql: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
-        let results = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await?;
-        let elapsed_ms = started.elapsed().as_millis() as u64;
-        Ok(QueryOutcome { results, elapsed_ms })
+        let ran = read_results(sqlx::raw_sql(AssertSqlSafe(sql)).fetch_many(&mut self.conn), row_limit).await;
+        Ok(QueryOutcome::complete(ran.into_result()?, started))
     }
 
     pub async fn is_alive(&mut self) -> bool {
@@ -374,10 +376,7 @@ fn text_values(row: &PgRow) -> Result<Vec<Option<String>>> {
 }
 
 /// What a script returns, with values read as this engine writes them as text.
-async fn read_results(
-    stream: BoxStream<'_, sqlx::Result<Either<PgQueryResult, PgRow>>>,
-    row_limit: usize,
-) -> Result<Vec<StatementResult>> {
+async fn read_results(stream: BoxStream<'_, sqlx::Result<Either<PgQueryResult, PgRow>>>, row_limit: usize) -> Ran {
     super::sqlx_results::read_results::<sqlx::Postgres>(stream, row_limit, text_values).await
 }
 
