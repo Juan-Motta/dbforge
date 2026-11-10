@@ -300,7 +300,7 @@
 
 .fileRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 9px 12px;
   border: 1px solid var(--border);
@@ -308,11 +308,17 @@
   color: var(--text3);
 }
 
-.fileRow .path {
+.fileRow > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.location {
   flex: 1;
+  min-width: 0;
   color: var(--text2);
   font: 12px var(--font-mono);
-  text-align: left;
+  overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
 }

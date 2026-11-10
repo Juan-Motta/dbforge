@@ -209,10 +209,8 @@ function Passwords() {
           <h4 className={styles.sectionTitle}>{m.fileLocation}</h4>
           <div className={styles.fileRow}>
             <Icon name="lock" size={14} />
-            <span className={styles.path} title={info?.filePath}>
-              {/* Right to left, so a long path shows its end; the path itself stays left to right. */}
-              <bdi>{info?.filePath ?? '\u00a0'}</bdi>
-            </span>
+            {/* The whole path, wrapped where it must, so it can be read and copied. */}
+            <span className={styles.location}>{info?.filePath ?? '\u00a0'}</span>
           </div>
         </section>
         {moving ? (
