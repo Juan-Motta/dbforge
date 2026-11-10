@@ -18,7 +18,6 @@ use crate::connections::model::{AgentAccess, Connection};
 use crate::connections::store::ConnectionStore;
 use crate::connections::tags::TagStore;
 use crate::drivers::{self, ObjectKind, QueryOutcome, TableRef};
-use crate::error::AppError;
 use crate::statement_log::{self, Origin, StatementLog};
 
 /// The MCP server's handler: one per agent session, all sharing the app.
@@ -300,9 +299,9 @@ impl Tools {
         );
         // A read leaves nothing half done, so one taking too long is simply dropped.
         let read = async {
-            tokio::time::timeout(drivers::READ_ONLY_TIME_LIMIT, read).await.unwrap_or_else(|_| {
-                Err(AppError::Invalid("The query took longer than a minute and was stopped.".into()))
-            })
+            tokio::time::timeout(drivers::READ_ONLY_TIME_LIMIT, read)
+                .await
+                .unwrap_or_else(|_| Err(drivers::read_only_timed_out()))
         };
         Ok(Json(self.as_agent(&connection, read).await?.into()))
     }

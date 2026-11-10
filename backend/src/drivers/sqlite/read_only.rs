@@ -10,24 +10,41 @@
 //! anything a statement sets up (an `ATTACH`) from outliving it. `PRAGMA` is
 //! refused: some change the whole process's SQLite, not just this connection.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sqlx::AssertSqlSafe;
 
 use super::{connect_with, has_several_statements, read_results};
 use crate::connections::model::Connection;
-use crate::drivers::{QueryOutcome, with_timeout};
+use crate::drivers::{QueryOutcome, READ_ONLY_TIME_LIMIT, read_only_timed_out, with_timeout};
 use crate::error::{AppError, Result};
 
 /// Runs `statement` on the file opened read-only, then closes it.
 pub async fn run_read_only(connection: &Connection, statement: &str, row_limit: usize) -> Result<QueryOutcome> {
+    run_within(connection, statement, row_limit, READ_ONLY_TIME_LIMIT).await
+}
+
+/// SQLite runs a statement on a thread of its own, which a dropped caller
+/// doesn't stop: it interrupts the statement itself once `limit` has passed.
+async fn run_within(
+    connection: &Connection,
+    statement: &str,
+    row_limit: usize,
+    limit: Duration,
+) -> Result<QueryOutcome> {
     check(statement)?;
     let started = Instant::now();
+    let deadline = started + limit;
     let mut conn = with_timeout(connect_with(connection, |options| options.read_only(true))).await?;
+    conn.set_progress_handler(PROGRESS_STEPS, move || Instant::now() < deadline).await?;
     let results = read_results(sqlx::raw_sql(AssertSqlSafe(statement)).fetch_many(&mut conn), row_limit).await;
     conn.close().await?;
-    Ok(QueryOutcome { results: results?, elapsed_ms: started.elapsed().as_millis() as u64 })
+    let results = results.map_err(|error| if Instant::now() >= deadline { read_only_timed_out() } else { error })?;
+    Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
 }
+
+/// SQLite's virtual machine steps between checks of the time limit.
+const PROGRESS_STEPS: i32 = 10_000;
 
 /// The words a statement that only reads starts with.
 /// `PRAGMA` isn't one: some change state for the whole process, which outlives
@@ -91,6 +108,18 @@ mod tests {
         for read in ["with x as (select 1) select * from x", "VALUES (1)", "SELECT * FROM pragma_table_info('t')"] {
             assert!(check(read).is_ok(), "{read}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_statement_that_runs_past_the_limit_is_interrupted() {
+        let (_dir, connection) = database("CREATE TABLE t (a);").await;
+        let endless = "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r) SELECT count(*) FROM r";
+        let started = Instant::now();
+        let error = run_within(&connection, endless, 10, Duration::from_millis(200)).await.unwrap_err();
+        assert_eq!(error.to_string(), read_only_timed_out().to_string());
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        // A quick one is untouched.
+        assert!(run_within(&connection, "SELECT 1", 10, Duration::from_millis(200)).await.is_ok());
     }
 
     #[tokio::test]

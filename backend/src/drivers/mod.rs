@@ -606,9 +606,14 @@ pub async fn explain(
 }
 
 /// The longest a read-only statement runs. PostgreSQL and MySQL stop it on
-/// the server after this, so a dropped caller leaves nothing running there;
-/// the other engines rely on the caller giving up after it.
+/// the server and SQLite interrupts it; SQL Server stops it when the caller
+/// gives up and its connection closes. Either way nothing is left running.
 pub const READ_ONLY_TIME_LIMIT: Duration = Duration::from_secs(60);
+
+/// A read-only statement that ran past [`READ_ONLY_TIME_LIMIT`].
+pub fn read_only_timed_out() -> AppError {
+    AppError::Invalid("The query took longer than a minute and was stopped.".into())
+}
 
 /// Runs one statement that may only read, in the engine's language (SQL,
 /// mongosh, a redis-cli line, Cosmos SQL), on a fresh connection that is

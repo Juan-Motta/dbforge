@@ -83,6 +83,19 @@ impl<C: Connection> Logged<C> {
     }
 }
 
+impl Logged<sqlx::SqliteConnection> {
+    /// Interrupts the running statement once `keep_going` says no; SQLite asks
+    /// every `steps` steps of its virtual machine. Not a statement, so not recorded.
+    pub async fn set_progress_handler(
+        &mut self,
+        steps: i32,
+        keep_going: impl FnMut() -> bool + Send + 'static,
+    ) -> Result<(), Error> {
+        self.inner.lock_handle().await?.set_progress_handler(steps, keep_going);
+        Ok(())
+    }
+}
+
 impl<C> Debug for Logged<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Logged").field("database", &self.database).finish_non_exhaustive()
