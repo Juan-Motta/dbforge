@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use sqlx::mysql::MySqlConnection;
-use sqlx::{AssertSqlSafe, Connection as _, Row};
+use sqlx::{AssertSqlSafe, Row};
 
+use super::Conn;
 use super::{connect, is_mariadb, quote_ident};
 use crate::connections::model::Connection;
 use crate::drivers::{ColumnInfo, ForeignKey, IndexInfo, ObjectKind, TableRef, TableStructure, TriggerInfo};
@@ -49,7 +49,7 @@ pub async fn table_structure(
     Ok(TableStructure { ddl: with_triggers(ddl, &structure.triggers), ..structure })
 }
 
-async fn columns(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) -> Result<Vec<ColumnInfo>> {
+async fn columns(conn: &mut Conn, table: &TableRef, mariadb: bool) -> Result<Vec<ColumnInfo>> {
     type Row = (String, String, String, Option<String>, String, Option<String>, String);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT CAST(column_name AS CHAR), CAST(column_type AS CHAR), CAST(is_nullable AS CHAR),
@@ -118,7 +118,7 @@ fn column_default(default: Option<String>, extra: &str, generated: Option<String
     default
 }
 
-async fn indexes(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) -> Result<Vec<IndexInfo>> {
+async fn indexes(conn: &mut Conn, table: &TableRef, mariadb: bool) -> Result<Vec<IndexInfo>> {
     // One row per indexed column (or expression), in order within each index.
     type IndexRow = (String, i64, String, Option<String>, Option<String>);
     // MySQL's functional indexes list their expression; MariaDB has no such column.
@@ -168,7 +168,7 @@ async fn indexes(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) ->
     Ok(indexes)
 }
 
-async fn foreign_keys(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<ForeignKey>> {
+async fn foreign_keys(conn: &mut Conn, table: &TableRef) -> Result<Vec<ForeignKey>> {
     type Row = (String, String, String, String, String, String, String);
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT CAST(k.constraint_name AS CHAR), CAST(k.column_name AS CHAR),
@@ -206,7 +206,7 @@ async fn foreign_keys(conn: &mut MySqlConnection, table: &TableRef) -> Result<Ve
     Ok(keys)
 }
 
-async fn triggers(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<TriggerInfo>> {
+async fn triggers(conn: &mut Conn, table: &TableRef) -> Result<Vec<TriggerInfo>> {
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
         "SELECT CAST(trigger_name AS CHAR), CAST(action_timing AS CHAR), CAST(event_manipulation AS CHAR),
                 CAST(action_statement AS CHAR)
@@ -232,7 +232,7 @@ async fn triggers(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<Tr
         .collect())
 }
 
-async fn show_create(conn: &mut MySqlConnection, table: &TableRef, is_view: bool) -> Result<String> {
+async fn show_create(conn: &mut Conn, table: &TableRef, is_view: bool) -> Result<String> {
     let object = if is_view { "VIEW" } else { "TABLE" };
     let sql = format!("SHOW CREATE {object} {}.{}", quote_ident(&table.schema), quote_ident(&table.name));
     let row = sqlx::raw_sql(AssertSqlSafe(sql)).fetch_one(conn).await?;

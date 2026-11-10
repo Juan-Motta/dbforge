@@ -6,9 +6,8 @@
 //! a warning, and only transactional tables can be edited, since a ROLLBACK can't
 //! undo changes to MyISAM or MEMORY tables.
 
-use sqlx::mysql::MySqlConnection;
-use sqlx::{AssertSqlSafe, Connection as _};
-
+use super::super::sqlx_edits;
+use super::Conn;
 use super::{connect, is_generated, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
@@ -39,20 +38,7 @@ pub async fn apply_changes(
         .await?;
 
     let mut transaction = conn.begin().await?;
-    for statement in &statements {
-        let mut query = sqlx::query(AssertSqlSafe(statement.sql.clone()));
-        for param in &statement.params {
-            query = query.bind(param.clone());
-        }
-        // The client asks for matched rows (FOUND_ROWS), so an UPDATE that sets a
-        // value to what it already was still counts its row.
-        let affected = query.execute(&mut *transaction).await?.rows_affected();
-        if let Some(key) = &statement.key
-            && affected != 1
-        {
-            return Err(edit_sql::changed_elsewhere(key));
-        }
-    }
+    sqlx_edits::run::<sqlx::MySql>(&mut transaction, &MYSQL, &statements).await?;
     transaction.commit().await?;
     conn.close().await?;
     Ok(edit_sql::summarize(changes))
@@ -75,7 +61,7 @@ pub async fn preview_changes(
 /// The table's columns, marking only the real primary key (not a unique index
 /// MySQL would show as `PRI` when there is no primary key). Refuses tables whose
 /// storage engine has no transactions.
-async fn editable_columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<Column>> {
+async fn editable_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
     let engine: Option<Option<String>> = sqlx::query_scalar(
         "SELECT CAST(engine AS CHAR) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
     )
@@ -121,6 +107,8 @@ async fn editable_columns(conn: &mut MySqlConnection, table: &TableRef) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use sqlx::AssertSqlSafe;
+
     use std::collections::BTreeMap;
 
     use super::super::tests::{PASSWORD, run, servers, table};
@@ -147,7 +135,7 @@ mod tests {
         )
     }
 
-    async fn rows(conn: &mut MySqlConnection, database: &str) -> Vec<(i32, String, i32, Option<String>)> {
+    async fn rows(conn: &mut Conn, database: &str) -> Vec<(i32, String, i32, Option<String>)> {
         sqlx::query_as(AssertSqlSafe(format!(
             "SELECT id, name, qty, CAST(status AS CHAR) FROM {database}.items ORDER BY id"
         )))

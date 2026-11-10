@@ -4,8 +4,7 @@
 //! is an error instead of being cut. Every change runs in one transaction, and
 //! each UPDATE or DELETE must hit exactly one row.
 
-use tiberius::Query;
-
+use super::logged::Statement;
 use super::{Client, connect, table_columns, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
@@ -55,11 +54,11 @@ pub async fn apply_changes(
 
 async fn run_all(client: &mut Client, statements: &[edit_sql::Statement]) -> Result<()> {
     for statement in statements {
-        let mut query = Query::new(statement.sql.as_str());
-        for param in &statement.params {
-            query.bind(param.as_deref());
-        }
-        let affected = query.execute(client).await?.total();
+        let bound = statement
+            .params
+            .iter()
+            .fold(Statement::new(statement.sql.as_str()), |bound, param| bound.bind(param.as_deref()));
+        let affected = client.execute(bound).await?.total();
         if let Some(key) = &statement.key
             && affected != 1
         {
@@ -88,6 +87,8 @@ mod tests {
 
     use super::super::tests::{PASSWORD, database, table};
     use super::*;
+    use crate::statement_log::store::tests::Collected;
+    use crate::statement_log::{self, Origin, StatementLog};
 
     /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
     fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
@@ -174,6 +175,31 @@ mod tests {
         let error = apply_changes(&connection, PASSWORD, &items, &long).await.unwrap_err();
         assert!(error.to_string().contains("truncated"), "{error}");
         assert_eq!(rows(&connection, "items").await.len(), 3);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
+    async fn records_the_transaction_with_values_written_in() {
+        let connection = database("dbforge_edit_log", ITEMS).await;
+        let items = table("dbforge_edit_log", "items");
+        let missing = vec![
+            RowChange::Delete { key: map(&[("id", Some("1"))]) },
+            RowChange::Update { key: map(&[("id", Some("99"))]), values: map(&[("name", Some("it's"))]) },
+        ];
+        let log = StatementLog::new(50, Collected::default());
+
+        let applied =
+            statement_log::scoped(&log, "ms", Origin::Edit, apply_changes(&connection, PASSWORD, &items, &missing));
+        assert!(applied.await.is_err());
+
+        let entries = log.entries();
+        let columns = &entries[0];
+        assert!(columns.text.contains("QUOTENAME(N'dbo') + '.' + QUOTENAME(N'items')"), "{}", columns.text);
+        let ran: Vec<_> =
+            entries.iter().skip(1).map(|e| (e.text.split_whitespace().next().unwrap_or_default(), e.rows)).collect();
+        assert_eq!(ran, [("BEGIN", None), ("DELETE", Some(1)), ("UPDATE", Some(0)), ("ROLLBACK", None)]);
+        assert!(entries[3].text.contains("N'it''s'"), "{}", entries[3].text);
+        assert!(entries.iter().all(|e| e.database.as_deref() == Some("dbforge_edit_log") && e.error.is_none()));
     }
 
     #[tokio::test]

@@ -87,7 +87,7 @@ fn mongodb_message(error: &mongodb::error::Error) -> String {
 }
 
 /// The server's own message, without tiberius's token and server details.
-fn sqlserver_message(error: &tiberius::error::Error) -> String {
+pub(crate) fn sqlserver_message(error: &tiberius::error::Error) -> String {
     match error {
         tiberius::error::Error::Server(server) => server.message().to_string(),
         other => other.to_string(),

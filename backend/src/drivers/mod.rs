@@ -12,6 +12,7 @@ pub(crate) mod postgres;
 pub mod redis;
 mod sqlite;
 mod sqlserver;
+mod sqlx_edits;
 
 use std::collections::BTreeMap;
 use std::future::Future;

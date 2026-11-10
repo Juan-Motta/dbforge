@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
+use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
@@ -29,16 +30,20 @@ use crate::error::{AppError, Result};
 /// SQLite's name for the schema of the opened file.
 pub const MAIN: &str = "main";
 
+/// A SQLite connection whose statements are recorded in the statement log.
+pub(super) type Conn = Logged<SqliteConnection>;
+
 /// Opens the file, which must already exist: a typo must not create an empty database.
-async fn connect(connection: &Connection) -> Result<SqliteConnection> {
+async fn connect(connection: &Connection) -> Result<Conn> {
     if connection.database.is_empty() {
         return Err(AppError::Invalid("Choose the SQLite database file.".into()));
     }
     let options = SqliteConnectOptions::new().filename(&connection.database).create_if_missing(false);
-    SqliteConnection::connect_with(&options).await.map_err(|error| match error {
+    let conn = SqliteConnection::connect_with(&options).await.map_err(|error| match error {
         sqlx::Error::Database(_) => AppError::Invalid(format!("Could not open {}: {error}", connection.database)),
-        other => other.into(),
-    })
+        other => AppError::from(other),
+    })?;
+    Ok(Logged::new(conn, Some(MAIN)))
 }
 
 pub async fn server_version(connection: &Connection) -> Result<String> {
@@ -130,7 +135,7 @@ pub async fn stream_table(
 /// Columns from `table_xinfo`, which also lists generated columns. Its `hidden`
 /// is 2 or 3 for those, and 1 for virtual-table internals, which are left out.
 /// `dflt_value` is the DEFAULT as SQL text, which edits write out to restore it.
-async fn table_columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<Column>> {
+async fn table_columns(conn: &mut Conn, table: &str) -> Result<Vec<Column>> {
     let rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
         "SELECT name, type, pk, hidden, dflt_value FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid",
     )
@@ -163,7 +168,7 @@ fn select_all(columns: &[Column], table: &str, filter: &RowFilter) -> String {
 /// carry over. SQLite has no way to stop a query from another connection, so
 /// sessions can't be cancelled.
 pub struct Session {
-    conn: SqliteConnection,
+    conn: Conn,
 }
 
 pub async fn open_session(connection: &Connection) -> Result<Session> {
@@ -225,7 +230,7 @@ pub async fn explain(connection: &Connection, sql: &str, analyze: bool) -> Resul
     let mut transaction = conn.begin().await?;
     // Columns: id, parent, notused, detail.
     let rows: std::result::Result<Vec<(i64, i64, i64, String)>, _> =
-        sqlx::query_as(AssertSqlSafe(format!("EXPLAIN QUERY PLAN {statement}"))).fetch_all(&mut *transaction).await;
+        sqlx::query_as(AssertSqlSafe(format!("EXPLAIN QUERY PLAN {statement}"))).fetch_all(&mut transaction).await;
     transaction.rollback().await?;
     conn.close().await?;
     let rows: Vec<(i64, i64, String)> = rows?.into_iter().map(|(id, parent, _, detail)| (id, parent, detail)).collect();

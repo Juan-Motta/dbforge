@@ -3,9 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use sqlx::Connection as _;
-use sqlx::sqlite::SqliteConnection;
-
+use super::Conn;
 use super::{MAIN, connect};
 use crate::connections::model::Connection;
 use crate::drivers::{
@@ -71,7 +69,7 @@ struct PragmaColumn {
     primary_key: bool,
 }
 
-async fn columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<PragmaColumn>> {
+async fn columns(conn: &mut Conn, table: &str) -> Result<Vec<PragmaColumn>> {
     let rows: Vec<(String, String, i64, Option<String>, i64, i64)> = sqlx::query_as(
         "SELECT name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?) WHERE hidden <> 1 ORDER BY cid",
     )
@@ -99,7 +97,7 @@ async fn columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<PragmaC
         .collect())
 }
 
-async fn indexes(conn: &mut SqliteConnection, table: &str, columns: &[PragmaColumn]) -> Result<Vec<IndexInfo>> {
+async fn indexes(conn: &mut Conn, table: &str, columns: &[PragmaColumn]) -> Result<Vec<IndexInfo>> {
     let list: Vec<(String, i64, String, i64)> = sqlx::query_as(
         "SELECT name, \"unique\", origin, partial FROM pragma_index_list(?) ORDER BY origin = 'pk' DESC, name",
     )
@@ -159,7 +157,7 @@ fn where_clause(sql: &str) -> Option<String> {
     Some(sql[at + 7..].trim().to_string())
 }
 
-async fn foreign_keys(conn: &mut SqliteConnection, table: &str) -> Result<Vec<ForeignKey>> {
+async fn foreign_keys(conn: &mut Conn, table: &str) -> Result<Vec<ForeignKey>> {
     let rows: Vec<(i64, String, String, Option<String>, String, String)> = sqlx::query_as(
         "SELECT id, \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list(?) ORDER BY id, seq",
     )
@@ -188,7 +186,7 @@ async fn foreign_keys(conn: &mut SqliteConnection, table: &str) -> Result<Vec<Fo
     Ok(keys.into_values().collect())
 }
 
-async fn primary_key_of(conn: &mut SqliteConnection, table: &str) -> Result<Vec<String>> {
+async fn primary_key_of(conn: &mut Conn, table: &str) -> Result<Vec<String>> {
     Ok(sqlx::query_scalar("SELECT name FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk")
         .bind(table)
         .fetch_all(conn)

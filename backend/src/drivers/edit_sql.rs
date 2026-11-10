@@ -186,20 +186,30 @@ fn describe_key(key: &BTreeMap<String, Option<String>>) -> String {
 }
 
 /// Writes the parameters into the SQL as literals. Only for showing the user.
-/// One pass left to right, so text already written in (a value holding `$1` or
-/// `?`) is never read again, and quoted names like `"t$1"` are copied as they are.
 pub fn inline(dialect: &Dialect, statement: &Statement) -> String {
-    let literal = |value: &Option<String>| match value {
-        None => "NULL".to_string(),
-        Some(text) => {
-            let text = if dialect.backslash_escapes { text.replace('\\', "\\\\") } else { text.clone() };
-            format!("{}'{}'", dialect.string_prefix, text.replace('\'', "''"))
-        }
-    };
-    let [open, close] = dialect.quote;
+    let literals: Vec<String> = statement
+        .params
+        .iter()
+        .map(|value| match value {
+            None => "NULL".to_string(),
+            Some(text) => {
+                let text = if dialect.backslash_escapes { text.replace('\\', "\\\\") } else { text.clone() };
+                format!("{}'{}'", dialect.string_prefix, text.replace('\'', "''"))
+            }
+        })
+        .collect();
+    substitute(dialect.quote, dialect.numbered, &statement.sql, &literals)
+}
 
-    let mut out = String::with_capacity(statement.sql.len());
-    let mut rest = statement.sql.as_str();
+/// Puts `literals`, already written as SQL, in place of the parameter markers
+/// in `sql`: `?`, or `numbered` ones like `$1`; names are quoted with `quote`. One pass left to right, so text already written
+/// in (a value holding `$1` or `?`) is never read again, and quoted names like
+/// `"t$1"` are copied as they are.
+pub fn substitute(quote: [char; 2], numbered: Option<&str>, sql: &str, literals: &[String]) -> String {
+    let [open, close] = quote;
+
+    let mut out = String::with_capacity(sql.len());
+    let mut rest = sql;
     let mut in_name = false;
     let mut next = 0;
     while let Some(c) = rest.chars().next() {
@@ -217,7 +227,7 @@ pub fn inline(dialect: &Dialect, statement: &Statement) -> String {
             continue;
         }
         // The marker's length and the index of its parameter.
-        let marker = match dialect.numbered {
+        let marker = match numbered {
             Some(prefix) => rest.strip_prefix(prefix).and_then(|after| {
                 let digits = after.len() - after.trim_start_matches(|d: char| d.is_ascii_digit()).len();
                 let number: usize = after[..digits].parse().ok()?;
@@ -229,9 +239,9 @@ pub fn inline(dialect: &Dialect, statement: &Statement) -> String {
             }
             None => None,
         };
-        match marker.and_then(|(length, index)| Some((length, statement.params.get(index)?))) {
-            Some((length, value)) => {
-                out.push_str(&literal(value));
+        match marker.and_then(|(length, index)| Some((length, literals.get(index)?))) {
+            Some((length, literal)) => {
+                out.push_str(literal);
                 rest = &rest[length..];
             }
             None => {

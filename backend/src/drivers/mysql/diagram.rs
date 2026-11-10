@@ -2,8 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use sqlx::Connection as _;
-
 use super::connect;
 use crate::connections::model::Connection;
 use crate::drivers::{DiagramColumn, DiagramTable, Relationship, SchemaDiagram};

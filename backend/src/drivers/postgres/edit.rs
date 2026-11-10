@@ -3,15 +3,13 @@
 //! parameter to a column's type, and runs everything in one transaction where
 //! every UPDATE or DELETE must hit exactly one row.
 
-use sqlx::AssertSqlSafe;
-
+use super::super::sqlx_edits;
 use super::Conn;
 use super::{connect, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
 use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
 use crate::error::Result;
-use crate::statement_log;
 
 /// Values are sent as text and cast to the column's type by the server.
 const POSTGRES: Dialect = Dialect {
@@ -35,21 +33,7 @@ pub async fn apply_changes(
     let statements = edit_sql::build(&POSTGRES, &columns, table, changes)?;
 
     let mut transaction = conn.begin().await?;
-    for statement in &statements {
-        let mut query = sqlx::query(AssertSqlSafe(statement.sql.clone()));
-        for param in &statement.params {
-            query = query.bind(param.clone());
-        }
-        // Recorded with its values written in, so it can be copied and run as is.
-        let shown = edit_sql::inline(&POSTGRES, statement);
-        let affected = statement_log::shown_as(shown, query.execute(&mut transaction)).await?.rows_affected();
-        if let Some(key) = &statement.key
-            && affected != 1
-        {
-            // Dropping the transaction rolls everything back.
-            return Err(edit_sql::changed_elsewhere(key));
-        }
-    }
+    sqlx_edits::run::<sqlx::Postgres>(&mut transaction, &POSTGRES, &statements).await?;
     transaction.commit().await?;
     conn.close().await?;
     Ok(edit_sql::summarize(changes))
@@ -104,13 +88,15 @@ async fn editable_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Colum
 
 #[cfg(test)]
 mod tests {
+    use sqlx::AssertSqlSafe;
+
     use super::super::tests::{PASSWORD, local};
     use std::collections::BTreeMap;
 
     use super::*;
     use crate::drivers::CellValue;
     use crate::statement_log::store::tests::Collected;
-    use crate::statement_log::{Origin, StatementLog};
+    use crate::statement_log::{self, Origin, StatementLog};
 
     /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
     fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {

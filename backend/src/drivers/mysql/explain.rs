@@ -4,7 +4,7 @@
 //! serves both engines.
 
 use serde_json::{Map, Value, json};
-use sqlx::{AssertSqlSafe, Connection as _, Row};
+use sqlx::{AssertSqlSafe, Row};
 
 use super::{connect, is_mariadb, with_timeout};
 use crate::connections::model::Connection;
@@ -40,14 +40,14 @@ pub async fn explain(
     let mut conn = with_timeout(connect(connection, password, database)).await?;
     if mariadb {
         let mut transaction = conn.begin().await?;
-        let rows = sqlx::query(AssertSqlSafe(format!("EXPLAIN {statement}"))).fetch_all(&mut *transaction).await;
+        let rows = sqlx::query(AssertSqlSafe(format!("EXPLAIN {statement}"))).fetch_all(&mut transaction).await;
         transaction.rollback().await?;
         conn.close().await?;
         return Ok(table_to_plan(&rows?));
     }
     let mode = if analyze { "ANALYZE" } else { "FORMAT=TREE" };
     let mut transaction = conn.begin().await?;
-    let tree = sqlx::query(AssertSqlSafe(format!("EXPLAIN {mode} {statement}"))).fetch_one(&mut *transaction).await;
+    let tree = sqlx::query(AssertSqlSafe(format!("EXPLAIN {mode} {statement}"))).fetch_one(&mut transaction).await;
     let text = match tree {
         Ok(row) => String::from_utf8_lossy(&row.try_get_unchecked::<Vec<u8>, _>(0)?).into_owned(),
         Err(error) => {
@@ -57,7 +57,7 @@ pub async fn explain(
     };
     // Single-table UPDATE and DELETE have no tree; the classic table plan still works.
     let plan = if text.contains("<not executable by iterator executor>") {
-        let rows = sqlx::query(AssertSqlSafe(format!("EXPLAIN {statement}"))).fetch_all(&mut *transaction).await;
+        let rows = sqlx::query(AssertSqlSafe(format!("EXPLAIN {statement}"))).fetch_all(&mut transaction).await;
         rows.map(|rows| table_to_plan(&rows))
     } else {
         Ok(tree_to_plan(&text))

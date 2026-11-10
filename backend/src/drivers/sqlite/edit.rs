@@ -3,8 +3,7 @@
 //! need no cast; every change runs in one transaction, and each UPDATE or DELETE
 //! must hit exactly one row.
 
-use sqlx::{AssertSqlSafe, Connection as _};
-
+use super::super::sqlx_edits;
 use super::{connect, table_columns, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect};
@@ -30,18 +29,7 @@ pub async fn apply_changes(connection: &Connection, table: &TableRef, changes: &
     let statements = edit_sql::build(&SQLITE, &columns, table, changes)?;
 
     let mut transaction = conn.begin().await?;
-    for statement in &statements {
-        let mut query = sqlx::query(AssertSqlSafe(statement.sql.clone()));
-        for param in &statement.params {
-            query = query.bind(param.clone());
-        }
-        let affected = query.execute(&mut *transaction).await?.rows_affected();
-        if let Some(key) = &statement.key
-            && affected != 1
-        {
-            return Err(edit_sql::changed_elsewhere(key));
-        }
-    }
+    sqlx_edits::run::<sqlx::Sqlite>(&mut transaction, &SQLITE, &statements).await?;
     transaction.commit().await?;
     conn.close().await?;
     Ok(edit_sql::summarize(changes))

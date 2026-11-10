@@ -8,6 +8,7 @@
 mod admin;
 mod edit;
 mod explain;
+mod logged;
 mod structure;
 
 pub use admin::create_object;
@@ -20,11 +21,12 @@ use std::time::Instant;
 
 use futures_util::TryStreamExt;
 use tiberius::time::chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
-use tiberius::{AuthMethod, ColumnData, ColumnType, Config, FromSql, Query, QueryItem, Row};
+use tiberius::{AuthMethod, ColumnData, ColumnType, Config, FromSql, QueryItem, Row};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
-use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
+use tokio_util::compat::TokioAsyncWriteCompatExt;
 
+use self::logged::{LoggedClient, Statement};
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
@@ -33,7 +35,8 @@ use super::{
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
-type Client = tiberius::Client<Compat<TcpStream>>;
+/// A SQL Server client whose statements are recorded in the statement log.
+type Client = LoggedClient;
 
 /// Opens a connection, to `database` when given, else the configured one, else
 /// the login's default database.
@@ -55,30 +58,27 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
         .await
         .map_err(|e| AppError::Invalid(format!("Could not reach {}:{}: {e}", connection.host, connection.port)))?;
     tcp.set_nodelay(true).map_err(|e| AppError::Invalid(e.to_string()))?;
-    Ok(Client::connect(config, tcp.compat_write()).await?)
+    let client = tiberius::Client::connect(config, tcp.compat_write()).await?;
+    Ok(LoggedClient::new(client, Some(database)))
 }
 
 /// Runs a query that returns rows and turns every value into text.
-async fn text_rows(client: &mut Client, query: Query<'_>) -> Result<Vec<Vec<Option<String>>>> {
-    let rows = query.query(client).await?.into_first_result().await?;
+async fn text_rows(client: &mut Client, statement: Statement<'_>) -> Result<Vec<Vec<Option<String>>>> {
+    let rows = client.query(statement).await?.into_first_result().await?;
     Ok(rows.iter().map(text_values).collect())
 }
 
 /// One text column of every row.
-async fn strings(client: &mut Client, query: Query<'_>) -> Result<Vec<String>> {
-    Ok(text_rows(client, query)
+async fn strings(client: &mut Client, statement: Statement<'_>) -> Result<Vec<String>> {
+    Ok(text_rows(client, statement)
         .await?
         .into_iter()
         .map(|row| row.into_iter().next().flatten().unwrap_or_default())
         .collect())
 }
 
-fn query<'a>(sql: impl Into<std::borrow::Cow<'a, str>>, params: &[&'a str]) -> Query<'a> {
-    let mut query = Query::new(sql);
-    for param in params {
-        query.bind(*param);
-    }
-    query
+fn query<'a>(sql: impl Into<std::borrow::Cow<'a, str>>, params: &[&'a str]) -> Statement<'a> {
+    params.iter().fold(Statement::new(sql), |statement, param| statement.bind(*param))
 }
 
 pub async fn server_version(connection: &Connection, password: Option<&str>) -> Result<String> {
@@ -208,9 +208,7 @@ pub async fn fetch_rows(
     let columns = table_columns(&mut client, table).await?;
     // Fetch one extra row to know whether another page exists.
     let sql = format!("{} OFFSET @P1 ROWS FETCH NEXT @P2 ROWS ONLY", select(&columns, table, filter));
-    let mut page = Query::new(sql);
-    page.bind(offset as i64);
-    page.bind(i64::from(limit) + 1);
+    let page = Statement::new(sql).bind(offset as i64).bind(i64::from(limit) + 1);
     let mut rows = text_rows(&mut client, page).await?;
     client.close().await?;
 

@@ -23,6 +23,7 @@ use futures_util::TryStreamExt;
 use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlRow};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
+use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
@@ -31,10 +32,13 @@ use super::{
 use crate::connections::model::{Connection, Engine};
 use crate::error::{AppError, Result};
 
+/// A MySQL or MariaDB connection whose statements are recorded in the statement log.
+pub(super) type Conn = Logged<MySqlConnection>;
+
 /// Schemas the server keeps for itself; never shown.
 const SYSTEM_DATABASES: &str = "('mysql', 'information_schema', 'performance_schema', 'sys')";
 
-async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<MySqlConnection> {
+async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Conn> {
     let mut options =
         MySqlConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username);
     let database = database.unwrap_or(&connection.database);
@@ -44,7 +48,7 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
     if let Some(password) = password {
         options = options.password(password);
     }
-    Ok(MySqlConnection::connect_with(&options).await?)
+    Ok(Logged::new(MySqlConnection::connect_with(&options).await?, Some(database)))
 }
 
 /// MariaDB reports a version like `11.4.13-MariaDB-ubu2404`; only the number is kept.
@@ -171,7 +175,7 @@ pub async fn stream_table(
     Ok(())
 }
 
-async fn table_columns(conn: &mut MySqlConnection, table: &TableRef) -> Result<Vec<Column>> {
+async fn table_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
         "SELECT CAST(column_name AS CHAR), CAST(column_type AS CHAR), CAST(column_key AS CHAR), CAST(extra AS CHAR)
          FROM information_schema.columns
@@ -219,7 +223,7 @@ fn select_as_text(columns: &[Column], table: &TableRef, filter: &RowFilter) -> S
 /// A connection kept open between runs, so transactions, variables and
 /// temporary tables carry over from one run to the next.
 pub struct Session {
-    conn: MySqlConnection,
+    conn: Conn,
     /// The server thread serving this connection; `KILL QUERY` targets it.
     id: u64,
 }
@@ -358,7 +362,7 @@ mod tests {
         [local(), mariadb()]
     }
 
-    pub(super) async fn run(server: &Connection, sql: &str) -> MySqlConnection {
+    pub(super) async fn run(server: &Connection, sql: &str) -> Conn {
         let mut conn = connect(server, PASSWORD, None).await.unwrap();
         sqlx::raw_sql(AssertSqlSafe(sql)).execute(&mut conn).await.unwrap();
         conn

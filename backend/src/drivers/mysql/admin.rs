@@ -1,8 +1,8 @@
 //! Databases, roles and users created from a connection's menu.
 
-use sqlx::mysql::MySqlConnection;
-use sqlx::{AssertSqlSafe, Connection as _};
+use sqlx::AssertSqlSafe;
 
+use super::Conn;
 use super::{connect, quote_ident};
 use crate::connections::model::Connection;
 use crate::drivers::{NewObject, or_default};
@@ -17,7 +17,7 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     Ok(())
 }
 
-async fn create_on(conn: &mut MySqlConnection, object: &NewObject) -> Result<()> {
+async fn create_on(conn: &mut Conn, object: &NewObject) -> Result<()> {
     backslashes_escape(conn).await?;
     let statement: String = match object {
         NewObject::Database { name, .. } => format!("CREATE DATABASE {}", quote_ident(name)),
@@ -40,7 +40,7 @@ async fn create_on(conn: &mut MySqlConnection, object: &NewObject) -> Result<()>
 /// `QUOTE` writes `'` as `\'`, which only escapes while backslashes do:
 /// a server running with NO_BACKSLASH_ESCAPES would end the literal there.
 /// This session drops that mode and keeps the others.
-async fn backslashes_escape(conn: &mut MySqlConnection) -> Result<()> {
+async fn backslashes_escape(conn: &mut Conn) -> Result<()> {
     let modes: String = sqlx::query_scalar("SELECT @@SESSION.sql_mode").fetch_one(&mut *conn).await?;
     if modes.split(',').any(|mode| mode.eq_ignore_ascii_case("NO_BACKSLASH_ESCAPES")) {
         let kept: Vec<&str> =
