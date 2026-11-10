@@ -367,6 +367,7 @@ export function TableView({
               }
               onEditNew={(id, text) => change((current) => editNewDocument(current, id, text))}
               onRemoveNew={(id) => change((current) => removeNewDocument(current, id))}
+              onToggleDelete={(key) => change((current) => toggleDelete(current, key))}
             />
           ) : (
             page && (
@@ -463,7 +464,9 @@ export function TableView({
           </span>
         )}
         {!pending && status.state === 'idle' && <span className={styles.summary}>{summary}</span>}
-        {selection.cells.size > 1 && <Badge tone="info">{m.selectionHint(selection.cells.size)}</Badge>}
+        {showingDocuments
+          ? selected.size > 1 && <Badge tone="info">{m.documentsSelected(selected.size)}</Badge>
+          : selection.cells.size > 1 && <Badge tone="info">{m.selectionHint(selection.cells.size)}</Badge>}
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
           {loading

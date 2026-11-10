@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { Button } from '../../components/Button'
+import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { CodeEditor } from '../../components/code/CodeEditor'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { documentTokens } from './documentTokens'
@@ -35,6 +36,8 @@ interface DocumentListProps {
   onReplace: (key: Values, text: string, original: string) => void
   onEditNew: (id: number, text: string) => void
   onRemoveNew: (id: number) => void
+  /** Marks a loaded document for deletion, or keeps it again. */
+  onToggleDelete: (key: Values) => void
 }
 
 /** The page's rows as whole documents; a double click edits one, as a cell in the grid. */
@@ -52,8 +55,64 @@ export function DocumentList({
   onReplace,
   onEditNew,
   onRemoveNew,
+  onToggleDelete,
 }: DocumentListProps) {
   const m = useMessages(messages)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const write = (text: string) => void navigator.clipboard.writeText(text)
+
+  /** The texts of the selected documents as they stand, in the list's order. */
+  const selectedTexts = () => [
+    ...edits.newDocuments.filter(({ id }) => selected.has(`doc:${id}`)).map(({ document }) => document),
+    ...documents
+      .filter(({ id }) => selected.has(id))
+      .map(({ id, text }) => edits.replacements.get(id)?.document ?? text),
+  ]
+
+  /** A document's menu: edit, copy (it, or the selected ones), and delete or keep it. */
+  const menuOf = (id: string, text: string, state: 'edited' | 'deleted' | 'new' | undefined): MenuItem[] => {
+    const count = selected.size > 1 && selected.has(id) ? selected.size : 0
+    const loaded = documents.find((document) => document.id === id)
+    return [
+      ...(!locked && state !== 'deleted'
+        ? [{ label: m.editDocument, icon: 'edit' as const, onSelect: () => onEdit(id) }]
+        : []),
+      {
+        label: m.copyMenu,
+        icon: 'duplicate',
+        items: [
+          { label: m.copyDocument, onSelect: () => write(text) },
+          ...(count
+            ? [
+                {
+                  label: m.copySelectedDocuments(count),
+                  onSelect: () => write(`[\n${selectedTexts().join(',\n')}\n]`),
+                },
+              ]
+            : []),
+        ],
+      },
+      ...(locked
+        ? []
+        : state === 'new'
+          ? [
+              {
+                label: m.removeNewDocument,
+                icon: 'trash' as const,
+                onSelect: () => onRemoveNew(Number(id.slice(4))),
+              },
+            ]
+          : loaded
+            ? [
+                {
+                  label: state === 'deleted' ? m.keepDocument : m.deleteDocument,
+                  icon: 'trash' as const,
+                  onSelect: () => onToggleDelete(loaded.key),
+                },
+              ]
+            : []),
+    ]
+  }
   const stateLabels = { edited: m.stateEdited, deleted: m.stateDeleted, new: m.stateNew }
   const card = (props: {
     id: string
@@ -72,6 +131,13 @@ export function DocumentList({
         aria-selected={selected.has(props.id)}
         onClick={(event) => !isEditing && onSelect(props.id, event.metaKey || event.ctrlKey)}
         onDoubleClick={() => !isEditing && !locked && props.state !== 'deleted' && onEdit(props.id)}
+        onContextMenu={(event) => {
+          if (isEditing) return
+          event.preventDefault()
+          // The menu acts on what was right-clicked, keeping a selection it belongs to.
+          if (!selected.has(props.id)) onSelect(props.id, false)
+          setMenu({ x: event.clientX, y: event.clientY, items: menuOf(props.id, props.text, props.state) })
+        }}
       >
         <header className={styles.header}>
           {props.label && <span className={styles.number}>{props.label}</span>}
@@ -103,6 +169,7 @@ export function DocumentList({
 
   return (
     <div className={styles.list} title={locked ?? undefined}>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {edits.newDocuments.map(({ id, document }) =>
         card({
           id: `doc:${id}`,
