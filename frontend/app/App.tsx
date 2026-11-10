@@ -165,9 +165,9 @@ export function App() {
         onSelect: () => setCreating({ connection, kind, refresh }),
       }))
       return [
-        { label: 'Edit connection…', icon: 'edit', onSelect: () => setDialog({ connection }) },
+        { label: 'Edit connection', icon: 'edit', onSelect: () => setDialog({ connection }) },
         ...(create.length > 0 ? [{ label: 'New', icon: 'plus' as const, items: create }] : []),
-        { label: 'Delete connection…', icon: 'trash', onSelect: () => setDeleting(connection) },
+        { label: 'Delete connection', icon: 'trash', onSelect: () => setDeleting(connection) },
       ]
     }
     const connection = connections.find((c) => c.id === node.connectionId)

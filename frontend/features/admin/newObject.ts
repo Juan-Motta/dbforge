@@ -18,9 +18,9 @@ export const NOUNS: Record<NewObjectKind, string> = { database: 'database', role
 
 /** The connection menu's items in its New section. */
 export const MENU_LABELS: Record<NewObjectKind, string> = {
-  database: 'Database…',
-  role: 'Role…',
-  user: 'User…',
+  database: 'Database',
+  role: 'Role',
+  user: 'User',
 }
 
 export const MENU_ICONS: Record<NewObjectKind, IconName> = {
