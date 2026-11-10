@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { rowWindow } from './useWindowedRows'
+import { drawnRows, rowWindow } from './useWindowedRows'
 
 describe('rowWindow', () => {
   it('takes the rows in sight and some around them, and stands in for the rest', () => {
@@ -13,5 +13,32 @@ describe('rowWindow', () => {
     // Scrolled further than a list that just got shorter.
     expect(rowWindow(5000, 100, 20, 3, 2)).toEqual({ start: 3, end: 3, before: 60, after: 0 })
     expect(rowWindow(0, 0, 20, 0, 2)).toEqual({ start: 0, end: 0, before: 0, after: 0 })
+  })
+})
+
+describe('drawnRows', () => {
+  it('draws the window with a gap for the rows before and after it', () => {
+    expect(drawnRows(2, 4, null, 10)).toEqual([
+      { gap: 2, from: 0 },
+      { index: 2 },
+      { index: 3 },
+      { gap: 6, from: 4 },
+    ])
+    expect(drawnRows(0, 2, null, 2)).toEqual([{ index: 0 }, { index: 1 }])
+    expect(drawnRows(0, 0, null, 0)).toEqual([])
+  })
+
+  it('keeps a row out of the window drawn, where it belongs', () => {
+    expect(drawnRows(5, 6, 1, 8)).toEqual([
+      { gap: 1, from: 0 },
+      { index: 1 },
+      { gap: 3, from: 2 },
+      { index: 5 },
+      { gap: 2, from: 6 },
+    ])
+    expect(drawnRows(0, 1, 7, 8)).toEqual([{ index: 0 }, { gap: 6, from: 1 }, { index: 7 }])
+    // In the window already, or not a row: nothing more to draw.
+    expect(drawnRows(0, 2, 1, 2)).toEqual([{ index: 0 }, { index: 1 }])
+    expect(drawnRows(0, 1, -1, 1)).toEqual([{ index: 0 }])
   })
 })

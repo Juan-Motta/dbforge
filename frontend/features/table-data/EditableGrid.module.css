@@ -1,3 +1,8 @@
+.scroller {
+  height: 100%;
+  overflow: auto;
+}
+
 .grid {
   border-collapse: separate;
   border-spacing: 0;
@@ -356,4 +361,11 @@ td[data-menu-open] {
 .grid td[data-selected],
 .grid tr:hover td[data-selected] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Stands in for the rows out of sight: only its height. */
+.grid tbody tr.gap td {
+  padding: 0;
+  border: 0;
+  background: none;
 }
