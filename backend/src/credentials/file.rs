@@ -101,12 +101,14 @@ impl EncryptedFile {
         write_private(&self.path(), &bytes)
     }
 
-    /// The random half of the key, created on first use.
+    /// The random half of the key, created on first use. Only `write` asks
+    /// for it, and `write` replaces the whole data file, so a key file that
+    /// was changed (wrong length) is replaced too instead of blocking saves.
     fn key(&self) -> Result<Vec<u8>> {
         let path = self.dir.join(KEY_FILE);
         match fs::read(&path) {
             Ok(key) if key.len() == KEY_LEN => return Ok(key),
-            Ok(_) => return Err(AppError::Invalid(UNREADABLE.into())),
+            Ok(_) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
@@ -161,10 +163,17 @@ fn random_error(error: getrandom::Error) -> AppError {
     AppError::Invalid(format!("No random bytes for the passwords' key: {error}"))
 }
 
+/// `credentials.bin.tmp` and `credentials.key.tmp`: each file has its own.
+fn temporary(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".tmp");
+    PathBuf::from(name)
+}
+
 /// Writes through a temporary file, owner-only from the moment it exists, so a
 /// crash never leaves half a file and no other user can read it.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
+    let tmp = temporary(path);
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -228,6 +237,31 @@ pub(super) mod tests {
         file.delete("a").unwrap();
         assert_eq!(file.get("a").unwrap(), None);
         assert_eq!(file.get("b").unwrap().as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn a_changed_key_is_replaced_when_a_password_is_saved_again() {
+        let scratch = scratch();
+        let dir = scratch.path().to_path_buf();
+        let file = EncryptedFile::new(dir.clone(), this_machine);
+        file.set("a", "secret").unwrap();
+        fs::write(dir.join(KEY_FILE), b"short").unwrap();
+        assert_eq!(file.get("a").unwrap_err().to_string(), UNREADABLE);
+        file.set("b", "again").unwrap();
+        assert_eq!(file.get("b").unwrap().as_deref(), Some("again"));
+
+        // With no passwords saved yet, a broken key never blocks the first one.
+        fs::remove_file(file.path()).unwrap();
+        fs::write(dir.join(KEY_FILE), b"").unwrap();
+        file.set("c", "first").unwrap();
+        assert_eq!(file.get("c").unwrap().as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn each_file_is_written_through_its_own_temporary_file() {
+        let scratch = scratch();
+        let dir = scratch.path();
+        assert_ne!(temporary(&dir.join(DATA_FILE)), temporary(&dir.join(KEY_FILE)));
     }
 
     #[test]

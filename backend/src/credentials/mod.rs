@@ -5,7 +5,7 @@ mod file;
 mod keychain;
 
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -139,7 +139,10 @@ impl Credentials {
             fs::create_dir_all(dir)?;
         }
         let tmp = self.settings_path.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_string_pretty(&Settings { credential_storage: storage })?)?;
+        let mut file = fs::File::create(&tmp)?;
+        file.write_all(serde_json::to_string_pretty(&Settings { credential_storage: storage })?.as_bytes())?;
+        // On disk before the rename, so a crash never leaves an empty settings file.
+        file.sync_all()?;
         fs::rename(&tmp, &self.settings_path)?;
         Ok(())
     }
@@ -150,14 +153,16 @@ impl Credentials {
     }
 }
 
-/// Copies every password `from` holds into `into`; the ids copied. On the
-/// first failure the copies are removed again.
+/// Copies every password `from` holds into `into`; the ids copied. A
+/// connection without a password in `from` has none in `into` either, so an
+/// old copy left there by an earlier switch never comes back. On the first
+/// failure the copies are removed again.
 fn copy_all(from: &dyn SecretStore, into: &dyn SecretStore, connection_ids: &[String]) -> Result<Vec<String>> {
     let mut moved = Vec::new();
     for id in connection_ids {
         let copied = from.get(id).and_then(|password| match password {
             Some(password) => into.set(id, &password).map(|()| true),
-            None => Ok(false),
+            None => into.delete(id).map(|()| false),
         });
         match copied {
             Ok(true) => moved.push(id.clone()),
@@ -245,6 +250,18 @@ mod tests {
         reopened.switch(Storage::Keychain, &ids(&["a", "b"])).unwrap();
         assert_eq!(fake.passwords.lock().unwrap().get("b").map(String::as_str), Some("two"));
         assert_eq!(reopened.file.get("a").unwrap(), None, "passwords left in the file");
+    }
+
+    #[test]
+    fn a_stale_copy_in_the_new_place_never_comes_back() {
+        let scratch = scratch();
+        let dir = scratch.path().to_path_buf();
+        // "a" has no password in the keychain, but an old copy sits in the file.
+        let fake = keychain(&[], None);
+        let credentials = Credentials::with(dir.clone(), Box::new(fake.clone()), this_machine).unwrap();
+        credentials.file.set("a", "stale").unwrap();
+        credentials.switch(Storage::File, &ids(&["a"])).unwrap();
+        assert_eq!(credentials.get("a").unwrap(), None);
     }
 
     #[test]
