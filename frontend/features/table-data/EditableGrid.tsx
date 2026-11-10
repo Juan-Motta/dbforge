@@ -116,14 +116,28 @@ export function EditableGrid(props: EditableGridProps) {
     state: CellState
   } | null>(null)
 
-  /** Arrow keys move the picked cell, new rows first as they are shown. */
-  const move = ([down, right]: [number, number]) => {
+  /**
+   * Picks a cell and selects it, so row actions reach the cell the grid shows
+   * as picked. `mode` says how the selection takes it; without one it stays as
+   * it is when the cell is already part of it (a menu opened on a selected block).
+   */
+  const pick = (cell: Cell, mode?: SelectMode) => {
+    onActivate(cell)
+    // Cells of tables without a key can't be told apart once edited, so they aren't selected.
+    if (!editable && !cell.row.startsWith('new:')) return
+    const ref = { row: selectionRow(cell.row), column: cell.column }
+    if (mode) onSelect(ref, mode)
+    else if (!selection.cells.has(cellKey(ref))) onSelect(ref, 'single')
+  }
+
+  /** Arrow keys move the picked cell, new rows first as they are shown; with Shift they grow the selection. */
+  const move = ([down, right]: [number, number], extend: boolean) => {
     if (!active) return
     const order = [...edits.inserts.map((r) => `new:${r.id}`), ...rows.map((_, r) => `row:${r}`)]
     const at = order.indexOf(active.row)
     const row = order[Math.min(order.length - 1, Math.max(0, at + down))]
     const column = Math.min(columns.length - 1, Math.max(0, active.column + right))
-    onActivate({ row, column })
+    pick({ row, column }, extend ? 'range' : 'single')
     // Once drawn, bring it into view past the sticky header and row numbers.
     requestAnimationFrame(() =>
       table.current
@@ -181,6 +195,9 @@ export function EditableGrid(props: EditableGridProps) {
 
   /** The selection's key of a cell's row: its primary key, or `new:<id>`. */
   const rowIdOf = (at: Editing) => ('row' in at ? rowKey(keyOf(rows[at.row], columns)) : `new:${at.newRow}`)
+  /** The same key, from the row a `Cell` names: `row:<index>` or `new:<id>`. */
+  const selectionRow = (row: string) =>
+    row.startsWith('new:') ? row : rowKey(keyOf(rows[Number(row.slice(4))], columns))
 
   // The rows as shown, by selection key and by the key cellAt reads them with.
   const shownRows = [
@@ -425,7 +442,6 @@ export function EditableGrid(props: EditableGridProps) {
         : 'newRow' in editing.at && editing.at.newRow === at.newRow)
     const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
     const isActive = active?.row === id && active.column === column
-    // Cells of tables without a key can't be told apart once edited, so they aren't selected.
     const selectable = editable || !('row' in at)
     const isSelected =
       selection.cells.size > 1 &&
@@ -521,15 +537,12 @@ export function EditableGrid(props: EditableGridProps) {
           }
           onSelect(here, 'range')
         }}
-        onClick={(event) => {
-          onActivate({ row: id, column })
-          // A click picks the cell; Shift and ⌘/Ctrl grow or change the selection.
-          if (selectable) onSelect({ row: rowIdOf(at), column }, modeOf(event))
-        }}
+        // A click picks the cell; Shift and ⌘/Ctrl grow or change the selection.
+        onClick={(event) => pick({ row: id, column }, modeOf(event))}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
         onContextMenu={(event: MouseEvent) => {
           event.preventDefault()
-          onActivate({ row: id, column })
+          pick({ row: id, column })
           setMenu({ x: event.clientX, y: event.clientY, at, column, state })
         }}
         data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
@@ -573,7 +586,7 @@ export function EditableGrid(props: EditableGridProps) {
           } else if (event.key === 'Escape') onActivate(null)
           else if (active && event.key in MOVES) {
             event.preventDefault()
-            move(MOVES[event.key])
+            move(MOVES[event.key], event.shiftKey)
           }
         }}
       >
@@ -699,11 +712,19 @@ function CellEditor({
   onCancel: () => void
 }) {
   const [text, setText] = useState(initial ?? '')
+  // Closing gives the focus back to the grid, which blurs this field while it is
+  // still drawn: the editor closes once, so that blur can't keep a cancelled text.
+  const closed = useRef(false)
+  const close = (how: () => void) => {
+    if (closed.current) return
+    closed.current = true
+    how()
+  }
   // Untouched text is no change: just opening a NULL or DEFAULT cell must not store ''.
-  const finish = () => (text === (initial ?? '') ? onCancel() : onCommit(text))
+  const finish = () => close(() => (text === (initial ?? '') ? onCancel() : onCommit(text)))
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Enter') finish()
-    else if (event.key === 'Escape') onCancel()
+    else if (event.key === 'Escape') close(onCancel)
     else if ((event.metaKey || event.ctrlKey) && event.key === 's') {
       // Save this cell first; applying now would leave the text being typed out.
       // A second ⌘S applies everything.

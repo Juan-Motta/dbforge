@@ -130,11 +130,12 @@ export function TableView({
   const [asDocuments, setAsDocuments] = useState(false)
   // The document open in an editor: a loaded row's key, or `doc:<n>` for a new one.
   const [editingDocument, setEditingDocument] = useState<string | null>(null)
-  // Another page, order or table: the picked cell and the open document are gone.
+  // Another page, order or table: the picked cell, the selection and the open document are gone.
   const [shownRows, setShownRows] = useState(page?.rows)
   if (shownRows !== page?.rows) {
     setShownRows(page?.rows)
     setPicked(null)
+    setSelection(NO_SELECTION)
     setEditingDocument(null)
   }
 
@@ -399,7 +400,11 @@ export function TableView({
                 }}
                 columnInfo={columnInfo && Object.fromEntries(columnInfo.map((c) => [c.name, c]))}
                 active={picked}
-                onActivate={setPicked}
+                // Letting go of the picked cell (Escape) lets go of the selection with it.
+                onActivate={(cell) => {
+                  setPicked(cell)
+                  if (!cell) setSelection(NO_SELECTION)
+                }}
                 onInspect={() => setInspecting(!inspecting)}
                 sortOf={(column) => sortOf(dialect, column, filter.order)}
                 onSort={pending ? undefined : (column) => onFilterChange(sortBy(dialect, column, filter))}
