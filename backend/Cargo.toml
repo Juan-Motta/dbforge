@@ -23,7 +23,7 @@ tauri-build = { version = "2.7.4", features = [] }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
 either = "1"
-futures-util = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 hmac = "0.13"
 keyring = "4.2"
 mongodb = "3"

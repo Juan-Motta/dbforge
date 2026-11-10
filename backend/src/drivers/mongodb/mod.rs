@@ -35,7 +35,9 @@ use mongodb::options::{ClientOptions, Credential, ServerAddress, Tls, TlsOptions
 use self::logged::{Find, LoggedClient, LoggedDatabase};
 
 use super::row_filter::RowFilter;
-use super::{Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout};
+use super::{
+    Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, each_concurrently, with_timeout,
+};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -122,15 +124,21 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
         }
         [database] => {
             let db = client.database(database);
-            let mut objects = Vec::new();
-            for (name, is_view) in collections(&db).await? {
-                // The count kept in collection metadata: instant, like reltuples.
-                let row_estimate =
-                    if is_view { None } else { Some(db.collection(&name).estimated_document_count().await? as i64) };
-                let kind = if is_view { ObjectKind::View } else { ObjectKind::Table };
-                objects.push(DbObject { name, kind, row_estimate });
-            }
-            objects
+            // The count kept in collection metadata: instant, like reltuples, but
+            // one round trip each, so they are asked for a few at a time.
+            each_concurrently(collections(&db).await?, |(name, is_view)| {
+                let db = &db;
+                async move {
+                    let row_estimate = if is_view {
+                        None
+                    } else {
+                        Some(db.collection(&name).estimated_document_count().await? as i64)
+                    };
+                    let kind = if is_view { ObjectKind::View } else { ObjectKind::Table };
+                    Ok(DbObject { name, kind, row_estimate })
+                }
+            })
+            .await?
         }
         _ => return Err(AppError::Invalid(format!("Unexpected path: {}", path.join("/")))),
     };

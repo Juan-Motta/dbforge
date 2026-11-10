@@ -31,7 +31,9 @@ use serde_json::Value;
 use self::client::{Client, Target};
 use self::query::{Items, Select};
 use super::row_filter::RowFilter;
-use super::{Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout};
+use super::{
+    Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, each_concurrently, with_timeout,
+};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -59,12 +61,15 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
             Ok(names.into_iter().map(|name| DbObject::new(name, ObjectKind::Database)).collect())
         }
         [database] => {
-            let mut objects = Vec::new();
-            for name in containers(&client, database).await? {
-                let row_estimate = item_count(&client, database, &name).await?;
-                objects.push(DbObject { name, kind: ObjectKind::Table, row_estimate });
-            }
-            Ok(objects)
+            // One request per container, so they are sent a few at a time.
+            each_concurrently(containers(&client, database).await?, |name| {
+                let client = &client;
+                async move {
+                    let row_estimate = item_count(client, database, &name).await?;
+                    Ok(DbObject { name, kind: ObjectKind::Table, row_estimate })
+                }
+            })
+            .await
         }
         _ => Err(AppError::Invalid(format!("Unexpected path: {}", path.join("/")))),
     }

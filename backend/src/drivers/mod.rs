@@ -742,6 +742,20 @@ pub(crate) fn install_crypto() {
     });
 }
 
+/// Requests sent at once by [`each_concurrently`].
+const CONCURRENT_REQUESTS: usize = 8;
+
+/// `work` for each of `items`, a few at a time, with the results in the
+/// items' order; the first error stops the rest. The requests share the
+/// caller's task, so the statement log still records each of them.
+async fn each_concurrently<T, U, Fut>(items: Vec<T>, work: impl FnMut(T) -> Fut) -> Result<Vec<U>>
+where
+    Fut: Future<Output = Result<U>>,
+{
+    use futures_util::{StreamExt, TryStreamExt, stream};
+    stream::iter(items).map(work).buffered(CONCURRENT_REQUESTS).try_collect().await
+}
+
 /// Bytes as `0x` and upper-case hex digits, the form binary values are shown in.
 fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
