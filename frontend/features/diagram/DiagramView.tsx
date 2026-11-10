@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { Button, IconButton } from '../../components/Button'
 import { shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
 import { useMessages } from '../../lib/i18n/useLanguage'
-import type { SchemaDiagram } from './api'
+import type { SchemaDiagram, DiagramTable } from './api'
 import {
   CARD_WIDTH,
   cardHeight,
@@ -116,8 +116,27 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
     [cards, relationships],
   )
   const positionOf = (name: string) => moved.get(name) ?? autoPositions.get(name)!
-  const byName = new Map(cards.map((c) => [c.table.name, c]))
-  const lines = relationships.filter((r) => byName.has(r.table) && byName.has(r.referencedTable))
+  const byName = useMemo(() => new Map(cards.map((c) => [c.table.name, c])), [cards])
+  const lines = useMemo(
+    () => relationships.filter((r) => byName.has(r.table) && byName.has(r.referencedTable)),
+    [relationships, byName],
+  )
+  // The tables tied to the active one, worked out once rather than for each card.
+  const related = useMemo(() => {
+    const names = new Set<string>()
+    if (active === null) return names
+    names.add(active)
+    for (const r of lines) {
+      if (r.table === active) names.add(r.referencedTable)
+      if (r.referencedTable === active) names.add(r.table)
+    }
+    return names
+  }, [lines, active])
+  const hover = useCallback(
+    (name: string, inside: boolean) =>
+      setHovered((current) => (inside ? name : current === name ? null : current)),
+    [],
+  )
 
   const fit = () => {
     const box = canvas.current?.getBoundingClientRect()
@@ -258,13 +277,6 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
     })
 
   const listed = diagram.tables.filter((t) => t.name.toLowerCase().includes(filter.toLowerCase()))
-  const isRelated = (name: string) =>
-    active === name ||
-    lines.some(
-      (r) =>
-        (r.table === active && r.referencedTable === name) ||
-        (r.referencedTable === active && r.table === name),
-    )
 
   return (
     <div className={styles.diagram}>
@@ -328,69 +340,22 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
           className={styles.world}
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         >
-          <svg className={styles.lines} aria-hidden="true">
-            {lines.map((r) => {
-              const from = byName.get(r.table)!
-              const to = byName.get(r.referencedTable)!
-              const highlighted = active !== null && (r.table === active || r.referencedTable === active)
-              return (
-                <path
-                  key={r.name}
-                  d={relationshipPath(
-                    positionOf(r.table),
-                    from.columns.findIndex((c) => c.name === r.columns[0]),
-                    positionOf(r.referencedTable),
-                    to.columns.findIndex((c) => c.name === r.referencedColumns[0]),
-                  )}
-                  data-highlighted={highlighted || undefined}
-                  data-dimmed={(active !== null && !highlighted) || undefined}
-                >
-                  <title>
-                    {r.name}: {r.table}({r.columns.join(', ')}) → {r.referencedTable}(
-                    {r.referencedColumns.join(', ')})
-                  </title>
-                </path>
-              )
-            })}
-          </svg>
-
+          <Lines lines={lines} cards={byName} moved={moved} autoPositions={autoPositions} active={active} />
           {cards.map(({ table, columns }) => {
             const { x, y } = positionOf(table.name)
             return (
-              <div
+              <TableCard
                 key={table.name}
-                className={styles.card}
-                style={{ left: x, top: y, width: CARD_WIDTH }}
-                data-card={table.name}
-                data-focused={active === table.name || undefined}
-                data-pinned={pinned === table.name || undefined}
-                data-dimmed={(active !== null && !isRelated(table.name)) || undefined}
-                onPointerEnter={() => setHovered(table.name)}
-                onPointerLeave={() => setHovered((name) => (name === table.name ? null : name))}
-              >
-                <div className={styles.cardHeader}>
-                  <Icon name="table" size={14} />
-                  <span className={styles.cardName}>{table.name}</span>
-                  {table.rowEstimate !== null && (
-                    <span className={styles.rows}>{compact(table.rowEstimate)}</span>
-                  )}
-                </div>
-                {columns.map((column) => {
-                  const fk = foreignKeys.has(`${table.name}.${column.name}`)
-                  return (
-                    <div key={column.name} className={styles.column}>
-                      <span
-                        className={styles.key}
-                        data-kind={column.primaryKey ? 'pk' : fk ? 'fk' : undefined}
-                      >
-                        {column.primaryKey ? 'PK' : fk ? 'FK' : ''}
-                      </span>
-                      <span className={styles.columnName}>{column.name}</span>
-                      <span className={styles.columnType}>{shortTypeName(column.dataType)}</span>
-                    </div>
-                  )
-                })}
-              </div>
+                table={table}
+                columns={columns}
+                x={x}
+                y={y}
+                foreignKeys={foreignKeys}
+                focused={active === table.name}
+                pinned={pinned === table.name}
+                dimmed={active !== null && !related.has(table.name)}
+                onHover={hover}
+              />
             )
           })}
         </div>
@@ -450,6 +415,110 @@ function buildCards(diagram: SchemaDiagram, names: Set<string>, mode: ColumnMode
     })
 }
 
-function compact(rows: number): string {
-  return Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(rows)
+type Card = ReturnType<typeof buildCards>[number]
+
+interface LinesProps {
+  lines: SchemaDiagram['relationships']
+  cards: Map<string, Card>
+  moved: Map<string, Point>
+  autoPositions: Map<string, Point>
+  active: string | null
 }
+
+/**
+ * The relationships between the cards shown. Drawn again only when a card
+ * moves or another table becomes active: panning and zooming move them as a whole.
+ */
+const Lines = memo(function Lines({ lines, cards, moved, autoPositions, active }: LinesProps) {
+  const positionOf = (name: string) => moved.get(name) ?? autoPositions.get(name)!
+  return (
+    <svg className={styles.lines} aria-hidden="true">
+      {lines.map((r) => {
+        const from = cards.get(r.table)!
+        const to = cards.get(r.referencedTable)!
+        const highlighted = active !== null && (r.table === active || r.referencedTable === active)
+        return (
+          // A constraint's name is unique within its table only.
+          <path
+            key={`${r.table}.${r.name}`}
+            d={relationshipPath(
+              positionOf(r.table),
+              from.columns.findIndex((c) => c.name === r.columns[0]),
+              positionOf(r.referencedTable),
+              to.columns.findIndex((c) => c.name === r.referencedColumns[0]),
+            )}
+            data-highlighted={highlighted || undefined}
+            data-dimmed={(active !== null && !highlighted) || undefined}
+          >
+            <title>
+              {r.name}: {r.table}({r.columns.join(', ')}) → {r.referencedTable}(
+              {r.referencedColumns.join(', ')})
+            </title>
+          </path>
+        )
+      })}
+    </svg>
+  )
+})
+
+interface TableCardProps {
+  table: DiagramTable
+  columns: Card['columns']
+  x: number
+  y: number
+  foreignKeys: Set<string>
+  focused: boolean
+  pinned: boolean
+  dimmed: boolean
+  /** The same function between renders, so a card is drawn again only when it changes. */
+  onHover: (name: string, inside: boolean) => void
+}
+
+/** One table. Drawn again only when it moves or its highlight changes, not when the canvas pans. */
+const TableCard = memo(function TableCard({
+  table,
+  columns,
+  x,
+  y,
+  foreignKeys,
+  focused,
+  pinned,
+  dimmed,
+  onHover,
+}: TableCardProps) {
+  return (
+    <div
+      className={styles.card}
+      style={{ left: x, top: y, width: CARD_WIDTH }}
+      data-card={table.name}
+      data-focused={focused || undefined}
+      data-pinned={pinned || undefined}
+      data-dimmed={dimmed || undefined}
+      onPointerEnter={() => onHover(table.name, true)}
+      onPointerLeave={() => onHover(table.name, false)}
+    >
+      <div className={styles.cardHeader}>
+        <Icon name="table" size={14} />
+        <span className={styles.cardName}>{table.name}</span>
+        {table.rowEstimate !== null && (
+          <span className={styles.rows}>{COMPACT.format(table.rowEstimate)}</span>
+        )}
+      </div>
+      {columns.map((column) => {
+        const fk = foreignKeys.has(`${table.name}.${column.name}`)
+        return (
+          <div key={column.name} className={styles.column}>
+            <span className={styles.key} data-kind={column.primaryKey ? 'pk' : fk ? 'fk' : undefined}>
+              {column.primaryKey ? 'PK' : fk ? 'FK' : ''}
+            </span>
+            <span className={styles.columnName}>{column.name}</span>
+            <span className={styles.columnType}>{shortTypeName(column.dataType)}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
+/** Row estimates as `12K`, `3.4M`. */
+const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
