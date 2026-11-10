@@ -351,3 +351,9 @@ td[data-menu-open] {
 .choiceValue {
   color: var(--text3);
 }
+
+/* One of several selected cells: a change or a copy reaches all of them. */
+.grid td[data-selected],
+.grid tr:hover td[data-selected] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}

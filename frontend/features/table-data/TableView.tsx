@@ -44,7 +44,16 @@ import { DocumentList, NEW_DOCUMENT, type LoadedDocument } from './DocumentList'
 import { CellInspector, type InspectedCell } from './CellInspector'
 import { FilterBar } from './FilterBar'
 import { narrowedBy, sortedBy } from './cellActions'
-import { NO_SELECTION, selectRows, type RowSelection, type SelectMode } from './rowSelection'
+import {
+  cellKey,
+  NO_SELECTION,
+  select as selectCells,
+  selectedCells,
+  selectedRows,
+  type CellRef,
+  type Selection,
+  type SelectMode,
+} from './selection'
 import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
@@ -109,8 +118,8 @@ export function TableView({
     pageSize,
   )
   const [edits, setEdits] = useState<Edits>(NO_EDITS)
-  const [selection, setSelection] = useState<RowSelection>(NO_SELECTION)
-  const selected = selection.selected
+  // Selected cells; the rows they are in count as selected for row actions.
+  const [selection, setSelection] = useState<Selection>(NO_SELECTION)
   const [status, setStatus] = useState<Status>({ state: 'idle' })
   const [preview, setPreview] = useState<string[] | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -149,15 +158,20 @@ export function TableView({
     ...edits.inserts.map((row) => `new:${row.id}`),
     ...(page?.rows ?? []).map((row) => rowKey(keyOf(row, page?.columns ?? []))),
   ]
-  const select = (id: string, mode: SelectMode) =>
-    setSelection((current) => selectRows(current, id, mode, rowOrder))
+  const selected = new Set(selectedRows(selection, rowOrder))
+  const select = (cell: CellRef, mode: SelectMode, wholeRow = false) =>
+    setSelection((current) => selectCells(current, cell, mode, rowOrder, columns.length, wholeRow))
 
-  /** A change to row `id` reaches every selected row when `id` is one of several selected. */
-  const targetsOf = (id: string) => (selected.size > 1 && selected.has(id) ? [...selected] : [id])
+  /** A change to a cell reaches every selected cell when it is one of several selected. */
+  const targetsOf = (cell: CellRef): CellRef[] =>
+    selection.cells.size > 1 && selection.cells.has(cellKey(cell))
+      ? selectedCells(selection, rowOrder)
+      : [cell]
 
-  /** Puts `value` in column `c` of each row in `ids`; rows marked for deletion keep theirs. */
-  const editRows = (current: Edits, ids: string[], c: number, value: CellValue | null): Edits =>
-    ids.reduce((acc, id) => {
+  /** Puts `value` in each of `cells`; computed columns and rows marked for deletion keep theirs. */
+  const editCells = (current: Edits, cells: CellRef[], value: CellValue | null): Edits =>
+    cells.reduce((acc, { row: id, column: c }) => {
+      if (columns[c]?.generated) return acc
       const name = columns[c].name
       if (id.startsWith('new:')) {
         const newId = Number(id.slice(4))
@@ -255,7 +269,7 @@ export function TableView({
     const id = picked.row.startsWith('new:')
       ? picked.row
       : rowKey(keyOf(rows[Number(picked.row.slice(4))], columns))
-    change((current) => editRows(current, targetsOf(id), picked.column, value))
+    change((current) => editCells(current, targetsOf({ row: id, column: picked.column }), value))
   }
 
   /** A new document, open in its editor. */
@@ -342,7 +356,9 @@ export function TableView({
               firstNumber={offset + 1}
               locked={!editable ? noKey : applying ? m.applyingChanges : null}
               selected={selected}
-              onSelect={(id, additive) => select(id, additive ? 'toggle' : 'single')}
+              onSelect={(id, additive) =>
+                select({ row: id, column: 0 }, additive ? 'toggle' : 'single', true)
+              }
               editing={editingDocument}
               onEdit={setEditingDocument}
               check={check}
@@ -360,16 +376,18 @@ export function TableView({
                 firstRowNumber={offset + 1}
                 edits={edits}
                 editable={editable && !applying}
-                selected={selected}
+                selection={selection}
                 onSelect={select}
                 onEditCell={(r, c, value) =>
-                  change((current) => editRows(current, targetsOf(rowKey(keyOf(rows[r], columns))), c, value))
+                  change((current) =>
+                    editCells(current, targetsOf({ row: rowKey(keyOf(rows[r], columns)), column: c }), value),
+                  )
                 }
                 onUnsetNewCell={(id, c) =>
-                  change((current) => editRows(current, targetsOf(`new:${id}`), c, DEFAULT))
+                  change((current) => editCells(current, targetsOf({ row: `new:${id}`, column: c }), DEFAULT))
                 }
                 onEditNewCell={(id, c, value) =>
-                  change((current) => editRows(current, targetsOf(`new:${id}`), c, value))
+                  change((current) => editCells(current, targetsOf({ row: `new:${id}`, column: c }), value))
                 }
                 linkOf={(r, c) => {
                   const key = foreignKeys.find((k) => k.columns.includes(columns[c].name))
@@ -445,7 +463,7 @@ export function TableView({
           </span>
         )}
         {!pending && status.state === 'idle' && <span className={styles.summary}>{summary}</span>}
-        {selected.size > 1 && <Badge tone="info">{m.selectionHint(selected.size)}</Badge>}
+        {selection.cells.size > 1 && <Badge tone="info">{m.selectionHint(selection.cells.size)}</Badge>}
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
           {loading

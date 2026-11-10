@@ -18,7 +18,15 @@ import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
 import { messages } from './messages'
 import { filtersByValue, rowAsInsert, rowAsJson, valueCondition } from './cellActions'
-import { modeOf, rowsAsTsv, type SelectMode } from './rowSelection'
+import {
+  cellKey,
+  cellsAsTsv,
+  modeOf,
+  selectedRows as rowsOfSelection,
+  type CellRef,
+  type Selection,
+  type SelectMode,
+} from './selection'
 import { ChoiceEditor } from './ChoiceEditor'
 import { choicesOf } from './choices'
 import { formatTemporal, temporalKindOf, temporalOf } from './temporal'
@@ -37,12 +45,13 @@ interface EditableGridProps {
   edits: Edits
   /** False for tables without a primary key: rows can't be identified to change them. */
   editable: boolean
-  selected: Set<string>
+  /** The selected cells; the rows they are in count as selected for row actions. */
+  selection: Selection
   /**
-   * Picks rows: a click alone, ⌘/Ctrl-click adds or removes, Shift-click or a
-   * drag over the row numbers selects a block. Keys are `rowKey()`s, or `new:<id>`.
+   * Picks cells: a click alone, ⌘/Ctrl-click adds or removes, Shift-click or a
+   * drag selects a block. On a row's number (`wholeRow`) it picks the whole row.
    */
-  onSelect: (id: string, mode: SelectMode) => void
+  onSelect: (cell: CellRef, mode: SelectMode, wholeRow?: boolean) => void
   onEditCell: (row: number, column: number, value: CellValue) => void
   onEditNewCell: (id: number, column: number, value: Value) => void
   /** Puts a column of a new row back to its DEFAULT. */
@@ -88,7 +97,7 @@ const MOVES: Record<string, [number, number]> = {
 
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
-  const { columns, rows, firstRowNumber, edits, editable, selected, onSelect, active, onActivate } = props
+  const { columns, rows, firstRowNumber, edits, editable, selection, onSelect, active, onActivate } = props
   const m = useMessages(messages)
   const [editing, setEditing] = useState<{ at: Editing; column: number } | null>(null)
   const table = useRef<HTMLTableElement>(null)
@@ -173,22 +182,32 @@ export function EditableGrid(props: EditableGridProps) {
   /** The selection's key of a cell's row: its primary key, or `new:<id>`. */
   const rowIdOf = (at: Editing) => ('row' in at ? rowKey(keyOf(rows[at.row], columns)) : `new:${at.newRow}`)
 
-  /** The selected rows' values as they stand (edits included), in the grid's order. */
-  const selectedRows = (): Value[][] => {
-    const ids = [
-      ...edits.inserts.map((row) => ({ select: `new:${row.id}`, cell: `new:${row.id}` })),
-      ...rows.map((row, r) => ({ select: rowKey(keyOf(row, columns)), cell: `row:${r}` })),
-    ].filter(({ select }) => selected.has(select))
-    return ids.map(({ cell }) =>
-      columns.map((_, c) => cellAt(edits, rows, columns, { row: cell, column: c })?.value ?? null),
-    )
-  }
+  // The rows as shown, by selection key and by the key cellAt reads them with.
+  const shownRows = [
+    ...edits.inserts.map((row) => ({ select: `new:${row.id}`, cell: `new:${row.id}` })),
+    ...rows.map((row, r) => ({ select: rowKey(keyOf(row, columns)), cell: `row:${r}` })),
+  ]
+  const order = shownRows.map((row) => row.select)
+  const cellRow = new Map(shownRows.map((row) => [row.select, row.cell]))
+  const selectedRowSet = new Set(rowsOfSelection(selection, order))
+  /** A row whose every cell is selected, as its number picks it: drawn selected as a whole. */
+  const wholeRowSelected = (id: string) =>
+    columns.every((_, column) => selection.cells.has(cellKey({ row: id, column })))
+  const valueAt = (cell: CellRef) =>
+    cellAt(edits, rows, columns, { row: cellRow.get(cell.row) ?? '', column: cell.column })?.value ?? null
 
-  // A drag over the row numbers selects a block; it ends wherever the button is let go.
+  /** The rows with a selected cell, whole and as they stand (edits included), in the grid's order. */
+  const selectedRows = (): Value[][] =>
+    rowsOfSelection(selection, order).map((row) => columns.map((_, column) => valueAt({ row, column })))
+
+  // A drag over the row numbers selects whole rows; it ends wherever the button is let go.
   const dragging = useRef(false)
+  // A drag that starts on a cell: that cell, until the pointer reaches another one.
+  const cellDrag = useRef<{ start: CellRef; moved: boolean } | null>(null)
   useEffect(() => {
     const stop = () => {
       dragging.current = false
+      cellDrag.current = null
     }
     window.addEventListener('pointerup', stop)
     return () => window.removeEventListener('pointerup', stop)
@@ -198,9 +217,9 @@ export function EditableGrid(props: EditableGridProps) {
       if (event.button !== 0) return
       event.preventDefault()
       dragging.current = true
-      onSelect(id, modeOf(event))
+      onSelect({ row: id, column: 0 }, modeOf(event), true)
     },
-    onPointerEnter: () => dragging.current && onSelect(id, 'range'),
+    onPointerEnter: () => dragging.current && onSelect({ row: id, column: 0 }, 'range', true),
   })
 
   /** A cell's text for the clipboard: its value, or NULL or DEFAULT spelled out. */
@@ -238,14 +257,19 @@ export function EditableGrid(props: EditableGridProps) {
     const write = (text: string) => void navigator.clipboard.writeText(text)
     const { dialect, table } = props
 
-    // Several selected rows, this one among them: a change reaches them all.
-    const across = selected.size > 1 && selected.has(rowIdOf(at)) ? selected.size : 0
-    const forAll = (label: string) => (across ? m.acrossRows(label, across) : label)
+    // Several selected cells, this one among them: a change reaches them all.
+    const cellCount = selection.cells.size
+    const across = cellCount > 1 && selection.cells.has(cellKey({ row: rowIdOf(at), column })) ? cellCount : 0
+    const rowCount = selectedRowSet.size
+    const forAll = (label: string) => (across ? m.acrossCells(label, across) : label)
     const copySelection: MenuItem[] = across
       ? [
-          { label: m.copySelectedRows(across), onSelect: () => write(rowsAsTsv(selectedRows())) },
           {
-            label: m.copySelectedJson(across),
+            label: m.copySelectedCells(across),
+            onSelect: () => write(cellsAsTsv(selection, order, valueAt)),
+          },
+          {
+            label: m.copySelectedJson(rowCount),
             onSelect: () =>
               write(
                 `[${selectedRows()
@@ -256,7 +280,7 @@ export function EditableGrid(props: EditableGridProps) {
           ...(dialect && table && RELATIONAL_DIALECTS.includes(dialect)
             ? [
                 {
-                  label: m.copySelectedInsert(across),
+                  label: m.copySelectedInsert(rowCount),
                   onSelect: () =>
                     write(
                       selectedRows()
@@ -401,6 +425,12 @@ export function EditableGrid(props: EditableGridProps) {
         : 'newRow' in editing.at && editing.at.newRow === at.newRow)
     const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
     const isActive = active?.row === id && active.column === column
+    // Cells of tables without a key can't be told apart once edited, so they aren't selected.
+    const selectable = editable || !('row' in at)
+    const isSelected =
+      selection.cells.size > 1 &&
+      selection.cells.has(cellKey({ row: rowIdOf(at), column })) &&
+      !wholeRowSelected(rowIdOf(at))
     // Edited or new values may not exist yet in the referenced table: only loaded ones link.
     const link = 'row' in at && !state.edited ? (props.linkOf?.(at.row, column) ?? null) : null
     const classes = [
@@ -473,11 +503,28 @@ export function EditableGrid(props: EditableGridProps) {
         className={classes.filter(Boolean).join(' ') || undefined}
         style={sized[column]}
         title={value ?? undefined}
+        // Holding the button on a cell and moving over others selects the block between them.
+        onPointerDown={(event: PointerEvent) => {
+          if (event.button !== 0 || modeOf(event) !== 'single' || !selectable) return
+          cellDrag.current = { start: { row: rowIdOf(at), column }, moved: false }
+        }}
+        onPointerEnter={() => {
+          const drag = cellDrag.current
+          if (!drag) return
+          const here = { row: rowIdOf(at), column }
+          if (!drag.moved && cellKey(here) === cellKey(drag.start)) return
+          if (!drag.moved) {
+            drag.moved = true
+            onSelect(drag.start, 'start')
+            // Text selection would otherwise follow the pointer across the cells.
+            window.getSelection()?.removeAllRanges()
+          }
+          onSelect(here, 'range')
+        }}
         onClick={(event) => {
           onActivate({ row: id, column })
-          // Shift or ⌘/Ctrl on a cell picks rows too, where rows can be told apart.
-          const mode = modeOf(event)
-          if (mode !== 'single' && (editable || !('row' in at))) onSelect(rowIdOf(at), mode)
+          // A click picks the cell; Shift and ⌘/Ctrl grow or change the selection.
+          if (selectable) onSelect({ row: rowIdOf(at), column }, modeOf(event))
         }}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
         onContextMenu={(event: MouseEvent) => {
@@ -487,6 +534,7 @@ export function EditableGrid(props: EditableGridProps) {
         }}
         data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
         data-active={isActive || undefined}
+        data-selected={isSelected || undefined}
       >
         {content}
       </td>
@@ -508,10 +556,10 @@ export function EditableGrid(props: EditableGridProps) {
           if (event.target instanceof HTMLInputElement) return
           const text = active && cellText(active)
           const command = event.metaKey || event.ctrlKey
-          if (command && event.key === 'c' && selected.size > 1) {
-            // Several rows selected: they go to the clipboard as a spreadsheet's rows.
+          if (command && event.key === 'c' && selection.cells.size > 1) {
+            // Several cells selected: they go to the clipboard as a spreadsheet's block.
             event.preventDefault()
-            void navigator.clipboard.writeText(rowsAsTsv(selectedRows()))
+            void navigator.clipboard.writeText(cellsAsTsv(selection, order, valueAt))
           } else if (command && event.key === 'c' && text !== null) {
             event.preventDefault()
             void navigator.clipboard.writeText(text)
@@ -575,7 +623,7 @@ export function EditableGrid(props: EditableGridProps) {
           {edits.inserts.map((row) => {
             const id = `new:${row.id}`
             return (
-              <tr key={id} className={styles.inserted} aria-selected={selected.has(id)}>
+              <tr key={id} className={styles.inserted} aria-selected={wholeRowSelected(id)}>
                 <td className={styles.rowNumber} {...rowNumberProps(id)}>
                   +
                 </td>
@@ -597,7 +645,7 @@ export function EditableGrid(props: EditableGridProps) {
               <tr
                 key={id + r}
                 className={deleted ? styles.deleted : undefined}
-                aria-selected={selected.has(id)}
+                aria-selected={wholeRowSelected(id)}
               >
                 <td className={styles.rowNumber} {...(editable ? rowNumberProps(id) : {})}>
                   {deleted ? '−' : firstRowNumber + r}
