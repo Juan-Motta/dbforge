@@ -499,13 +499,28 @@ fn text(data: &ColumnData<'static>) -> Option<String> {
         ColumnData::Xml(v) => v.as_ref().map(|v| v.to_string()),
         // datetime keeps 1/300 s; three decimals is how it's written and read back.
         ColumnData::DateTime(_) | ColumnData::SmallDateTime(_) => date("%Y-%m-%d %H:%M:%S%.3f"),
-        ColumnData::DateTime2(_) => date("%Y-%m-%d %H:%M:%S%.f"),
+        ColumnData::DateTime2(_) => date("%Y-%m-%d %H:%M:%S%.f").map(seven_digits),
         ColumnData::Date(_) => NaiveDate::from_sql(data).ok()?.map(|v| v.format("%Y-%m-%d").to_string()),
-        ColumnData::Time(_) => NaiveTime::from_sql(data).ok()?.map(|v| v.format("%H:%M:%S%.f").to_string()),
-        ColumnData::DateTimeOffset(_) => {
-            DateTime::<FixedOffset>::from_sql(data).ok()?.map(|v| v.format("%Y-%m-%d %H:%M:%S%.f %:z").to_string())
+        ColumnData::Time(_) => {
+            NaiveTime::from_sql(data).ok()?.map(|v| seven_digits(v.format("%H:%M:%S%.f").to_string()))
+        }
+        ColumnData::DateTimeOffset(_) => DateTime::<FixedOffset>::from_sql(data)
+            .ok()?
+            .map(|v| seven_digits(v.format("%Y-%m-%d %H:%M:%S%.f %:z").to_string())),
+    }
+}
+
+/// A time with at most the 7 decimals SQL Server reads back. chrono writes 9
+/// once a value has digits past the microsecond, and SQL Server keeps 100 ns,
+/// so the last two are always zeros: `07.123456700` → `07.1234567`.
+fn seven_digits(mut text: String) -> String {
+    if let Some(point) = text.find('.') {
+        let digits = text[point + 1..].bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 7 {
+            text.replace_range(point + 8..point + 1 + digits, "");
         }
     }
+    text
 }
 
 /// `value` with `scale` digits after the point, e.g. (-5, 2) → `-0.05`.
@@ -760,6 +775,16 @@ pub(super) mod tests {
     fn go_lines_split_batches() {
         assert_eq!(batches("SELECT 1\nGO\n\ngo\nSELECT 'GO'\n"), ["SELECT 1\n", "SELECT 'GO'\n"]);
         assert_eq!(batches("SELECT 1 -- GO"), ["SELECT 1 -- GO\n"]);
+    }
+
+    #[test]
+    fn times_keep_the_seven_decimals_sql_server_reads() {
+        assert_eq!(seven_digits("2024-03-04 05:06:07.123456700".into()), "2024-03-04 05:06:07.1234567");
+        assert_eq!(seven_digits("05:06:07.100000000".into()), "05:06:07.1000000");
+        assert_eq!(seven_digits("2024-03-04 05:06:07.123456700 +02:00".into()), "2024-03-04 05:06:07.1234567 +02:00");
+        // Fewer digits, or none, stay as they are.
+        assert_eq!(seven_digits("2024-03-04 05:06:07.123".into()), "2024-03-04 05:06:07.123");
+        assert_eq!(seven_digits("05:06:07".into()), "05:06:07");
     }
 
     #[test]

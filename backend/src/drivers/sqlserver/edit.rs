@@ -205,6 +205,26 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs a local SQL Server on port 51433"]
+    async fn precise_times_shown_by_the_grid_find_their_row() {
+        let connection = database(
+            "dbforge_edit_times",
+            "CREATE TABLE stamps (at datetime2(7) PRIMARY KEY, during time(7), note nvarchar(10));
+             INSERT INTO stamps VALUES ('2024-03-04 05:06:07.1234567', '05:06:07.1234567', 'a');",
+        )
+        .await;
+        let shown = rows(&connection, "stamps").await;
+        let some = |v: &str| Some(v.to_string());
+        assert_eq!(shown, [[some("2024-03-04 05:06:07.1234567"), some("05:06:07.1234567"), some("a")]]);
+        let edit = [RowChange::Update {
+            key: map(&[("at", shown[0][0].as_deref())]),
+            values: map(&[("note", Some("b")), ("during", shown[0][1].as_deref())]),
+        }];
+        apply_changes(&connection, PASSWORD, &table("dbforge_edit_times", "stamps"), &edit).await.unwrap();
+        assert_eq!(rows(&connection, "stamps").await[0][2], some("b"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
     async fn a_trigger_that_changes_other_rows_does_not_fail_the_edit() {
         // Each change to `items` writes a row to `audit`, which the server counts too.
         let audited = format!(
