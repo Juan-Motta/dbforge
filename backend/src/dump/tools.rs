@@ -38,16 +38,46 @@ pub struct Tool {
     pub path: PathBuf,
     /// Major and minor version.
     pub version: (u32, u32),
+    /// Chosen by the user in place of the one DBForge finds.
+    pub custom: bool,
+}
+
+/// The tools DBForge runs, by the name the user knows them by.
+pub const TOOLS: [&str; 2] = ["pg_dump", "psql"];
+
+/// `name`, when it is one of the tools DBForge runs.
+pub fn check_name(name: &str) -> Result<&'static str> {
+    TOOLS
+        .into_iter()
+        .find(|tool| *tool == name)
+        .ok_or_else(|| AppError::Invalid(format!("{name} isn't a tool DBForge runs.")))
+}
+
+/// The version `path` reports with `--version`; `None` when it doesn't run or isn't that tool.
+async fn probe(path: &Path) -> Option<(u32, u32)> {
+    let output = Command::new(path).arg("--version").output().await.ok()?;
+    version_of(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The tool to run: the one the user chose (`custom`), else the newest found.
+pub async fn resolve(name: &str, custom: Option<&Path>) -> Result<Tool> {
+    let Some(path) = custom else { return find(name).await };
+    match probe(path).await {
+        Some(version) => Ok(Tool { path: path.to_path_buf(), version, custom: true }),
+        None => Err(AppError::Invalid(format!(
+            "The {name} chosen in DBForge can't be run: {}. Choose another one, or use the one DBForge finds.",
+            path.display()
+        ))),
+    }
 }
 
 /// The newest `name` (`pg_dump`, `psql`) installed, or how to install it.
 pub async fn find(name: &str) -> Result<Tool> {
     let mut newest: Option<Tool> = None;
     for path in candidates(name) {
-        let Ok(output) = Command::new(&path).arg("--version").output().await else { continue };
-        let Some(version) = version_of(&String::from_utf8_lossy(&output.stdout)) else { continue };
+        let Some(version) = probe(&path).await else { continue };
         if newest.as_ref().is_none_or(|tool| version > tool.version) {
-            newest = Some(Tool { path, version });
+            newest = Some(Tool { path, version, custom: false });
         }
     }
     newest.ok_or_else(|| {
@@ -241,5 +271,16 @@ mod tests {
         let error = run(command, &cancel, |_| {}).await.unwrap_err();
         assert_eq!(error.to_string(), "Cancelled.");
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn a_chosen_tool_is_used_or_refused_with_its_path() {
+        let found = find("pg_dump").await.unwrap();
+        let chosen = resolve("pg_dump", Some(&found.path)).await.unwrap();
+        assert_eq!((chosen.path, chosen.version, chosen.custom), (found.path.clone(), found.version, true));
+        let error = resolve("pg_dump", Some(Path::new("/nowhere/pg_dump"))).await.unwrap_err().to_string();
+        assert!(error.contains("/nowhere/pg_dump") && error.contains("can't be run"), "{error}");
+        assert!(!resolve("pg_dump", None).await.unwrap().custom);
+        assert!(check_name("rm").is_err());
     }
 }

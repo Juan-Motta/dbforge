@@ -27,6 +27,7 @@ pub fn run() {
             let credentials = credentials::Credentials::load(config.clone())?;
             app.manage(ConnectionStore::load(config.join("connections.json"), credentials)?);
             app.manage(connections::tags::TagStore::load(config.join("tags.json"))?);
+            app.manage(dump::ToolPaths::load(config.join("tools.json"))?);
             app.manage(query::QuerySessions::default());
             app.manage(dump::DumpJobs::default());
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
@@ -67,6 +68,9 @@ pub fn run() {
             dump::export_database,
             dump::import_database,
             dump::cancel_dump,
+            dump::dump_tool,
+            dump::set_dump_tool,
+            dump::dump_file_exists,
             cursor::keep_cursor,
         ])
         .run(tauri::generate_context!())

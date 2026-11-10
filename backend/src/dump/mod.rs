@@ -7,7 +7,10 @@
 //! A restore runs in one transaction and stops at the first error, so a failed
 //! one changes nothing; a database created for it is dropped again.
 
+mod tool_paths;
 mod tools;
+
+pub use tool_paths::ToolPaths;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,6 +22,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
+use self::tools::Tool;
 use crate::connections::model::{Connection, Engine};
 use crate::connections::store::ConnectionStore;
 use crate::drivers::postgres;
@@ -66,12 +70,16 @@ pub async fn export(
     database: &str,
     path: &Path,
     options: &DumpOptions,
-    cancel: &CancellationToken,
+    run: Run<'_>,
     on_line: impl FnMut(&str),
 ) -> Result<Exported> {
+    let Run { tool, cancel } = run;
     postgres_only(connection)?;
     let started = Instant::now();
-    let tool = tools::find("pg_dump").await?;
+    // The default export folder may not exist yet.
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     let partial = partial_path(path);
     let session = session_name();
     let mut command = Command::new(&tool.path);
@@ -113,9 +121,10 @@ pub async fn import(
     password: Option<&str>,
     database: &str,
     path: &Path,
-    cancel: &CancellationToken,
+    run: Run<'_>,
     on_line: impl FnMut(&str),
 ) -> Result<Imported> {
+    let Run { tool, cancel } = run;
     postgres_only(connection)?;
     let database = database.trim();
     if database.is_empty() {
@@ -125,7 +134,6 @@ pub async fn import(
         return Err(AppError::Invalid(format!("There's no file at {}.", path.display())));
     }
     let started = Instant::now();
-    let tool = tools::find("psql").await?;
     let stop = || if cancel.is_cancelled() { Err(tools::cancelled()) } else { Ok(()) };
     stop()?;
     let created = !postgres::database_exists(connection, password, database).await?;
@@ -264,17 +272,27 @@ pub async fn export_database(
     app: AppHandle,
     store: State<'_, ConnectionStore>,
     jobs: State<'_, DumpJobs>,
+    chosen: State<'_, ToolPaths>,
     request: ExportRequest,
 ) -> Result<Exported> {
     let connection = store.get(&request.connection_id)?;
     let password = store.password(&connection.id)?;
+    let tool = tools::resolve("pg_dump", chosen.get("pg_dump").as_deref()).await?;
     let cancel = jobs.start(&request.job_id);
     let report = |line: &str| {
         let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
     };
     let path = Path::new(&request.path);
-    let result =
-        export(&connection, password.as_deref(), &request.database, path, &request.options, &cancel, report).await;
+    let result = export(
+        &connection,
+        password.as_deref(),
+        &request.database,
+        path,
+        &request.options,
+        Run { tool: &tool, cancel: &cancel },
+        report,
+    )
+    .await;
     jobs.finish(&request.job_id);
     result
 }
@@ -284,18 +302,74 @@ pub async fn import_database(
     app: AppHandle,
     store: State<'_, ConnectionStore>,
     jobs: State<'_, DumpJobs>,
+    chosen: State<'_, ToolPaths>,
     request: ImportRequest,
 ) -> Result<Imported> {
     let connection = store.get(&request.connection_id)?;
     let password = store.password(&connection.id)?;
+    let tool = tools::resolve("psql", chosen.get("psql").as_deref()).await?;
     let cancel = jobs.start(&request.job_id);
     let report = |line: &str| {
         let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
     };
     let path = Path::new(&request.path);
-    let result = import(&connection, password.as_deref(), &request.database, path, &cancel, report).await;
+    let result =
+        import(&connection, password.as_deref(), &request.database, path, Run { tool: &tool, cancel: &cancel }, report)
+            .await;
     jobs.finish(&request.job_id);
     result
+}
+
+/// How an export or import runs: with which tool, and what stops it.
+#[derive(Clone, Copy)]
+pub struct Run<'a> {
+    pub tool: &'a Tool,
+    pub cancel: &'a CancellationToken,
+}
+
+/// The tool an export or import runs, as the dialogs show it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInfo {
+    path: String,
+    /// `major.minor`.
+    version: String,
+    /// Chosen by the user rather than found.
+    custom: bool,
+}
+
+impl From<Tool> for ToolInfo {
+    fn from(tool: Tool) -> Self {
+        Self {
+            path: tool.path.display().to_string(),
+            version: format!("{}.{}", tool.version.0, tool.version.1),
+            custom: tool.custom,
+        }
+    }
+}
+
+/// Which `pg_dump` or `psql` DBForge will run, or why there is none to run.
+#[tauri::command]
+pub async fn dump_tool(chosen: State<'_, ToolPaths>, name: String) -> Result<ToolInfo> {
+    let name = tools::check_name(&name)?;
+    Ok(tools::resolve(name, chosen.get(name).as_deref()).await?.into())
+}
+
+/// Runs `path` for `name` from now on, once it proves to be that tool; `None` goes back to the one found.
+#[tauri::command]
+pub async fn set_dump_tool(chosen: State<'_, ToolPaths>, name: String, path: Option<String>) -> Result<ToolInfo> {
+    let name = tools::check_name(&name)?;
+    let path = path.map(PathBuf::from);
+    // Refused before it is saved: a path that doesn't run would only fail later.
+    let tool = tools::resolve(name, path.as_deref()).await?;
+    chosen.set(name, path)?;
+    Ok(tool.into())
+}
+
+/// Whether a file is already at `path`, so the export dialog can ask before replacing it.
+#[tauri::command]
+pub fn dump_file_exists(path: String) -> bool {
+    Path::new(&path).exists()
 }
 
 /// Stops a running export or import. Harmless once it has finished.
@@ -316,6 +390,34 @@ mod tests {
     use crate::drivers::postgres::tests::{PASSWORD, local};
 
     const ALL: DumpOptions = DumpOptions { content: Content::All, clean: false, keep_owners: false };
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn exports_into_a_folder_that_doesnt_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("new folder").join("shop.sql");
+        assert!(!dump_file_exists(file.display().to_string()));
+        export(
+            &local(),
+            PASSWORD,
+            "shop",
+            &file,
+            &ALL,
+            Run { tool: &pg_dump().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(dump_file_exists(file.display().to_string()));
+    }
+
+    async fn pg_dump() -> Tool {
+        tools::find("pg_dump").await.unwrap()
+    }
+
+    async fn psql() -> Tool {
+        tools::find("psql").await.unwrap()
+    }
 
     async fn sql(database: &str, statements: &str) {
         let url = format!("postgres://postgres:dbforge@127.0.0.1:55432/{database}");
@@ -351,9 +453,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("source.sql");
         let mut lines = Vec::new();
-        let exported = export(&local(), PASSWORD, "dbforge_dump_source", &file, &ALL, &CancellationToken::new(), |l| {
-            lines.push(l.to_string())
-        })
+        let exported = export(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_source",
+            &file,
+            &ALL,
+            Run { tool: &pg_dump().await, cancel: &CancellationToken::new() },
+            |l| lines.push(l.to_string()),
+        )
         .await
         .unwrap();
         assert!(exported.bytes > 1000, "{exported:?}");
@@ -364,9 +472,14 @@ mod tests {
 
         postgres::drop_database(&local(), PASSWORD, "dbforge_dump_copy").await.unwrap();
         let mut restored = Vec::new();
-        let imported = import(&local(), PASSWORD, "dbforge_dump_copy", &file, &CancellationToken::new(), |l| {
-            restored.push(l.to_string())
-        })
+        let imported = import(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_copy",
+            &file,
+            Run { tool: &psql().await, cancel: &CancellationToken::new() },
+            |l| restored.push(l.to_string()),
+        )
         .await
         .unwrap();
         assert!(imported.created);
@@ -376,19 +489,43 @@ mod tests {
         // A dump that drops what it creates restores over the database it came from.
         let clean = dir.path().join("clean.sql");
         let options = DumpOptions { clean: true, ..ALL };
-        export(&local(), PASSWORD, "dbforge_dump_source", &clean, &options, &CancellationToken::new(), |_| {})
-            .await
-            .unwrap();
-        let again =
-            import(&local(), PASSWORD, "dbforge_dump_copy", &clean, &CancellationToken::new(), |_| {}).await.unwrap();
+        export(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_source",
+            &clean,
+            &options,
+            Run { tool: &pg_dump().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let again = import(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_copy",
+            &clean,
+            Run { tool: &psql().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert!(!again.created);
         assert_eq!(count("dbforge_dump_copy").await, 250);
 
         let structure = dir.path().join("structure.sql");
         let options = DumpOptions { content: Content::Structure, ..ALL };
-        export(&local(), PASSWORD, "dbforge_dump_source", &structure, &options, &CancellationToken::new(), |_| {})
-            .await
-            .unwrap();
+        export(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_source",
+            &structure,
+            &options,
+            Run { tool: &pg_dump().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert!(!std::fs::read_to_string(&structure).unwrap().contains("COPY dumped.items"));
 
         for name in ["dbforge_dump_source", "dbforge_dump_copy"] {
@@ -404,15 +541,31 @@ mod tests {
         std::fs::write(&file, "CREATE TABLE ok (id int);\nINSERT INTO missing VALUES (1);\n").unwrap();
 
         postgres::drop_database(&local(), PASSWORD, "dbforge_dump_broken").await.unwrap();
-        let error = import(&local(), PASSWORD, "dbforge_dump_broken", &file, &CancellationToken::new(), |_| {})
-            .await
-            .unwrap_err();
+        let error = import(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_broken",
+            &file,
+            Run { tool: &psql().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("relation \"missing\" does not exist"), "{error}");
         assert!(!postgres::database_exists(&local(), PASSWORD, "dbforge_dump_broken").await.unwrap());
 
         // Into an existing database, the transaction leaves it as it was.
         fresh("dbforge_dump_kept").await;
-        import(&local(), PASSWORD, "dbforge_dump_kept", &file, &CancellationToken::new(), |_| {}).await.unwrap_err();
+        import(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_kept",
+            &file,
+            Run { tool: &psql().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert!(postgres::database_exists(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap());
         let url = "postgres://postgres:dbforge@127.0.0.1:55432/dbforge_dump_kept";
         let mut conn = PgConnection::connect(url).await.unwrap();
@@ -423,8 +576,15 @@ mod tests {
         assert_eq!(tables, 0);
         conn.close().await.unwrap();
 
-        let error =
-            import(&local(), PASSWORD, "x", &dir.path().join("none.sql"), &CancellationToken::new(), |_| {}).await;
+        let error = import(
+            &local(),
+            PASSWORD,
+            "x",
+            &dir.path().join("none.sql"),
+            Run { tool: &psql().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await;
         assert!(error.unwrap_err().to_string().starts_with("There's no file at"));
         postgres::drop_database(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap();
     }
@@ -434,10 +594,18 @@ mod tests {
     async fn a_wrong_password_reads_as_libpq_says_and_leaves_no_file() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("x.sql");
-        let error = export(&local(), Some("wrong"), "shop", &file, &ALL, &CancellationToken::new(), |_| {})
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = export(
+            &local(),
+            Some("wrong"),
+            "shop",
+            &file,
+            &ALL,
+            Run { tool: &pg_dump().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("password authentication failed"), "{error}");
         assert!(!file.exists());
     }
@@ -448,14 +616,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("kept.sql");
         std::fs::write(&file, "-- an older dump").unwrap();
-        export(&local(), Some("wrong"), "shop", &file, &ALL, &CancellationToken::new(), |_| {}).await.unwrap_err();
+        export(
+            &local(),
+            Some("wrong"),
+            "shop",
+            &file,
+            &ALL,
+            Run { tool: &pg_dump().await, cancel: &CancellationToken::new() },
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "-- an older dump");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no partial file is left");
 
         // Stopped before pg_dump even started.
         let stopped = CancellationToken::new();
         stopped.cancel();
-        let error = export(&local(), PASSWORD, "shop", &file, &ALL, &stopped, |_| {}).await.unwrap_err();
+        let error =
+            export(&local(), PASSWORD, "shop", &file, &ALL, Run { tool: &pg_dump().await, cancel: &stopped }, |_| {})
+                .await
+                .unwrap_err();
         assert_eq!(error.to_string(), "Cancelled.");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "-- an older dump");
     }
@@ -472,7 +653,9 @@ mod tests {
             stop.cancel();
         });
         let started = Instant::now();
-        let error = import(&local(), PASSWORD, database, &file, &cancel, |_| {}).await.unwrap_err();
+        let error = import(&local(), PASSWORD, database, &file, Run { tool: &psql().await, cancel: &cancel }, |_| {})
+            .await
+            .unwrap_err();
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "the cancel stopped the sleep");
         error
     }
@@ -511,7 +694,16 @@ mod tests {
         std::fs::write(&file, "SELECT 1;").unwrap();
         let stopped = CancellationToken::new();
         stopped.cancel();
-        let error = import(&local(), PASSWORD, "dbforge_dump_never", &file, &stopped, |_| {}).await.unwrap_err();
+        let error = import(
+            &local(),
+            PASSWORD,
+            "dbforge_dump_never",
+            &file,
+            Run { tool: &psql().await, cancel: &stopped },
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.to_string(), "Cancelled.");
         assert!(!postgres::database_exists(&local(), PASSWORD, "dbforge_dump_never").await.unwrap());
     }
