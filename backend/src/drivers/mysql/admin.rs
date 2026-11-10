@@ -1,5 +1,6 @@
 //! Databases, roles and users created from a connection's menu.
 
+use sqlx::mysql::MySqlConnection;
 use sqlx::{AssertSqlSafe, Connection as _};
 
 use super::{connect, quote_ident};
@@ -8,25 +9,44 @@ use crate::drivers::{NewObject, or_default};
 use crate::error::Result;
 
 /// Creates `object`. Account names and passwords are quoted by the server
-/// (`QUOTE`), which knows whether backslashes escape.
+/// (`QUOTE`), which escapes quotes with a backslash.
 pub async fn create_object(connection: &Connection, password: Option<&str>, object: &NewObject) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;
+    create_on(&mut conn, object).await?;
+    conn.close().await?;
+    Ok(())
+}
+
+async fn create_on(conn: &mut MySqlConnection, object: &NewObject) -> Result<()> {
+    backslashes_escape(conn).await?;
     let statement: String = match object {
         NewObject::Database { name, .. } => format!("CREATE DATABASE {}", quote_ident(name)),
         NewObject::Role { name, .. } => {
-            sqlx::query_scalar("SELECT CONCAT('CREATE ROLE ', QUOTE(?))").bind(name).fetch_one(&mut conn).await?
+            sqlx::query_scalar("SELECT CONCAT('CREATE ROLE ', QUOTE(?))").bind(name).fetch_one(&mut *conn).await?
         }
         NewObject::User { name, password: secret, host, .. } => {
             sqlx::query_scalar("SELECT CONCAT('CREATE USER ', QUOTE(?), '@', QUOTE(?), ' IDENTIFIED BY ', QUOTE(?))")
                 .bind(name)
                 .bind(or_default(host, "%"))
                 .bind(secret)
-                .fetch_one(&mut conn)
+                .fetch_one(&mut *conn)
                 .await?
         }
     };
-    sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut conn).await?;
-    conn.close().await?;
+    sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut *conn).await?;
+    Ok(())
+}
+
+/// `QUOTE` writes `'` as `\'`, which only escapes while backslashes do:
+/// a server running with NO_BACKSLASH_ESCAPES would end the literal there.
+/// This session drops that mode and keeps the others.
+async fn backslashes_escape(conn: &mut MySqlConnection) -> Result<()> {
+    let modes: String = sqlx::query_scalar("SELECT @@SESSION.sql_mode").fetch_one(&mut *conn).await?;
+    if modes.split(',').any(|mode| mode.eq_ignore_ascii_case("NO_BACKSLASH_ESCAPES")) {
+        let kept: Vec<&str> =
+            modes.split(',').filter(|mode| !mode.eq_ignore_ascii_case("NO_BACKSLASH_ESCAPES")).collect();
+        sqlx::query("SET SESSION sql_mode = ?").bind(kept.join(",")).execute(&mut *conn).await?;
+    }
     Ok(())
 }
 
@@ -80,6 +100,41 @@ mod tests {
         let again = new(user).await.unwrap_err();
         assert!(again.to_string().contains("CREATE USER failed"), "{again}");
         run(&server, cleanup).await;
+    }
+
+    /// With NO_BACKSLASH_ESCAPES a backslash is an ordinary character, so a
+    /// quote escaped as `\'` would end the literal.
+    async fn quotes_hold_without_backslash_escapes(server: Connection) {
+        let cleanup = "DROP DATABASE IF EXISTS admin_injected; DROP USER IF EXISTS 'admin_nbe'@'%'";
+        run(&server, cleanup).await;
+        let mut conn = connect(&server, PASSWORD, None).await.unwrap();
+        sqlx::raw_sql("SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',NO_BACKSLASH_ESCAPES')")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let secret = "'; CREATE DATABASE admin_injected; -- \\ it's";
+        let user = NewObject::User { name: "admin_nbe".into(), password: secret.into(), host: None, database: None };
+        create_on(&mut conn, &user).await.unwrap();
+
+        let schemata = "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?";
+        assert_eq!(count(&server, schemata, "admin_injected").await, 0);
+        let mut as_user = server.clone();
+        as_user.username = "admin_nbe".into();
+        as_user.database = String::new();
+        connect(&as_user, Some(secret), None).await.unwrap();
+        run(&server, cleanup).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn mysql_quotes_hold_without_backslash_escapes() {
+        quotes_hold_without_backslash_escapes(local()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MariaDB on port 53307"]
+    async fn mariadb_quotes_hold_without_backslash_escapes() {
+        quotes_hold_without_backslash_escapes(mariadb()).await;
     }
 
     #[tokio::test]
