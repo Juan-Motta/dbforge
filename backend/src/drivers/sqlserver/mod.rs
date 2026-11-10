@@ -436,12 +436,6 @@ async fn read_results(client: &mut Client, sql: &str, row_limit: usize) -> Resul
     Ok(results)
 }
 
-/// Wakes the session's running query so it cancels itself. Harmless when idle:
-/// nothing is waiting, and nothing is kept for the next run.
-pub fn cancel(canceller: &Notify) {
-    canceller.notify_waiters();
-}
-
 /// The type name of a result column, as far as the protocol tells it.
 fn column_type(column_type: ColumnType) -> &'static str {
     match column_type {
@@ -737,12 +731,12 @@ pub(super) mod tests {
         let mut session = open_session(&connection, PASSWORD, None).await.unwrap();
         let canceller = session.canceller();
         // Harmless while idle, and not remembered for the next run.
-        cancel(&canceller);
+        canceller.notify_waiters();
 
         let started = Instant::now();
         let stop = async {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            cancel(&canceller);
+            canceller.notify_waiters();
         };
         let (outcome, ()) = tokio::join!(session.run("WAITFOR DELAY '00:00:20'", 10), stop);
         assert!(outcome.unwrap_err().to_string().starts_with("Query cancelled."));

@@ -605,6 +605,11 @@ pub async fn explain(
     }
 }
 
+/// The longest a read-only statement runs. PostgreSQL and MySQL stop it on
+/// the server after this, so a dropped caller leaves nothing running there;
+/// the other engines rely on the caller giving up after it.
+pub const READ_ONLY_TIME_LIMIT: Duration = Duration::from_secs(60);
+
 /// Runs one statement that may only read, in the engine's language (SQL,
 /// mongosh, a redis-cli line, Cosmos SQL), on a fresh connection that is
 /// closed afterwards. Anything that could change data is refused or fails.
@@ -612,10 +617,6 @@ pub async fn explain(
 /// Each engine enforces it as far as its server allows; its `read_only` module
 /// says how, and what it can't prevent. Only connecting has a time limit, as
 /// for the console.
-/// The longest a read-only statement runs: the server stops it after this,
-/// so a dropped caller leaves nothing running.
-pub const READ_ONLY_TIME_LIMIT: Duration = Duration::from_secs(60);
-
 pub async fn run_read_only(
     connection: &Connection,
     password: Option<&str>,
@@ -653,8 +654,9 @@ pub async fn cancel(
         match target {
             CancelTarget::Postgres { pid } => postgres::cancel(connection, password, database, pid).await,
             CancelTarget::Mysql { id } => mysql::cancel(connection, password, id).await,
+            // Harmless when idle: nothing is waiting, and nothing is kept for the next run.
             CancelTarget::Signal(canceller) => {
-                sqlserver::cancel(&canceller);
+                canceller.notify_waiters();
                 Ok(())
             }
             CancelTarget::Mongodb { tag } => mongodb::cancel(connection, password, &tag).await,
