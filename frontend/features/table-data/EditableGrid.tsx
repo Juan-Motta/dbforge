@@ -18,6 +18,7 @@ import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
 import { messages } from './messages'
 import { filtersByValue, rowAsInsert, rowAsJson, valueCondition } from './cellActions'
+import { modeOf, rowsAsTsv, type SelectMode } from './rowSelection'
 import { ChoiceEditor } from './ChoiceEditor'
 import { choicesOf } from './choices'
 import { formatTemporal, temporalKindOf, temporalOf } from './temporal'
@@ -37,8 +38,11 @@ interface EditableGridProps {
   /** False for tables without a primary key: rows can't be identified to change them. */
   editable: boolean
   selected: Set<string>
-  /** Click selects a row; ⌘/Ctrl-click adds or removes it. Keys are `rowKey()`s, or `new:<id>`. */
-  onSelect: (id: string, additive: boolean) => void
+  /**
+   * Picks rows: a click alone, ⌘/Ctrl-click adds or removes, Shift-click or a
+   * drag over the row numbers selects a block. Keys are `rowKey()`s, or `new:<id>`.
+   */
+  onSelect: (id: string, mode: SelectMode) => void
   onEditCell: (row: number, column: number, value: CellValue) => void
   onEditNewCell: (id: number, column: number, value: Value) => void
   /** Puts a column of a new row back to its DEFAULT. */
@@ -166,6 +170,39 @@ export function EditableGrid(props: EditableGridProps) {
     else props.onEditNewCell(at.newRow, column, value)
   }
 
+  /** The selection's key of a cell's row: its primary key, or `new:<id>`. */
+  const rowIdOf = (at: Editing) => ('row' in at ? rowKey(keyOf(rows[at.row], columns)) : `new:${at.newRow}`)
+
+  /** The selected rows' values as they stand (edits included), in the grid's order. */
+  const selectedRows = (): Value[][] => {
+    const ids = [
+      ...edits.inserts.map((row) => ({ select: `new:${row.id}`, cell: `new:${row.id}` })),
+      ...rows.map((row, r) => ({ select: rowKey(keyOf(row, columns)), cell: `row:${r}` })),
+    ].filter(({ select }) => selected.has(select))
+    return ids.map(({ cell }) =>
+      columns.map((_, c) => cellAt(edits, rows, columns, { row: cell, column: c })?.value ?? null),
+    )
+  }
+
+  // A drag over the row numbers selects a block; it ends wherever the button is let go.
+  const dragging = useRef(false)
+  useEffect(() => {
+    const stop = () => {
+      dragging.current = false
+    }
+    window.addEventListener('pointerup', stop)
+    return () => window.removeEventListener('pointerup', stop)
+  }, [])
+  const rowNumberProps = (id: string) => ({
+    onPointerDown: (event: PointerEvent) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      dragging.current = true
+      onSelect(id, modeOf(event))
+    },
+    onPointerEnter: () => dragging.current && onSelect(id, 'range'),
+  })
+
   /** A cell's text for the clipboard: its value, or NULL or DEFAULT spelled out. */
   const cellText = (cell: Cell) => {
     const value = cellAt(edits, rows, columns, cell)
@@ -201,10 +238,42 @@ export function EditableGrid(props: EditableGridProps) {
     const write = (text: string) => void navigator.clipboard.writeText(text)
     const { dialect, table } = props
 
+    // Several selected rows, this one among them: a change reaches them all.
+    const across = selected.size > 1 && selected.has(rowIdOf(at)) ? selected.size : 0
+    const forAll = (label: string) => (across ? m.acrossRows(label, across) : label)
+    const copySelection: MenuItem[] = across
+      ? [
+          { label: m.copySelectedRows(across), onSelect: () => write(rowsAsTsv(selectedRows())) },
+          {
+            label: m.copySelectedJson(across),
+            onSelect: () =>
+              write(
+                `[${selectedRows()
+                  .map((values) => rowAsJson(names, values))
+                  .join(',\n')}]`,
+              ),
+          },
+          ...(dialect && table && RELATIONAL_DIALECTS.includes(dialect)
+            ? [
+                {
+                  label: m.copySelectedInsert(across),
+                  onSelect: () =>
+                    write(
+                      selectedRows()
+                        .map((values) => rowAsInsert(dialect, table, names, values))
+                        .join('\n'),
+                    ),
+                },
+              ]
+            : []),
+        ]
+      : []
+
     const copy: MenuItem = {
       label: m.copyMenu,
       icon: 'duplicate',
       items: [
+        ...copySelection,
         {
           label: m.copyValue,
           onSelect: () => {
@@ -267,7 +336,7 @@ export function EditableGrid(props: EditableGridProps) {
         formatTemporal(temporalOf(new Date()), temporal!, /datetimeoffset/i.test(dataType)),
       )
     const set: MenuItem = {
-      label: m.setMenu,
+      label: forAll(m.setMenu),
       icon: 'edit',
       items: [
         ...((info?.nullable ?? true) ? [{ label: 'NULL', onSelect: () => setValue(at, column, null) }] : []),
@@ -305,9 +374,9 @@ export function EditableGrid(props: EditableGridProps) {
         : []
 
     return [
-      { label: m.edit, onSelect: () => setEditing({ at, column }) },
+      { label: forAll(m.edit), onSelect: () => setEditing({ at, column }) },
       copy,
-      { label: m.paste, onSelect: () => paste(at, column) },
+      { label: forAll(m.paste), onSelect: () => paste(at, column) },
       ...(set.items!.length > 0 ? [set] : []),
       ...filter,
       ...row,
@@ -404,7 +473,12 @@ export function EditableGrid(props: EditableGridProps) {
         className={classes.filter(Boolean).join(' ') || undefined}
         style={sized[column]}
         title={value ?? undefined}
-        onClick={() => onActivate({ row: id, column })}
+        onClick={(event) => {
+          onActivate({ row: id, column })
+          // Shift or ⌘/Ctrl on a cell picks rows too, where rows can be told apart.
+          const mode = modeOf(event)
+          if (mode !== 'single' && (editable || !('row' in at))) onSelect(rowIdOf(at), mode)
+        }}
         onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
         onContextMenu={(event: MouseEvent) => {
           event.preventDefault()
@@ -434,7 +508,11 @@ export function EditableGrid(props: EditableGridProps) {
           if (event.target instanceof HTMLInputElement) return
           const text = active && cellText(active)
           const command = event.metaKey || event.ctrlKey
-          if (command && event.key === 'c' && text !== null) {
+          if (command && event.key === 'c' && selected.size > 1) {
+            // Several rows selected: they go to the clipboard as a spreadsheet's rows.
+            event.preventDefault()
+            void navigator.clipboard.writeText(rowsAsTsv(selectedRows()))
+          } else if (command && event.key === 'c' && text !== null) {
             event.preventDefault()
             void navigator.clipboard.writeText(text)
           } else if (command && event.key === 'v' && active && pasteable(active)) {
@@ -498,10 +576,7 @@ export function EditableGrid(props: EditableGridProps) {
             const id = `new:${row.id}`
             return (
               <tr key={id} className={styles.inserted} aria-selected={selected.has(id)}>
-                <td
-                  className={styles.rowNumber}
-                  onClick={(event) => onSelect(id, event.metaKey || event.ctrlKey)}
-                >
+                <td className={styles.rowNumber} {...rowNumberProps(id)}>
                   +
                 </td>
                 {columns.map((column, c) =>
@@ -524,10 +599,7 @@ export function EditableGrid(props: EditableGridProps) {
                 className={deleted ? styles.deleted : undefined}
                 aria-selected={selected.has(id)}
               >
-                <td
-                  className={styles.rowNumber}
-                  onClick={editable ? (event) => onSelect(id, event.metaKey || event.ctrlKey) : undefined}
-                >
+                <td className={styles.rowNumber} {...(editable ? rowNumberProps(id) : {})}>
                   {deleted ? '−' : firstRowNumber + r}
                 </td>
                 {columns.map((column, c) =>

@@ -20,10 +20,12 @@ import {
   cellAt,
   counts,
   addRowWith,
+  DEFAULT,
   editCell,
   editNewCell,
   editNewDocument,
   hasEdits,
+  isDefault,
   keyOf,
   NO_EDITS,
   removeNewDocument,
@@ -34,6 +36,7 @@ import {
   toggleDelete,
   unsetNewCell,
   type Cell,
+  type CellValue,
   type Edits,
   type RowChange,
 } from './edits'
@@ -41,6 +44,7 @@ import { DocumentList, NEW_DOCUMENT, type LoadedDocument } from './DocumentList'
 import { CellInspector, type InspectedCell } from './CellInspector'
 import { FilterBar } from './FilterBar'
 import { narrowedBy, sortedBy } from './cellActions'
+import { NO_SELECTION, selectRows, type RowSelection, type SelectMode } from './rowSelection'
 import { isFiltered, sortBy, sortOf, type RowFilter } from './rowFilter'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES, useRowsPage } from './useRowsPage'
 import styles from './TableView.module.css'
@@ -105,7 +109,8 @@ export function TableView({
     pageSize,
   )
   const [edits, setEdits] = useState<Edits>(NO_EDITS)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selection, setSelection] = useState<RowSelection>(NO_SELECTION)
+  const selected = selection.selected
   const [status, setStatus] = useState<Status>({ state: 'idle' })
   const [preview, setPreview] = useState<string[] | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -139,14 +144,29 @@ export function TableView({
     if (status.state !== 'idle') setStatus({ state: 'idle' })
   }
 
-  const select = (id: string, additive: boolean) =>
-    setSelected((current) => {
-      if (!additive) return current.size === 1 && current.has(id) ? new Set() : new Set([id])
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  /** The rows as the grid shows them, new ones first: the order a Shift-click or a drag selects in. */
+  const rowOrder = [
+    ...edits.inserts.map((row) => `new:${row.id}`),
+    ...(page?.rows ?? []).map((row) => rowKey(keyOf(row, page?.columns ?? []))),
+  ]
+  const select = (id: string, mode: SelectMode) =>
+    setSelection((current) => selectRows(current, id, mode, rowOrder))
+
+  /** A change to row `id` reaches every selected row when `id` is one of several selected. */
+  const targetsOf = (id: string) => (selected.size > 1 && selected.has(id) ? [...selected] : [id])
+
+  /** Puts `value` in column `c` of each row in `ids`; rows marked for deletion keep theirs. */
+  const editRows = (current: Edits, ids: string[], c: number, value: CellValue | null): Edits =>
+    ids.reduce((acc, id) => {
+      const name = columns[c].name
+      if (id.startsWith('new:')) {
+        const newId = Number(id.slice(4))
+        return isDefault(value) ? unsetNewCell(acc, newId, name) : editNewCell(acc, newId, name, value)
+      }
+      if (acc.deletes.has(id)) return acc
+      const row = rows.find((r) => rowKey(keyOf(r, columns)) === id)
+      return row ? editCell(acc, keyOf(row, columns), name, value, row[c]) : acc
+    }, current)
 
   /** Marks the selected rows for deletion (or unmarks them); new rows are simply removed. */
   const deleteSelected = () => {
@@ -158,7 +178,7 @@ export function TableView({
         return row ? toggleDelete(acc, keyOf(row, columns)) : acc
       }, current),
     )
-    setSelected(new Set())
+    setSelection(NO_SELECTION)
   }
 
   const apply = async () => {
@@ -167,7 +187,7 @@ export function TableView({
     try {
       const summary = await tableDataApi.applyChanges(connectionId, table, toChanges(edits))
       setEdits(NO_EDITS)
-      setSelected(new Set())
+      setSelection(NO_SELECTION)
       setEditingDocument(null)
       setStatus({ state: 'applied', summary })
       reload()
@@ -192,7 +212,7 @@ export function TableView({
 
   const discard = () => {
     setEdits(NO_EDITS)
-    setSelected(new Set())
+    setSelection(NO_SELECTION)
     setEditingDocument(null)
     setStatus({ state: 'idle' })
   }
@@ -232,14 +252,10 @@ export function TableView({
   /** The inspector's value, as a pending edit of the picked cell. */
   const saveInspected = (value: string | null) => {
     if (!picked) return
-    const name = columns[picked.column].name
-    if (picked.row.startsWith('new:')) {
-      const id = Number(picked.row.slice(4))
-      change((current) => editNewCell(current, id, name, value))
-    } else {
-      const row = rows[Number(picked.row.slice(4))]
-      change((current) => editCell(current, keyOf(row, columns), name, value, row[picked.column]))
-    }
+    const id = picked.row.startsWith('new:')
+      ? picked.row
+      : rowKey(keyOf(rows[Number(picked.row.slice(4))], columns))
+    change((current) => editRows(current, targetsOf(id), picked.column, value))
   }
 
   /** A new document, open in its editor. */
@@ -326,7 +342,7 @@ export function TableView({
               firstNumber={offset + 1}
               locked={!editable ? noKey : applying ? m.applyingChanges : null}
               selected={selected}
-              onSelect={select}
+              onSelect={(id, additive) => select(id, additive ? 'toggle' : 'single')}
               editing={editingDocument}
               onEdit={setEditingDocument}
               check={check}
@@ -347,13 +363,13 @@ export function TableView({
                 selected={selected}
                 onSelect={select}
                 onEditCell={(r, c, value) =>
-                  change((current) =>
-                    editCell(current, keyOf(rows[r], columns), columns[c].name, value, rows[r][c]),
-                  )
+                  change((current) => editRows(current, targetsOf(rowKey(keyOf(rows[r], columns))), c, value))
                 }
-                onUnsetNewCell={(id, c) => change((current) => unsetNewCell(current, id, columns[c].name))}
+                onUnsetNewCell={(id, c) =>
+                  change((current) => editRows(current, targetsOf(`new:${id}`), c, DEFAULT))
+                }
                 onEditNewCell={(id, c, value) =>
-                  change((current) => editNewCell(current, id, columns[c].name, value))
+                  change((current) => editRows(current, targetsOf(`new:${id}`), c, value))
                 }
                 linkOf={(r, c) => {
                   const key = foreignKeys.find((k) => k.columns.includes(columns[c].name))
@@ -429,6 +445,7 @@ export function TableView({
           </span>
         )}
         {!pending && status.state === 'idle' && <span className={styles.summary}>{summary}</span>}
+        {selected.size > 1 && <Badge tone="info">{m.selectionHint(selected.size)}</Badge>}
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
           {loading

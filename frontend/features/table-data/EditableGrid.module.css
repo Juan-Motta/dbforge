@@ -129,6 +129,9 @@
 }
 
 .rowNumber {
+  /* Dragging over the numbers selects rows, not their text. */
+  -webkit-user-select: none;
+  user-select: none;
   position: sticky;
   left: 0;
   min-width: 48px;
