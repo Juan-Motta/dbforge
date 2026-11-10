@@ -253,19 +253,31 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_stopped_server_lets_its_port_go_at_once() {
+    async fn a_stopped_server_stops_answering_at_once() {
         install_crypto();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let cancel = CancellationToken::new();
-        let router = secured(|| Echo, Arc::new(RwLock::new("t".into())), port, cancel.child_token());
+        let token = "only-this-test-uses-this-token";
+        let router = secured(|| Echo, Arc::new(RwLock::new(token.into())), port, cancel.child_token());
         let shutdown = cancel.clone();
         let task = tauri::async_runtime::spawn(async move {
             let _ = axum::serve(listener, router).with_graceful_shutdown(shutdown.cancelled_owned()).await;
         });
 
         super::stop(Some(super::Running { cancel, task })).await;
-        TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await.expect("the port is free again");
+        // It no longer answers its token. (Checking the port itself would race the
+        // other tests, which take free ports at the same time and may get this one.)
+        let url = format!("http://127.0.0.1:{port}{PATH}");
+        let answer = reqwest::Client::new()
+            .post(&url)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream")
+            .body(INITIALIZE)
+            .send()
+            .await;
+        assert!(answer.is_err() || answer.unwrap().status() != 200, "the stopped server still answers");
     }
 
     #[tokio::test]

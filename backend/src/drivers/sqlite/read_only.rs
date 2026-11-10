@@ -7,7 +7,8 @@
 //! reading word are taken (anything else, including text the check can't
 //! read, such as a byte-order mark in front, is refused). Since SQLite runs
 //! every statement of a string, a script is refused too, which also keeps
-//! anything a statement sets up (an `ATTACH`, a `PRAGMA`) from outliving it.
+//! anything a statement sets up (an `ATTACH`) from outliving it. `PRAGMA` is
+//! refused: some change the whole process's SQLite, not just this connection.
 
 use std::time::Instant;
 
@@ -29,7 +30,10 @@ pub async fn run_read_only(connection: &Connection, statement: &str, row_limit: 
 }
 
 /// The words a statement that only reads starts with.
-const READING: [&str; 5] = ["select", "with", "values", "explain", "pragma"];
+/// `PRAGMA` isn't one: some change state for the whole process, which outlives
+/// the connection (`hard_heap_limit = 1` breaks every SQLite connection the app
+/// opens). The reading ones are table-valued functions: `SELECT * FROM pragma_table_info('t')`.
+const READING: [&str; 4] = ["select", "with", "values", "explain"];
 
 /// Takes one statement starting with a reading word; refuses scripts and
 /// anything else, `VACUUM` among them.
@@ -40,7 +44,7 @@ fn check(statement: &str) -> Result<()> {
     let first = first_word(statement);
     if !READING.iter().any(|word| first.eq_ignore_ascii_case(word)) {
         return Err(AppError::Invalid(
-            "Read-only queries on SQLite start with SELECT, WITH, VALUES, EXPLAIN or PRAGMA.".into(),
+            "Read-only queries on SQLite start with SELECT, WITH, VALUES or EXPLAIN. For a PRAGMA that reads, use its function: SELECT * FROM pragma_table_info('t').".into(),
         ));
     }
     Ok(())
@@ -81,7 +85,10 @@ mod tests {
         for write in ["ATTACH 'x.db' AS x", "INSERT INTO t VALUES (1)", "REINDEX", "ANALYZE"] {
             assert!(check(write).is_err(), "{write}");
         }
-        for read in ["with x as (select 1) select * from x", "VALUES (1)", "PRAGMA table_info(t)"] {
+        for setting in ["PRAGMA hard_heap_limit = 1", "PRAGMA temp_store_directory = '/tmp'", "pragma table_info(t)"] {
+            assert!(check(setting).is_err(), "{setting}");
+        }
+        for read in ["with x as (select 1) select * from x", "VALUES (1)", "SELECT * FROM pragma_table_info('t')"] {
             assert!(check(read).is_ok(), "{read}");
         }
     }
@@ -115,7 +122,7 @@ mod tests {
         }
         let after = run_read_only(&connection, "SELECT count(*), (SELECT count(*) FROM sqlite_master) FROM items", 9);
         assert_eq!(after.await.unwrap().results[0].rows, [vec![Some("2".into()), Some("1".into())]]);
-        let version = run_read_only(&connection, "PRAGMA user_version", 9).await.unwrap();
+        let version = run_read_only(&connection, "SELECT user_version FROM pragma_user_version", 9).await.unwrap();
         assert_eq!(version.results[0].rows, [vec![Some("0".into())]]);
         assert!(!copy.exists());
         assert!(!dir.path().join("new.db").exists());
