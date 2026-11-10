@@ -9,6 +9,7 @@
 mod admin;
 mod edit;
 mod explain;
+mod logged;
 mod session;
 mod shell;
 mod structure;
@@ -25,7 +26,8 @@ use std::time::Duration;
 use futures_util::TryStreamExt;
 use mongodb::bson::{Bson, Document, doc};
 use mongodb::options::{ClientOptions, Credential, ServerAddress, Tls, TlsOptions};
-use mongodb::{Client, Database};
+
+use self::logged::{Find, LoggedClient, LoggedDatabase};
 
 use super::row_filter::RowFilter;
 use super::{Column, DbObject, ObjectKind, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout};
@@ -38,8 +40,8 @@ const SYSTEM_DATABASES: [&str; 3] = ["admin", "config", "local"];
 /// A client for the connection. Users authenticate against `admin`, where
 /// mongod's users usually live. Hosts saved as a whole `mongodb://` or
 /// `mongodb+srv://` URL, before the form split URLs into fields, still work.
-async fn connect(connection: &Connection, password: Option<&str>) -> Result<Client> {
-    Ok(Client::with_options(options(connection, password).await?)?)
+async fn connect(connection: &Connection, password: Option<&str>) -> Result<LoggedClient> {
+    Ok(LoggedClient::with_options(options(connection, password).await?)?)
 }
 
 async fn options(connection: &Connection, password: Option<&str>) -> Result<ClientOptions> {
@@ -90,10 +92,8 @@ fn is_uri(host: &str) -> bool {
 
 /// The database to use when none is named: the connection's, or the one in its
 /// connection string.
-fn default_database(connection: &Connection, client: &Client) -> Option<String> {
-    Some(connection.database.clone())
-        .filter(|d| !d.is_empty())
-        .or_else(|| client.default_database().map(|d| d.name().to_string()))
+fn default_database(connection: &Connection, client: &LoggedClient) -> Option<String> {
+    Some(connection.database.clone()).filter(|d| !d.is_empty()).or_else(|| client.default_database())
 }
 
 pub async fn server_version(connection: &Connection, password: Option<&str>) -> Result<String> {
@@ -120,11 +120,8 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
             let mut objects = Vec::new();
             for (name, is_view) in collections(&db).await? {
                 // The count kept in collection metadata: instant, like reltuples.
-                let row_estimate = if is_view {
-                    None
-                } else {
-                    Some(db.collection::<Document>(&name).estimated_document_count().await? as i64)
-                };
+                let row_estimate =
+                    if is_view { None } else { Some(db.collection(&name).estimated_document_count().await? as i64) };
                 let kind = if is_view { ObjectKind::View } else { ObjectKind::Table };
                 objects.push(DbObject { name, kind, row_estimate });
             }
@@ -137,11 +134,9 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
 }
 
 /// Collections and views by name, without the server's own `system.*` ones.
-async fn collections(db: &Database) -> Result<Vec<(String, bool)>> {
+async fn collections(db: &LoggedDatabase) -> Result<Vec<(String, bool)>> {
     let mut specs: Vec<(String, bool)> = db
         .list_collections()
-        .await?
-        .try_collect::<Vec<_>>()
         .await?
         .into_iter()
         .filter(|spec| !spec.name.starts_with("system."))
@@ -187,17 +182,10 @@ pub async fn fetch_rows(
 ) -> Result<RowsPage> {
     let (query, sort) = documents_of(filter)?;
     let client = connect(connection, password).await?;
-    let mut documents: Vec<Document> = client
-        .database(&table.database)
-        .collection::<Document>(&table.name)
-        .find(query)
-        .sort(sort)
-        .skip(offset)
-        // One extra document tells whether another page exists.
-        .limit(i64::from(limit) + 1)
-        .await?
-        .try_collect()
-        .await?;
+    // One extra document tells whether another page exists.
+    let find = Find::new(query).sort(sort).skip(offset).limit(i64::from(limit) + 1);
+    let mut documents: Vec<Document> =
+        client.database(&table.database).collection(&table.name).find(find).await?.try_collect().await?;
     client.shutdown().await;
 
     let has_more = documents.len() > limit as usize;
@@ -219,7 +207,7 @@ pub async fn stream_table(
 ) -> Result<()> {
     let (query, sort) = documents_of(filter)?;
     let client = with_timeout(connect(connection, password)).await?;
-    let collection = client.database(&table.database).collection::<Document>(&table.name);
+    let collection = client.database(&table.database).collection(&table.name);
     let pipeline = vec![
         doc! { "$match": query.clone() },
         doc! { "$project": { "fields": { "$objectToArray": "$$ROOT" } } },
@@ -234,11 +222,11 @@ pub async fn stream_table(
         .iter()
         .filter_map(|group| group.get_str("_id").ok().map(String::from))
         .collect();
-    let first = collection.find_one(query.clone()).sort(sort.clone()).await?;
+    let first = collection.find(Find::new(query.clone()).sort(sort.clone()).limit(1)).await?.try_next().await?;
     let columns = ordered_columns(first.iter(), names);
     sink.columns(&columns)?;
 
-    let mut cursor = collection.find(query).sort(sort).await?;
+    let mut cursor = collection.find(Find::new(query).sort(sort)).await?;
     while let Some(document) = cursor.try_next().await? {
         sink.row(&row(&document, &columns))?;
     }
@@ -379,14 +367,16 @@ pub fn literal(value: &Bson) -> String {
             Err(_) => format!("new Date({})", date.timestamp_millis()),
         },
         Bson::Array(items) => format!("[{}]", items.iter().map(literal).collect::<Vec<_>>().join(", ")),
-        Bson::Document(document) => {
-            let fields: Vec<String> =
-                document.iter().map(|(key, value)| format!("{}: {}", quote(key), literal(value))).collect();
-            format!("{{{}}}", fields.join(", "))
-        }
+        Bson::Document(document) => object_literal(document.iter().map(|(key, value)| (key.as_str(), literal(value)))),
         // The rest has no short mongosh form worth reading; Extended JSON says it exactly.
         other => other.clone().into_relaxed_extjson().to_string(),
     }
+}
+
+/// A document in [`literal`]'s syntax from its fields, each value already written.
+fn object_literal<'a>(fields: impl Iterator<Item = (&'a str, String)>) -> String {
+    let fields: Vec<String> = fields.map(|(key, value)| format!("{}: {value}", serde_json::Value::from(key))).collect();
+    format!("{{{}}}", fields.join(", "))
 }
 
 /// A document as the JSON view shows it: [`literal`]'s syntax, which mongosh
@@ -446,7 +436,7 @@ pub(super) mod tests {
     /// A fresh database named `name` with `documents` in each collection.
     pub async fn database(name: &str, collections: &[(&str, Vec<Document>)]) -> Connection {
         let client = connect(&local(), PASSWORD).await.unwrap();
-        let db = client.database(name);
+        let db = client.unlogged().database(name);
         db.drop().await.unwrap();
         for (collection, documents) in collections {
             db.create_collection(*collection).await.unwrap();
@@ -494,6 +484,7 @@ pub(super) mod tests {
             database("dbforge_list", &[("items", vec![doc! { "a": 1 }, doc! { "a": 2 }]), ("empty", vec![])]).await;
         let client = connect(&connection, PASSWORD).await.unwrap();
         client
+            .unlogged()
             .database("dbforge_list")
             .create_collection("big")
             .view_on("items".to_string())

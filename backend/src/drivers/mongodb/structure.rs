@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use futures_util::TryStreamExt;
 use mongodb::bson::{Bson, Document, doc};
 
+use super::logged::LoggedClient;
 use super::{connect, literal, ordered_columns, type_name};
 use crate::connections::model::Connection;
 use crate::drivers::{ColumnInfo, IndexInfo, ObjectKind, TableRef, TableStructure};
@@ -27,7 +28,7 @@ pub async fn table_structure(
     result
 }
 
-async fn read(client: &mongodb::Client, table: &TableRef) -> Result<TableStructure> {
+async fn read(client: &LoggedClient, table: &TableRef) -> Result<TableStructure> {
     let database = client.database(&table.database);
     // The raw command keeps the options exactly as the server stores them.
     let reply = database.run_command(doc! { "listCollections": 1, "filter": { "name": &table.name } }).await?;
@@ -39,7 +40,7 @@ async fn read(client: &mongodb::Client, table: &TableRef) -> Result<TableStructu
         .ok_or_else(|| AppError::Invalid(format!("Collection {} not found", table.name)))?;
     let view = info.get_str("type") == Ok("view");
     let options = info.get_document("options").cloned().unwrap_or_default();
-    let collection = database.collection::<Document>(&table.name);
+    let collection = database.collection(&table.name);
 
     let sample: Vec<Document> =
         collection.aggregate([doc! { "$sample": { "size": SAMPLE } }]).await?.try_collect().await?;
@@ -211,7 +212,7 @@ mod tests {
         )
         .await;
         let client = connect(&connection, PASSWORD).await.unwrap();
-        let db = client.database("dbforge_structure");
+        let db = client.unlogged().database("dbforge_structure");
         db.run_command(doc! { "collMod": "people", "validator": { "name": { "$type": "string" } } }).await.unwrap();
         db.run_command(doc! {
             "createIndexes": "people",

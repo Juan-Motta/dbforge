@@ -46,7 +46,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a local MongoDB on port 57017"]
     async fn creates_a_database_a_role_and_a_user_that_can_sign_in() {
-        let client = connect(&local(), PASSWORD).await.unwrap();
+        let logged = connect(&local(), PASSWORD).await.unwrap();
+        let client = logged.unlogged();
         let admin = client.database("admin");
         client.database("admin_test_db").drop().await.unwrap();
         let _ = admin.run_command(doc! { "dropRole": "admin_test_role" }).await;
@@ -73,7 +74,8 @@ mod tests {
         let mut as_user = local();
         as_user.username = "admin_test_user".into();
         let signed_in = connect(&as_user, Some("it's \\ secret")).await.unwrap();
-        let status: Document = signed_in.database("admin").run_command(doc! { "connectionStatus": 1 }).await.unwrap();
+        let status: Document =
+            signed_in.unlogged().database("admin").run_command(doc! { "connectionStatus": 1 }).await.unwrap();
         let users = status.get_document("authInfo").unwrap().get_array("authenticatedUsers").unwrap();
         assert_eq!(users.len(), 1);
 

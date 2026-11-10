@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{Bson, Decimal128, Document, doc};
-use mongodb::{Client, ClientSession, Collection};
 
+use super::logged::{Find, LoggedClient, LoggedCollection, LoggedSession, Update, Write};
 use super::shell::{date, parse_value};
 use super::{columns_of, connect, literal, type_name};
 use crate::connections::model::Connection;
@@ -26,14 +26,6 @@ use crate::error::{AppError, Result};
 
 /// Documents read to learn the type of a field a document doesn't have.
 const SAMPLE: i64 = 100;
-
-/// One change, ready to send.
-enum Write {
-    Update { id: Bson, set: Document, unset: Document },
-    Replace { id: Bson, document: Document },
-    Insert(Document),
-    Delete { id: Bson },
-}
 
 pub async fn apply_changes(
     connection: &Connection,
@@ -47,6 +39,7 @@ pub async fn apply_changes(
     result
 }
 
+/// The writes [`apply_changes`] would send, as mongosh runs them.
 pub async fn preview_changes(
     connection: &Connection,
     password: Option<&str>,
@@ -54,42 +47,17 @@ pub async fn preview_changes(
     changes: &[RowChange],
 ) -> Result<Vec<String>> {
     let client = connect(connection, password).await?;
-    let writes = prepare(&collection(&client, table), changes).await;
+    let writes = prepare(&client.database(&table.database).collection(&table.name), changes).await;
     client.shutdown().await;
-    let target = format!("db.getCollection({})", literal(&Bson::String(table.name.clone())));
-    Ok(writes?
-        .iter()
-        .map(|write| match write {
-            Write::Update { id, set, unset } => {
-                let mut update = Document::new();
-                if !set.is_empty() {
-                    update.insert("$set", set.clone());
-                }
-                if !unset.is_empty() {
-                    update.insert("$unset", unset.clone());
-                }
-                format!("{target}.updateOne({}, {});", literal(&id_filter(id).into()), literal(&update.into()))
-            }
-            Write::Replace { id, document } => format!(
-                "{target}.replaceOne({}, {});",
-                literal(&id_filter(id).into()),
-                literal(&document.clone().into())
-            ),
-            Write::Insert(document) => format!("{target}.insertOne({});", literal(&document.clone().into())),
-            Write::Delete { id } => format!("{target}.deleteOne({});", literal(&id_filter(id).into())),
-        })
-        .collect())
+    Ok(writes?.iter().map(|write| format!("{};", write.text(&table.name))).collect())
 }
 
-fn collection(client: &Client, table: &TableRef) -> Collection<Document> {
-    client.database(&table.database).collection(&table.name)
-}
-
-async fn apply(client: &Client, table: &TableRef, changes: &[RowChange]) -> Result<ApplySummary> {
-    let collection = collection(client, table);
+async fn apply(client: &LoggedClient, table: &TableRef, changes: &[RowChange]) -> Result<ApplySummary> {
+    let database = client.database(&table.database);
+    let collection = database.collection(&table.name);
     let writes = prepare(&collection, changes).await?;
 
-    let mut session = client.start_session().await?;
+    let mut session = database.start_session().await?;
     let transaction = supports_transactions(client).await?;
     if transaction {
         session.start_transaction().await?;
@@ -108,42 +76,17 @@ async fn apply(client: &Client, table: &TableRef, changes: &[RowChange]) -> Resu
     Ok(summarize(changes))
 }
 
-async fn send(collection: &Collection<Document>, session: &mut ClientSession, write: &Write) -> Result<()> {
-    let matched = match write {
-        Write::Update { id, set, unset } => {
-            let mut update = Document::new();
-            if !set.is_empty() {
-                update.insert("$set", set.clone());
-            }
-            if !unset.is_empty() {
-                update.insert("$unset", unset.clone());
-            }
-            if update.is_empty() {
-                return Ok(());
-            }
-            collection.update_one(id_filter(id), update).session(&mut *session).await?.matched_count
-        }
-        Write::Replace { id, document } => {
-            collection.replace_one(id_filter(id), document).session(&mut *session).await?.matched_count
-        }
-        Write::Insert(document) => {
-            collection.insert_one(document).session(&mut *session).await?;
-            1
-        }
-        Write::Delete { id } => collection.delete_one(id_filter(id)).session(&mut *session).await?.deleted_count,
-    };
-    if matched != 1 {
-        let id = match write {
-            Write::Update { id, .. } | Write::Replace { id, .. } | Write::Delete { id } => id,
-            Write::Insert(_) => unreachable!("inserts always count one"),
-        };
+/// Sends `write`, which must find exactly the one document it was prepared for.
+async fn send(collection: &LoggedCollection, session: &mut LoggedSession, write: &Write) -> Result<()> {
+    if session.write(collection, write).await?.matched != 1 {
+        let id = write.filter().and_then(|filter| filter.get("_id")).unwrap_or(&Bson::Null);
         return Err(changed_elsewhere(&format!("_id {}", literal(id))));
     }
     Ok(())
 }
 
 /// Replica set members and `mongos` routers run transactions; standalone servers can't.
-async fn supports_transactions(client: &Client) -> Result<bool> {
+async fn supports_transactions(client: &LoggedClient) -> Result<bool> {
     let hello = client.database("admin").run_command(doc! { "hello": 1 }).await?;
     Ok(hello.contains_key("setName") || hello.get_str("msg") == Ok("isdbgrid"))
 }
@@ -153,9 +96,9 @@ fn id_filter(id: &Bson) -> Document {
 }
 
 /// Finds every edited document and converts every value; nothing is written.
-async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Result<Vec<Write>> {
+async fn prepare(collection: &LoggedCollection, changes: &[RowChange]) -> Result<Vec<Write>> {
     let sample: Vec<Document> =
-        collection.find(doc! {}).sort(doc! { "_id": 1 }).limit(SAMPLE).await?.try_collect().await?;
+        collection.find(Find::new(doc! {}).sort(doc! { "_id": 1 }).limit(SAMPLE)).await?.try_collect().await?;
     let known: BTreeMap<String, String> = columns_of(&sample)
         .into_iter()
         .filter(|c| !matches!(c.data_type.as_str(), "mixed" | "null"))
@@ -164,7 +107,7 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
 
     let mut writes = Vec::new();
     for change in changes {
-        writes.push(match change {
+        writes.extend(match change {
             RowChange::Update { key, values } => {
                 let document = find(collection, key).await?;
                 let mut set = Document::new();
@@ -185,7 +128,18 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                         }
                     }
                 }
-                Write::Update { id: document.get("_id").cloned().unwrap_or(Bson::Null), set, unset }
+                let mut update = Document::new();
+                if !set.is_empty() {
+                    update.insert("$set", set);
+                }
+                if !unset.is_empty() {
+                    update.insert("$unset", unset);
+                }
+                // Nothing to change: nothing to send.
+                (!update.is_empty()).then(|| {
+                    let filter = id_filter(document.get("_id").unwrap_or(&Bson::Null));
+                    Write::UpdateOne(Update { filter, update: update.into(), upsert: false })
+                })
             }
             RowChange::Insert { values } => {
                 let mut document = Document::new();
@@ -197,11 +151,11 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                         document.insert(field, convert(field, text, known.get(field).map(String::as_str))?);
                     }
                 }
-                Write::Insert(document)
+                Some(Write::InsertOne(document))
             }
             RowChange::Delete { key } => {
                 let document = find(collection, key).await?;
-                Write::Delete { id: document.get("_id").cloned().unwrap_or(Bson::Null) }
+                Some(Write::DeleteOne(id_filter(document.get("_id").unwrap_or(&Bson::Null))))
             }
             RowChange::Replace { key, document } => {
                 let id = find(collection, key).await?.get("_id").cloned().unwrap_or(Bson::Null);
@@ -216,9 +170,9 @@ async fn prepare(collection: &Collection<Document>, changes: &[RowChange]) -> Re
                         with_id
                     }
                 };
-                Write::Replace { id, document }
+                Some(Write::ReplaceOne { filter: id_filter(&id), replacement: document, upsert: false })
             }
-            RowChange::InsertDocument { document } => Write::Insert(parse_document(document)?),
+            RowChange::InsertDocument { document } => Some(Write::InsertOne(parse_document(document)?)),
         });
     }
     Ok(writes)
@@ -240,7 +194,7 @@ fn parse_document(text: &str) -> Result<Document> {
 /// The document whose `_id` the grid showed as `key["_id"]`. The grid shows
 /// ids as text, so every value that reads back as that text is looked for, and
 /// exactly one document must match.
-async fn find(collection: &Collection<Document>, key: &BTreeMap<String, Option<String>>) -> Result<Document> {
+async fn find(collection: &LoggedCollection, key: &BTreeMap<String, Option<String>>) -> Result<Document> {
     let Some(Some(text)) = key.get("_id") else {
         return Err(AppError::Invalid("Documents are edited by _id, and this one has none.".into()));
     };
@@ -258,8 +212,7 @@ async fn find(collection: &Collection<Document>, key: &BTreeMap<String, Option<S
         candidates.push(Bson::DateTime(when));
     }
     let found: Vec<Document> = collection
-        .find(doc! { "_id": { "$in": candidates } })
-        .limit(2)
+        .find(Find::new(doc! { "_id": { "$in": candidates } }).limit(2))
         .await?
         .try_collect::<Vec<_>>()
         .await?
@@ -334,6 +287,7 @@ mod tests {
     async fn documents(connection: &Connection, name: &str) -> Vec<Document> {
         let client = connect(connection, PASSWORD).await.unwrap();
         let found = client
+            .unlogged()
             .database(name)
             .collection::<Document>("people")
             .find(doc! {})
@@ -380,6 +334,52 @@ mod tests {
         assert_eq!(found[1].get("score"), Some(&Bson::Double(2.0)));
         // A new document: known fields keep their type (`_id` is mixed, so it's read as a literal).
         assert_eq!(found[2], doc! { "_id": 4, "name": "42", "age": 7_i64, "extra": { "a": 1 } });
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn records_each_write_with_its_values_written_in() {
+        use crate::statement_log::store::tests::Collected;
+        use crate::statement_log::{self, Origin, StatementLog};
+
+        let connection = people("dbforge_edit_log").await;
+        let changes = vec![
+            RowChange::Update { key: map(&[("_id", Some(ID))]), values: map(&[("name", Some("it's Ann"))]) },
+            RowChange::Delete { key: map(&[("_id", Some("3"))]) },
+        ];
+        let log = StatementLog::new(50, Collected::default());
+        let target = table("dbforge_edit_log", "people");
+
+        statement_log::scoped(&log, "mongo", Origin::Edit, apply_changes(&connection, PASSWORD, &target, &changes))
+            .await
+            .unwrap();
+
+        let entries = log.entries();
+        let texts: Vec<_> = entries.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts[0], r#"db.getCollection("people").find({}).sort({"_id": 1}).limit(100)"#);
+        let writes: Vec<_> = entries
+            .iter()
+            .filter(|e| e.text.contains(".updateOne(") || e.text.contains(".deleteOne("))
+            .map(|e| (e.text.as_str(), e.database.as_deref(), e.rows))
+            .collect();
+        assert_eq!(
+            writes,
+            [
+                (
+                    r#"db.getCollection("people").updateOne({"_id": ObjectId("65a0f0f0f0f0f0f0f0f0f0f0")}, {"$set": {"name": "it's Ann"}})"#,
+                    Some("dbforge_edit_log"),
+                    Some(1)
+                ),
+                (r#"db.getCollection("people").deleteOne({"_id": "3"})"#, Some("dbforge_edit_log"), Some(1)),
+            ]
+        );
+        // The documents are found before anything is written, and the server is asked whether it runs transactions.
+        let finds = texts.iter().filter(|t| t.contains(r#"find({"_id": {"$in": "#)).count();
+        assert_eq!(finds, 2, "{texts:#?}");
+        assert!(texts.contains(&r#"db.runCommand({"hello": 1})"#), "{texts:#?}");
+        let hello = entries.iter().find(|e| e.text.contains("hello")).unwrap();
+        assert_eq!((hello.database.as_deref(), hello.rows), (Some("admin"), Some(1)));
+        assert!(entries.iter().all(|e| e.connection_id == "mongo" && e.origin == Origin::Edit && e.error.is_none()));
     }
 
     #[tokio::test]

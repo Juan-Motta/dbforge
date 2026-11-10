@@ -273,7 +273,7 @@ mod tests {
         let connection = database(name, &[("orders", orders)]).await;
         let client = connect(&connection, PASSWORD).await.unwrap();
         let index = mongodb::IndexModel::builder().keys(doc! { "customer": 1 }).build();
-        client.database(name).collection::<Document>("orders").create_index(index).await.unwrap();
+        client.unlogged().database(name).collection::<Document>("orders").create_index(index).await.unwrap();
         client.shutdown().await;
         connection
     }

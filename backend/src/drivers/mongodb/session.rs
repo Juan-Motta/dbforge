@@ -11,8 +11,9 @@ use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{Bson, Document, doc};
 use mongodb::error::{CommandError, ErrorKind, WriteError, WriteFailure};
-use mongodb::{Client, Collection, Cursor, Database};
+use mongodb::options::UpdateModifications;
 
+use super::logged::{Documents, Find, LoggedClient, LoggedCollection, LoggedDatabase, Update, Write};
 use super::shell::{self, Method, Statement};
 use super::{columns_of, connect, default_database, row, text};
 use crate::connections::model::Connection;
@@ -23,7 +24,7 @@ use crate::error::{AppError, Result};
 const INTERRUPTED: i32 = 11601;
 
 pub struct Session {
-    client: Client,
+    client: LoggedClient,
     database: String,
     tag: String,
 }
@@ -63,8 +64,8 @@ impl Session {
                     StatementResult::default()
                 }
                 Statement::Call { collection, method, chain } => {
-                    let database = self.client.database(&self.database);
-                    let call = Call { tag: &self.tag, row_limit };
+                    let database = self.client.database(&self.database).tagged(&self.tag);
+                    let call = Call { row_limit };
                     let outcome = match collection {
                         Some(name) => call.collection(database.collection(&name), method, chain).await,
                         None => call.database(database, method, chain).await,
@@ -114,19 +115,14 @@ fn interrupted(error: &mongodb::error::Error) -> bool {
 }
 
 /// What every operation of one run shares.
-struct Call<'a> {
-    tag: &'a str,
+struct Call {
     row_limit: usize,
 }
 
-impl Call<'_> {
-    fn comment(&self) -> Bson {
-        Bson::String(self.tag.to_string())
-    }
-
+impl Call {
     async fn collection(
         &self,
-        collection: Collection<Document>,
+        collection: LoggedCollection,
         method: Method,
         chain: Vec<Method>,
     ) -> Result<StatementResult> {
@@ -138,7 +134,7 @@ impl Call<'_> {
         match name {
             "find" | "findOne" => {
                 args.at_most(2)?;
-                let mut find = collection.find(args.document(0)?).comment(self.comment());
+                let mut find = Find::new(args.document(0)?);
                 if let Some(projection) = args.optional_document(1)? {
                     find = find.projection(projection);
                 }
@@ -157,8 +153,7 @@ impl Call<'_> {
                         other => return Err(unsupported_after(other, name)),
                     };
                 }
-                let cursor = find.await?;
-                self.documents(cursor).await
+                self.documents(collection.find(find).await?).await
             }
             "aggregate" => {
                 args.at_most(1)?;
@@ -168,31 +163,28 @@ impl Call<'_> {
                         return Err(unsupported_after(&modifier.name, name));
                     }
                 }
-                let cursor = collection.aggregate(pipeline).comment(self.comment()).await?;
-                self.documents(cursor).await
+                self.documents(collection.aggregate(pipeline).await?).await
             }
             "countDocuments" | "count" => {
                 args.at_most(1)?;
-                let count = collection.count_documents(args.document(0)?).comment(self.comment()).await?;
-                Ok(count_result(count))
+                Ok(count_result(collection.count_documents(args.document(0)?).await?))
             }
             "estimatedDocumentCount" => {
                 args.at_most(0)?;
-                Ok(count_result(collection.estimated_document_count().comment(self.comment()).await?))
+                Ok(count_result(collection.estimated_document_count().await?))
             }
             "distinct" => {
                 args.at_most(2)?;
                 let Some(Bson::String(field)) = args.values.first() else {
                     return Err(AppError::Invalid("distinct takes a field name.".into()));
                 };
-                let values = collection.distinct(field, args.document(1)?).comment(self.comment()).await?;
+                let values = collection.distinct(field, args.document(1)?).await?;
                 let documents = values.into_iter().map(|value| doc! { field.as_str(): value }).collect();
                 Ok(self.rows(documents, false))
             }
             "insertOne" => {
                 args.at_most(1)?;
-                collection.insert_one(args.required_document(0)?).comment(self.comment()).await?;
-                Ok(affected(1))
+                self.write(&collection, Write::InsertOne(args.required_document(0)?)).await
             }
             "insertMany" => {
                 args.at_most(1)?;
@@ -206,44 +198,32 @@ impl Call<'_> {
                         _ => Err(AppError::Invalid("insertMany takes an array of documents.".into())),
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let inserted = collection.insert_many(documents).comment(self.comment()).await?;
-                Ok(affected(inserted.inserted_ids.len() as u64))
+                self.write(&collection, Write::InsertMany(documents)).await
             }
             "updateOne" | "updateMany" | "replaceOne" => {
                 args.at_most(3)?;
                 let filter = args.required_document(0)?;
                 let upsert = upsert(&args)?;
-                let result = if name == "replaceOne" {
-                    collection
-                        .replace_one(filter, args.required_document(1)?)
-                        .upsert(upsert)
-                        .comment(self.comment())
-                        .await?
+                let write = if name == "replaceOne" {
+                    Write::ReplaceOne { filter, replacement: args.required_document(1)?, upsert }
                 } else {
                     let update = match args.values.get(1) {
-                        Some(Bson::Document(update)) => mongodb::options::UpdateModifications::Document(update.clone()),
-                        Some(Bson::Array(stages)) => mongodb::options::UpdateModifications::Pipeline(
+                        Some(Bson::Document(update)) => UpdateModifications::Document(update.clone()),
+                        Some(Bson::Array(stages)) => UpdateModifications::Pipeline(
                             stages.iter().filter_map(|s| s.as_document().cloned()).collect(),
                         ),
                         _ => return Err(AppError::Invalid(format!("{name} takes a filter and an update."))),
                     };
-                    if name == "updateOne" {
-                        collection.update_one(filter, update).upsert(upsert).comment(self.comment()).await?
-                    } else {
-                        collection.update_many(filter, update).upsert(upsert).comment(self.comment()).await?
-                    }
+                    let update = Update { filter, update, upsert };
+                    if name == "updateOne" { Write::UpdateOne(update) } else { Write::UpdateMany(update) }
                 };
-                Ok(affected(result.modified_count + u64::from(result.upserted_id.is_some())))
+                self.write(&collection, write).await
             }
             "deleteOne" | "deleteMany" => {
                 args.at_most(1)?;
                 let filter = args.required_document(0)?;
-                let deleted = if name == "deleteOne" {
-                    collection.delete_one(filter).comment(self.comment()).await?
-                } else {
-                    collection.delete_many(filter).comment(self.comment()).await?
-                };
-                Ok(affected(deleted.deleted_count))
+                let write = if name == "deleteOne" { Write::DeleteOne(filter) } else { Write::DeleteMany(filter) };
+                self.write(&collection, write).await
             }
             other => Err(AppError::Invalid(format!(
                 "`{other}` isn't supported. Use find, findOne, aggregate, countDocuments, estimatedDocumentCount, \
@@ -252,17 +232,13 @@ impl Call<'_> {
         }
     }
 
-    async fn database(&self, database: Database, method: Method, chain: Vec<Method>) -> Result<StatementResult> {
+    async fn database(&self, database: LoggedDatabase, method: Method, chain: Vec<Method>) -> Result<StatementResult> {
         no_chain(&method.name, &chain)?;
         let args = Args { method: &method.name, values: &method.args };
         match method.name.as_str() {
             "runCommand" => {
                 args.at_most(1)?;
-                let mut command = args.required_document(0)?;
-                if !command.contains_key("comment") {
-                    command.insert("comment", self.comment());
-                }
-                let reply = database.run_command(command).await?;
+                let reply = database.run_command(args.required_document(0)?).await?;
                 Ok(self.rows(vec![reply], false))
             }
             "getCollectionNames" => {
@@ -277,8 +253,13 @@ impl Call<'_> {
         }
     }
 
+    /// Writes and reports the documents it changed.
+    async fn write(&self, collection: &LoggedCollection, write: Write) -> Result<StatementResult> {
+        Ok(affected(collection.write(&write).await?.affected))
+    }
+
     /// Reads the cursor until the row limit; the rest is dropped.
-    async fn documents(&self, mut cursor: Cursor<Document>) -> Result<StatementResult> {
+    async fn documents(&self, mut cursor: Documents) -> Result<StatementResult> {
         let mut documents = Vec::new();
         while let Some(document) = cursor.try_next().await? {
             if documents.len() == self.row_limit {
@@ -458,6 +439,46 @@ mod tests {
         assert_eq!((limited.results[0].rows.len(), limited.results[0].truncated), (2, true));
         let empty = session.run("db.orders.find({total: -1})", 2).await.unwrap();
         assert_eq!((names(&empty.results[0]), empty.results[0].rows.len()), (vec!["_id"], 0));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn records_each_statement_as_mongosh_runs_it() {
+        use crate::statement_log::store::tests::Collected;
+        use crate::statement_log::{self, Origin, StatementLog};
+
+        let connection = shop("dbforge_console_log").await;
+        let mut session = open_session(&connection, PASSWORD, None).await.unwrap();
+        let log = StatementLog::new(50, Collected::default());
+        let script = "db.orders.find({customer: 'bob'}).sort({_id: -1}).limit(2)
+                      db.orders.countDocuments()
+                      db.orders.updateMany({customer: 'ann'}, {$inc: {total: 1}})
+                      db.runCommand({ping: 1})
+                      db.orders.insertOne({_id: 1})";
+
+        let error = statement_log::scoped(&log, "mongo", Origin::Console, session.run(script, 1)).await.unwrap_err();
+        assert!(error.to_string().contains("duplicate key"), "{error}");
+
+        let entries = log.entries();
+        let recorded: Vec<_> = entries.iter().map(|e| (e.text.as_str(), e.rows, e.error.is_some())).collect();
+        assert_eq!(
+            recorded,
+            [
+                // One document shown, and the one more read to tell the result was cut.
+                (r#"db.getCollection("orders").find({"customer": "bob"}).sort({"_id": -1}).limit(2)"#, Some(2), false),
+                (r#"db.getCollection("orders").countDocuments({})"#, Some(1), false),
+                (
+                    r#"db.getCollection("orders").updateMany({"customer": "ann"}, {"$inc": {"total": 1}})"#,
+                    Some(2),
+                    false
+                ),
+                // The session's tag goes along as the command's comment, but isn't shown.
+                (r#"db.runCommand({"ping": 1})"#, Some(1), false),
+                (r#"db.getCollection("orders").insertOne({"_id": 1})"#, None, true),
+            ]
+        );
+        assert!(entries.iter().all(|e| e.database.as_deref() == Some("dbforge_console_log")));
+        assert!(entries[4].error.as_deref().unwrap().contains("duplicate key"));
     }
 
     #[tokio::test]
