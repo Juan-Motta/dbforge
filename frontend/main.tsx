@@ -7,9 +7,12 @@ import './styles/theme.css'
 import './styles/base.css'
 import { App } from './app/App'
 import { applyTheme, loadThemePreference, resolveTheme, systemIsDark } from './features/settings/theme'
+import { applyLanguage, loadLanguage } from './lib/i18n/language'
+import { LanguageProvider } from './lib/i18n/LanguageProvider'
 
 // Apply the saved theme before the first paint so the window doesn't flash dark.
 applyTheme(resolveTheme(loadThemePreference(), systemIsDark()))
+applyLanguage(loadLanguage())
 
 // Outside the desktop app (plain `pnpm dev`), fake the backend. Never bundled in production.
 if (import.meta.env.DEV && !isTauri()) {
@@ -19,6 +22,8 @@ if (import.meta.env.DEV && !isTauri()) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <LanguageProvider>
+      <App />
+    </LanguageProvider>
   </StrictMode>,
 )

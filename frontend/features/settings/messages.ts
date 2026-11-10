@@ -1,0 +1,43 @@
+import { defineMessages } from '../../lib/i18n/messages'
+
+export const messages = defineMessages({
+  en: {
+    title: 'Settings',
+    sections: 'Settings sections',
+    appearance: 'Appearance',
+    appearanceIntro: 'How DBForge looks. Changes apply instantly.',
+    theme: 'Theme',
+    dark: 'Dark',
+    light: 'Light',
+    system: 'Match system',
+    language: 'Language',
+    languageIntro: 'The language of menus, dialogs and messages.',
+    interfaceLanguage: 'Interface language',
+    interfaceLanguageHelp: 'Messages from database servers stay in the language the server uses.',
+    about: 'About',
+    tagline: 'A fast desktop viewer and editor for your databases.',
+    version: 'Version',
+    versionUnknown: 'Unknown',
+    engines: 'Connects to',
+  },
+  es: {
+    title: 'Configuración',
+    sections: 'Secciones de la configuración',
+    appearance: 'Apariencia',
+    appearanceIntro: 'Cómo se ve DBForge. Los cambios se aplican al instante.',
+    theme: 'Tema',
+    dark: 'Oscuro',
+    light: 'Claro',
+    system: 'Igual que el sistema',
+    language: 'Idioma',
+    languageIntro: 'El idioma de los menús, diálogos y mensajes.',
+    interfaceLanguage: 'Idioma de la interfaz',
+    interfaceLanguageHelp:
+      'Los mensajes de los servidores de bases de datos llegan en el idioma del servidor.',
+    about: 'Acerca de',
+    tagline: 'Un visor y editor de escritorio rápido para tus bases de datos.',
+    version: 'Versión',
+    versionUnknown: 'Desconocida',
+    engines: 'Se conecta a',
+  },
+})

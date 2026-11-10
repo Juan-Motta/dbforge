@@ -341,6 +341,8 @@ export function installMockBackend() {
           else accounts.add(object.name)
           return delay(null)
         }
+        case 'plugin:app|version':
+          return '0.1.0'
         case 'cancel_dump':
           cancelled.add(String(payload.jobId))
           return null
