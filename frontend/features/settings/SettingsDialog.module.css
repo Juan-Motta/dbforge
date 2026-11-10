@@ -158,12 +158,6 @@
   user-select: text;
 }
 
-.engines {
-  flex: 3;
-  color: var(--text2);
-  font-size: 12.5px;
-  text-align: right;
-}
 
 .themes {
   display: flex;

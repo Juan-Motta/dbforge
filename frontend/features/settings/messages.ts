@@ -40,7 +40,6 @@ export const messages = defineMessages({
     tagline: 'A fast desktop viewer and editor for your databases.',
     version: 'Version',
     versionUnknown: 'Unknown',
-    engines: 'Connects to',
   },
   es: {
     title: 'Configuración',
@@ -83,7 +82,6 @@ export const messages = defineMessages({
     tagline: 'Un visor y editor de escritorio rápido para tus bases de datos.',
     version: 'Versión',
     versionUnknown: 'Desconocida',
-    engines: 'Se conecta a',
   },
 })
 

@@ -4,7 +4,6 @@ import { Callout, CalloutSpace } from '../../components/Callout'
 import { Icon, type IconName } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { Option, OptionList } from '../../components/OptionList'
-import { ENGINE_LABELS } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
 import { LANGUAGES } from '../../lib/i18n/language'
 import { useLanguage, useMessages } from '../../lib/i18n/useLanguage'
@@ -276,10 +275,6 @@ function About() {
         <span className={styles.label}>{m.version}</span>
         {/* The space is kept while the version loads, so nothing moves when it arrives. */}
         <span className={styles.value}>{version === null ? ' ' : version || m.versionUnknown}</span>
-      </div>
-      <div className={styles.row}>
-        <span className={styles.label}>{m.engines}</span>
-        <span className={styles.engines}>{Object.values(ENGINE_LABELS).join(' · ')}</span>
       </div>
     </>
   )
