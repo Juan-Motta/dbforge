@@ -15,14 +15,19 @@ export function useApprovals() {
     const stop = mcpApi.onApproval((request) => {
       if (!current) return
       setWaiting((state) => [...state, request])
-      // The user is likely in the agent's terminal: bring the question to them.
-      const window = getCurrentWindow()
-      void window.setFocus().catch(() => {})
-      void window.requestUserAttention(UserAttentionType.Critical).catch(() => {})
+      // The user is likely in the agent's terminal: ask for their attention
+      // without taking focus, so a key meant for the terminal can't answer.
+      void getCurrentWindow()
+        .requestUserAttention(UserAttentionType.Critical)
+        .catch(() => {})
     })
+    const stopWithdrawn = mcpApi.onWithdrawn(
+      (id) => current && setWaiting((state) => state.filter((request) => request.id !== id)),
+    )
     return () => {
       current = false
       void stop.then((unlisten) => unlisten())
+      void stopWithdrawn.then((unlisten) => unlisten())
     }
   }, [])
 

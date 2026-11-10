@@ -13,6 +13,8 @@ use tokio::sync::oneshot;
 
 /// The event the window shows an approval dialog for.
 const ASKED: &str = "mcp-approval";
+/// The event that closes a dialog nobody waits on any more (the agent left, or time ran out).
+const WITHDRAWN: &str = "mcp-approval-withdrawn";
 /// How long a request waits for the user before it counts as declined.
 const WAIT: Duration = Duration::from_secs(300);
 
@@ -37,19 +39,17 @@ pub struct Approvals {
 }
 
 impl Approvals {
-    /// Shows `request` in the app and waits for the user's answer.
+    /// Shows `request` in the app and waits for the user's answer. If the
+    /// wait ends without one (time ran out, or the agent went away and this
+    /// future was dropped), the dialog is withdrawn.
     pub async fn ask(&self, app: &AppHandle, request: ApprovalRequest) -> bool {
         let (answer, answered) = oneshot::channel();
-        let id = request.id.clone();
-        self.lock().insert(id.clone(), answer);
+        self.lock().insert(request.id.clone(), answer);
+        let _pending = Pending { approvals: self, app, id: &request.id };
         if app.emit(ASKED, &request).is_err() {
-            self.lock().remove(&id);
             return false;
         }
-        let approved = tokio::time::timeout(WAIT, answered).await.ok().and_then(Result::ok).unwrap_or(false);
-        // Gone already when answered; still there after the wait ran out.
-        self.lock().remove(&id);
-        approved
+        tokio::time::timeout(WAIT, answered).await.ok().and_then(Result::ok).unwrap_or(false)
     }
 
     /// The user's answer to request `id`; false when nothing waits under it any more.
@@ -59,6 +59,22 @@ impl Approvals {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, oneshot::Sender<bool>>> {
         self.waiting.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+/// A request still waiting when the asking ends: removed, and its dialog closed.
+struct Pending<'a> {
+    approvals: &'a Approvals,
+    app: &'a AppHandle,
+    id: &'a str,
+}
+
+impl Drop for Pending<'_> {
+    fn drop(&mut self) {
+        // Already gone when the user answered.
+        if self.approvals.lock().remove(self.id).is_some() {
+            let _ = self.app.emit(WITHDRAWN, self.id);
+        }
     }
 }
 

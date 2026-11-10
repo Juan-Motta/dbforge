@@ -161,8 +161,6 @@ pub struct RunResult {
 }
 
 const DEFAULT_LIMIT: usize = 100;
-/// Agents can't cancel a query, so a long one would hold its connection; reads give up after this.
-const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const MAX_LIMIT: usize = 1000;
 /// Long values (JSON documents, blobs as text) would fill an agent's context.
 const MAX_VALUE: usize = 2000;
@@ -302,7 +300,7 @@ impl Tools {
         );
         // A read leaves nothing half done, so one taking too long is simply dropped.
         let read = async {
-            tokio::time::timeout(QUERY_TIMEOUT, read).await.unwrap_or_else(|_| {
+            tokio::time::timeout(drivers::READ_ONLY_TIME_LIMIT, read).await.unwrap_or_else(|_| {
                 Err(AppError::Invalid("The query took longer than a minute and was stopped.".into()))
             })
         };

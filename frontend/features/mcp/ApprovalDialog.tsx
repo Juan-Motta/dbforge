@@ -36,8 +36,11 @@ export function ApprovalDialog({ request, engine, onAnswer }: ApprovalDialogProp
         <p className={styles.note}>{m.approvalNote}</p>
       </div>
       <footer className={styles.footer}>
-        <Button onClick={() => onAnswer(false)}>{m.decline}</Button>
-        <Button variant="primary" data-autofocus onClick={() => onAnswer(true)}>
+        {/* Decline has the focus: Enter or Space pressed by mistake must not approve. */}
+        <Button data-autofocus onClick={() => onAnswer(false)}>
+          {m.decline}
+        </Button>
+        <Button variant="primary" onClick={() => onAnswer(true)}>
           {m.approve}
         </Button>
       </footer>

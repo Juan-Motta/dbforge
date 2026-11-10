@@ -36,4 +36,7 @@ export const mcpApi = {
   answer: (id: string, approved: boolean) => invoke<boolean>('answer_mcp_approval', { id, approved }),
   onApproval: (handler: (request: ApprovalRequest) => void) =>
     listen<ApprovalRequest>('mcp-approval', (event) => handler(event.payload)),
+  /** A request nobody waits on any more: the agent left, or time ran out. */
+  onWithdrawn: (handler: (id: string) => void) =>
+    listen<string>('mcp-approval-withdrawn', (event) => handler(event.payload)),
 }

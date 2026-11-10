@@ -71,6 +71,8 @@ export function McpSettings() {
     try {
       setToken(await mcpApi.regenerateToken())
       setShown(true)
+      // The server keeps running with the new token; read its state again rather than assume it.
+      setState(await mcpApi.state())
     } catch (failure) {
       setError(errorMessage(failure))
     }

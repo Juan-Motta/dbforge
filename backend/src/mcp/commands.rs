@@ -20,7 +20,7 @@ pub struct McpState {
 pub async fn apply(app: &AppHandle, settings: McpSettings) -> Status {
     let server = app.state::<McpServer>();
     if !settings.enabled {
-        server.stop();
+        server.stop().await;
         return server.status();
     }
     match server::token_of(app) {
@@ -52,8 +52,8 @@ pub fn mcp_token(app: AppHandle) -> Result<String> {
 #[tauri::command]
 pub async fn regenerate_mcp_token(app: AppHandle) -> Result<String> {
     let token = token::regenerate(app.state::<ConnectionStore>().credentials())?;
-    let settings = app.state::<SettingsFile>().get();
-    apply(&app, settings).await;
+    // The running server takes the new token at once; the old one stops working.
+    app.state::<McpServer>().use_token(token.clone());
     Ok(token)
 }
 
