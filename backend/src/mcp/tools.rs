@@ -18,6 +18,7 @@ use crate::connections::model::{AgentAccess, Connection};
 use crate::connections::store::ConnectionStore;
 use crate::connections::tags::TagStore;
 use crate::drivers::{self, ObjectKind, QueryOutcome, TableRef};
+use crate::error::AppError;
 use crate::statement_log::{self, Origin, StatementLog};
 
 /// The MCP server's handler: one per agent session, all sharing the app.
@@ -160,6 +161,8 @@ pub struct RunResult {
 }
 
 const DEFAULT_LIMIT: usize = 100;
+/// Agents can't cancel a query, so a long one would hold its connection; reads give up after this.
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const MAX_LIMIT: usize = 1000;
 /// Long values (JSON documents, blobs as text) would fill an agent's context.
 const MAX_VALUE: usize = 2000;
@@ -281,6 +284,29 @@ impl Tools {
             row_estimate: structure.row_estimate,
             definition: structure.ddl,
         }))
+    }
+
+    #[tool(
+        description = "Runs one statement that only reads (SELECT, find, GET…) on a connection and returns its rows. The server keeps it from changing anything; a statement that would is refused. Takes at most a minute."
+    )]
+    async fn query(&self, Parameters(request): Parameters<RunRequest>) -> Result<Json<RunResult>, String> {
+        let (connection, password) = self.open(&request.connection_id)?;
+        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        let read = drivers::run_read_only(
+            &connection,
+            password.as_deref(),
+            request.database.as_deref(),
+            request.container.as_deref(),
+            &request.statement,
+            limit,
+        );
+        // A read leaves nothing half done, so one taking too long is simply dropped.
+        let read = async {
+            tokio::time::timeout(QUERY_TIMEOUT, read).await.unwrap_or_else(|_| {
+                Err(AppError::Invalid("The query took longer than a minute and was stopped.".into()))
+            })
+        };
+        Ok(Json(self.as_agent(&connection, read).await?.into()))
     }
 
     #[tool(

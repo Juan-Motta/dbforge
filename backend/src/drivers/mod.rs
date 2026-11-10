@@ -611,7 +611,6 @@ pub async fn explain(
 /// Each engine enforces it as far as its server allows; its `read_only` module
 /// says how, and what it can't prevent. Only connecting has a time limit, as
 /// for the console.
-#[allow(dead_code, reason = "called by the MCP server's query tool, which is built alongside")]
 pub async fn run_read_only(
     connection: &Connection,
     password: Option<&str>,

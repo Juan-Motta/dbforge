@@ -29,7 +29,7 @@ export const messages = defineMessages({
     codex: 'Codex',
     codexToken: 'Codex reads the token from the environment (e.g. in ~/.zshrc)',
     accessNote:
-      'Agents only see connections you give them access to: open a connection’s settings and choose Agent access.',
+      'Agents only see connections you give them access to: open a connection’s settings and choose Agent access. Read only blocks writes, not everything an administrator account can do (ending sessions, server settings); for agents, a database user with only the rights they need is safest.',
   },
   es: {
     approvalTitle: '¿Aprobar el cambio de un agente?',
@@ -60,6 +60,6 @@ export const messages = defineMessages({
     codex: 'Codex',
     codexToken: 'Codex lee el token del entorno (por ejemplo, en ~/.zshrc)',
     accessNote:
-      'Los agentes solo ven las conexiones a las que les des acceso: abre la configuración de una conexión y elige Acceso de agentes.',
+      'Los agentes solo ven las conexiones a las que les des acceso: abre la configuración de una conexión y elige Acceso de agentes. Solo lectura bloquea las escrituras, no todo lo que puede hacer una cuenta de administrador (cerrar sesiones, ajustes del servidor); para agentes, lo más seguro es un usuario con solo los permisos que necesitan.',
   },
 })
