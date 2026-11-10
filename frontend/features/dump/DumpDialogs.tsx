@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/Button'
-import { Icon } from '../../components/Icon'
+import { Icon, type IconName } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { TextField } from '../../components/TextField'
 import { errorMessage } from '../../lib/errors'
@@ -8,7 +8,10 @@ import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi } from '../explorer/api'
 import { formatMs } from '../query/plan'
 import { formatBytes } from '../table-structure/format'
-import { chooseDumpFile, chooseSqlFile, dumpApi, type DumpOptions } from './api'
+import { chooseFolder, chooseSqlFile, dumpApi, type DumpContent, type DumpOptions } from './api'
+import { exportFileName, joinPath } from './exportFolder'
+import { ToolRow } from './ToolRow'
+import { useExportFolder } from './useExportFolder'
 import { contentsOf, targetNote } from './dump'
 import { messages } from './messages'
 import styles from './DumpDialogs.module.css'
@@ -65,7 +68,9 @@ interface ExportDatabaseDialogProps {
   onClose: () => void
 }
 
-/** Writes a whole database to a .sql file with pg_dump. */
+const CONTENT_ICONS: Record<DumpContent, IconName> = { all: 'database', structure: 'schema', data: 'table' }
+
+/** Writes a whole database to a .sql file with pg_dump, in the export folder. */
 export function ExportDatabaseDialog({
   connectionId,
   connectionName,
@@ -75,11 +80,23 @@ export function ExportDatabaseDialog({
   const m = useMessages(messages)
   const [options, setOptions] = useState<DumpOptions>({ content: 'all', clean: false, keepOwners: false })
   const [status, setStatus] = useState<Status>({ state: 'idle' })
+  const exportFolder = useExportFolder()
+  // A folder picked for this export only; the settings keep the default.
+  const [folder, setFolder] = useState<string | null>(null)
+  const [fileName, setFileName] = useState(() => exportFileName(database, new Date()))
+  // A file already at the path: the first press says so, the second replaces it.
+  const [replacing, setReplacing] = useState(false)
   const job = useDumpJob()
+  const target = folder ?? exportFolder.folder
+  const path = target && fileName.trim() ? joinPath(target, fileName.trim()) : null
 
   const start = async () => {
-    const path = await chooseDumpFile(database)
     if (!path) return
+    if (!replacing && (await dumpApi.fileExists(path))) {
+      setReplacing(true)
+      return
+    }
+    setReplacing(false)
     setStatus({ state: 'idle' })
     try {
       const done = await job.run((jobId) =>
@@ -94,6 +111,14 @@ export function ExportDatabaseDialog({
     }
   }
 
+  const pickFolder = async () => {
+    const picked = await chooseFolder(target ?? undefined)
+    if (picked) {
+      setFolder(picked)
+      setReplacing(false)
+    }
+  }
+
   const close = () => {
     job.cancel()
     onClose()
@@ -104,61 +129,98 @@ export function ExportDatabaseDialog({
       <div className={styles.body}>
         <p className={styles.source}>
           <Icon name="database" />
-          {database}
-          <span className="muted">{m.exportSource(connectionName)}</span>
+          <strong>{database}</strong>
+          <span className="muted">· {connectionName}</span>
         </p>
 
-        <div>
-          <span className={styles.label} id="dump-content">
-            {m.include}
-          </span>
-          <div role="radiogroup" aria-labelledby="dump-content" className={styles.choices}>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle} id="dump-content">
+            {m.content}
+          </h3>
+          <div role="radiogroup" aria-labelledby="dump-content" className={styles.list}>
             {contentsOf(m).map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                role="radio"
-                aria-checked={options.content === option.id}
-                data-autofocus={options.content === option.id || undefined}
-                disabled={job.running}
-                className={styles.choice}
-                onClick={() => setOptions({ ...options, content: option.id })}
-              >
-                <strong>{option.label}</strong>
-                <span className={styles.description}>{option.description}</span>
-              </button>
+              <label key={option.id} className={styles.option}>
+                <input
+                  type="radio"
+                  name="dump-content"
+                  checked={options.content === option.id}
+                  data-autofocus={options.content === option.id || undefined}
+                  disabled={job.running}
+                  onChange={() => setOptions({ ...options, content: option.id })}
+                />
+                <span className={styles.optionIcon}>
+                  <Icon name={CONTENT_ICONS[option.id]} size={15} />
+                </span>
+                <span className={styles.optionText}>
+                  <span className={styles.optionTitle}>{option.label}</span>
+                  <span className={styles.description}>{option.description}</span>
+                </span>
+              </label>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className={styles.checks}>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              checked={options.clean && options.content !== 'data'}
-              disabled={job.running || options.content === 'data'}
-              onChange={(event) => setOptions({ ...options, clean: event.target.checked })}
-            />
-            <span>
-              {m.clean}
-              <span className={styles.description}>{m.cleanDescription}</span>
-            </span>
-          </label>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              checked={options.keepOwners}
-              disabled={job.running}
-              onChange={(event) => setOptions({ ...options, keepOwners: event.target.checked })}
-            />
-            <span>
-              {m.keepOwners}
-              <span className={styles.description}>{m.keepOwnersDescription}</span>
-            </span>
-          </label>
-        </div>
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>{m.options}</h3>
+          <div className={styles.list}>
+            <label className={styles.option}>
+              <input
+                type="checkbox"
+                checked={options.clean && options.content !== 'data'}
+                disabled={job.running || options.content === 'data'}
+                onChange={(event) => setOptions({ ...options, clean: event.target.checked })}
+              />
+              <span className={styles.optionText}>
+                <span className={styles.optionTitle}>{m.clean}</span>
+                <span className={styles.description}>{m.cleanDescription}</span>
+              </span>
+            </label>
+            <label className={styles.option}>
+              <input
+                type="checkbox"
+                checked={options.keepOwners}
+                disabled={job.running}
+                onChange={(event) => setOptions({ ...options, keepOwners: event.target.checked })}
+              />
+              <span className={styles.optionText}>
+                <span className={styles.optionTitle}>{m.keepOwners}</span>
+                <span className={styles.description}>{m.keepOwnersDescription}</span>
+              </span>
+            </label>
+          </div>
+        </section>
 
-        <StatusLine running={job.running} line={job.line} status={status} />
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>{m.saveTo}</h3>
+          <div className={styles.folderRow}>
+            <Icon name="folder" size={15} />
+            <span className={styles.path} title={target ?? undefined}>
+              <bdi>{target ?? m.lookingForFolder}</bdi>
+            </span>
+            <Button disabled={job.running} onClick={() => void pickFolder()}>
+              {m.change}
+            </Button>
+          </div>
+          <TextField
+            label={m.fileName}
+            mono
+            value={fileName}
+            disabled={job.running}
+            help={m.folderHelp}
+            onChange={(event) => {
+              setFileName(event.target.value)
+              setReplacing(false)
+            }}
+          />
+        </section>
+
+        <ToolRow name="pg_dump" disabled={job.running} />
+
+        <StatusLine
+          running={job.running}
+          line={job.line}
+          status={replacing ? { state: 'failed', error: m.fileExists(fileName.trim()) } : status}
+        />
       </div>
 
       <footer className={styles.footer}>
@@ -170,9 +232,9 @@ export function ExportDatabaseDialog({
         ) : (
           <Button onClick={onClose}>{status.state === 'done' ? m.done : m.cancel}</Button>
         )}
-        <Button variant="primary" disabled={job.running} onClick={() => void start()}>
+        <Button variant="primary" disabled={job.running || !path} onClick={() => void start()}>
           <Icon name="download" />
-          {job.running ? m.exporting : m.export}
+          {job.running ? m.exporting : replacing ? m.replace : m.export}
         </Button>
       </footer>
     </Modal>
@@ -297,6 +359,8 @@ export function ImportDatabaseDialog({
           <code>\!</code>
           {m.importNoteAfter}
         </p>
+
+        <ToolRow name="psql" disabled={job.running} />
 
         <StatusLine
           running={job.running}

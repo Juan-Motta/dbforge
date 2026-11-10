@@ -15,6 +15,8 @@ export const messages = defineMessages({
     interfaceLanguage: 'Interface language',
     interfaceLanguageHelp: 'Messages from database servers stay in the language the server uses.',
     tags: 'Tags',
+    exports: 'Export and import',
+    exportsIntro: 'Where database exports are saved, and the PostgreSQL tools that write and restore them.',
     passwords: 'Passwords',
     passwordsIntro: 'Where DBForge saves the passwords and keys of your connections.',
     storage: 'Where passwords are saved',
@@ -50,6 +52,9 @@ export const messages = defineMessages({
     interfaceLanguageHelp:
       'Los mensajes de los servidores de bases de datos llegan en el idioma del servidor.',
     tags: 'Etiquetas',
+    exports: 'Exportar e importar',
+    exportsIntro:
+      'Dónde se guardan los exports de bases de datos, y las herramientas de PostgreSQL que los escriben y restauran.',
     passwords: 'Contraseñas',
     passwordsIntro: 'Dónde guarda DBForge las contraseñas y claves de tus conexiones.',
     storage: 'Dónde se guardan las contraseñas',

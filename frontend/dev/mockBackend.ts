@@ -383,6 +383,20 @@ export function installMockBackend() {
         }
         case 'plugin:app|version':
           return '0.1.0'
+        case 'dump_tool':
+          return delay(mockTools[String(payload.name)])
+        case 'set_dump_tool': {
+          const name = String(payload.name)
+          const path = payload.path as string | null
+          if (path && !/pg_dump|psql/.test(path))
+            throw `The ${name} chosen in DBForge can't be run: ${path}. Choose another one, or use the one DBForge finds.`
+          mockTools[name] = path ? { path, version: '16.4', custom: true } : { ...foundTools[name] }
+          return delay(mockTools[name])
+        }
+        case 'dump_file_exists':
+          return delay(String(payload.path).includes('exists'))
+        case 'plugin:path|resolve_directory':
+          return '/Users/demo/Documents'
         case 'cancel_dump':
           cancelled.add(String(payload.jobId))
           return null
@@ -396,6 +410,12 @@ export function installMockBackend() {
 
 /** Jobs the dialogs asked to stop. */
 const cancelled = new Set<string>()
+// The PostgreSQL client tools found, and the ones chosen in their place.
+const foundTools: Record<string, { path: string; version: string; custom: boolean }> = {
+  pg_dump: { path: '/opt/homebrew/opt/postgresql@18/bin/pg_dump', version: '18.1', custom: false },
+  psql: { path: '/opt/homebrew/opt/postgresql@18/bin/psql', version: '18.1', custom: false },
+}
+const mockTools = { ...foundTools }
 // The connection tags, as the settings edit them.
 let tags = [
   { id: 'production', name: 'PROD', color: 'red', confirm: true },

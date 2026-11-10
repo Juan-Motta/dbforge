@@ -12,14 +12,15 @@ import {
   type CredentialStorageInfo,
   type SwitchProgress,
 } from '../connections/api'
+import { ExportSettings } from '../dump/ExportSettings'
 import { TagsSection } from '../tags/TagsSection'
 import { messages, type SettingsMessages } from './messages'
 import type { ThemePreference } from './theme'
 import styles from './SettingsDialog.module.css'
 
-type Section = 'appearance' | 'language' | 'tags' | 'passwords' | 'about'
+type Section = 'appearance' | 'language' | 'tags' | 'exports' | 'passwords' | 'about'
 
-const SECTIONS: Section[] = ['appearance', 'language', 'tags', 'passwords', 'about']
+const SECTIONS: Section[] = ['appearance', 'language', 'tags', 'exports', 'passwords', 'about']
 
 const THEMES: ThemePreference[] = ['dark', 'light', 'system']
 
@@ -55,6 +56,13 @@ export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialog
           {section === 'appearance' && <Appearance theme={theme} onThemeChange={onThemeChange} />}
           {section === 'language' && <LanguageSection />}
           {section === 'tags' && <TagsSection />}
+          {section === 'exports' && (
+            <>
+              <h3 className={styles.heading}>{m.exports}</h3>
+              <p className={styles.intro}>{m.exportsIntro}</p>
+              <ExportSettings />
+            </>
+          )}
           {section === 'passwords' && <Passwords />}
           {section === 'about' && <About />}
         </main>
