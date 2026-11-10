@@ -18,6 +18,8 @@ import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
 import { messages } from './messages'
 import { filtersByValue, rowAsInsert, rowAsJson, valueCondition } from './cellActions'
+import { ChoiceEditor } from './ChoiceEditor'
+import { choicesOf } from './choices'
 import { formatTemporal, temporalKindOf, temporalOf } from './temporal'
 import { TemporalEditor } from './TemporalEditor'
 import styles from './EditableGrid.module.css'
@@ -51,7 +53,7 @@ interface EditableGridProps {
   /** Shift+Enter: shows the picked cell in the inspector. */
   onInspect?: () => void
   /** What the table's structure says of each column, by name, once it has loaded. */
-  columnInfo?: Record<string, { nullable: boolean; default: string | null }>
+  columnInfo?: Record<string, { nullable: boolean; default: string | null; options?: string[] }>
   /** Opens the row a foreign key column points to; `null` for other columns or NULL keys. */
   linkOf?: (row: number, column: number) => (() => void) | null
   /** The query language, for the conditions and statements the cell menu writes. */
@@ -361,6 +363,7 @@ export function EditableGrid(props: EditableGridProps) {
       (value ?? 'NULL')
     )
     const temporalKind = temporalKindOf(columns[column].dataType)
+    const choices = choicesOf(columns[column].dataType, props.columnInfo?.[columns[column].name]?.options)
     if (isEditing) {
       // The editor lies over the cell, which keeps its content (unseen) and so its size.
       return (
@@ -372,7 +375,15 @@ export function EditableGrid(props: EditableGridProps) {
           <span className={styles.hidden} aria-hidden="true">
             {content}
           </span>
-          {temporalKind ? (
+          {choices ? (
+            <ChoiceEditor
+              initial={value}
+              choices={choices}
+              nullable={props.columnInfo?.[columns[column].name]?.nullable ?? true}
+              onCommit={commit}
+              onCancel={stopEditing}
+            />
+          ) : temporalKind ? (
             <TemporalEditor
               initial={value}
               kind={temporalKind}

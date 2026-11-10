@@ -8,6 +8,8 @@ export interface ColumnInfo {
   /** The default expression, or how the value is generated (identity, computed). */
   default: string | null
   comment: string | null
+  /** The values an enum column takes, in order; absent for other columns. */
+  options?: string[]
 }
 
 export interface IndexInfo {

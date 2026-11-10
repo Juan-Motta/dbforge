@@ -188,6 +188,8 @@ export function installMockBackend() {
                 ? null
                 : `2026-${String((id % 12) + 1).padStart(2, '0')}-${String((id % 28) + 1).padStart(2, '0')}`,
               `2026-09-16 ${String(id % 24).padStart(2, '0')}:00:27`,
+              id % 4 === 0 ? 'false' : 'true',
+              id % 9 === 0 ? null : ['lead', 'trial', 'paying', 'churned'][id % 4],
             ]
           })
           return delay({
@@ -205,6 +207,8 @@ export function installMockBackend() {
               { name: 'external_id', dataType: 'uuid', primaryKey: false },
               { name: 'birthday', dataType: 'date', primaryKey: false },
               { name: 'last_login', dataType: 'timestamp without time zone', primaryKey: false },
+              { name: 'active', dataType: 'boolean', primaryKey: false },
+              { name: 'status', dataType: 'customer_status', primaryKey: false },
             ],
             rows,
             hasMore: offset + count < total,
@@ -461,6 +465,15 @@ const mockStructure = {
       nullable: false,
       default: 'now()',
       comment: null,
+    },
+    { name: 'active', dataType: 'boolean', nullable: false, default: 'true', comment: null },
+    {
+      name: 'status',
+      dataType: 'customer_status',
+      nullable: true,
+      default: null,
+      comment: null,
+      options: ['lead', 'trial', 'paying', 'churned'],
     },
   ],
   indexes: [

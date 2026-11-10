@@ -339,3 +339,51 @@ td[data-menu-open] {
 .temporalSpacer {
   flex: 1;
 }
+
+/* A cell that takes one of a few values: its value stays in sight while the list is open. */
+.choiceCell {
+  align-items: center;
+  padding: 0 8px;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--surface);
+}
+
+.choices {
+  position: fixed;
+  z-index: 40;
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--elev);
+  box-shadow: var(--shadow);
+  list-style: none;
+  outline: none;
+  font: 12px var(--font-mono);
+  text-align: left;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.choiceActive {
+  background: var(--accent-soft);
+}
+
+.choiceLabel {
+  flex: 1;
+}
+
+.choiceValue {
+  color: var(--text3);
+}
