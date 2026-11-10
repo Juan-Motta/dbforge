@@ -611,6 +611,10 @@ pub async fn explain(
 /// Each engine enforces it as far as its server allows; its `read_only` module
 /// says how, and what it can't prevent. Only connecting has a time limit, as
 /// for the console.
+/// The longest a read-only statement runs: the server stops it after this,
+/// so a dropped caller leaves nothing running.
+pub const READ_ONLY_TIME_LIMIT: Duration = Duration::from_secs(60);
+
 pub async fn run_read_only(
     connection: &Connection,
     password: Option<&str>,

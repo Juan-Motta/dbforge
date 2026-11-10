@@ -21,8 +21,8 @@ use std::time::Instant;
 use sqlx::{AssertSqlSafe, Executor, SqlSafeStr};
 
 use super::{connect, read_results};
-use crate::connections::model::Connection;
-use crate::drivers::{QueryOutcome, with_timeout};
+use crate::connections::model::{Connection, Engine};
+use crate::drivers::{QueryOutcome, READ_ONLY_TIME_LIMIT, with_timeout};
 use crate::error::Result;
 
 /// Runs `statement` on a new read-only connection that is closed afterwards.
@@ -36,6 +36,12 @@ pub async fn run_read_only(
     let started = Instant::now();
     let mut conn = with_timeout(connect(connection, password, database)).await?;
     sqlx::raw_sql("SET SESSION TRANSACTION READ ONLY").execute(&mut conn).await?;
+    // The server stops the statement after the limit, so a dropped caller leaves nothing running.
+    let limit = match connection.engine {
+        Engine::Mariadb => format!("SET SESSION max_statement_time = {}", READ_ONLY_TIME_LIMIT.as_secs()),
+        _ => format!("SET SESSION max_execution_time = {}", READ_ONLY_TIME_LIMIT.as_millis()),
+    };
+    sqlx::raw_sql(AssertSqlSafe(limit)).execute(&mut conn).await?;
     let mut transaction = conn.begin().await?;
     let results = async {
         // Prepared only to have the server refuse several statements.

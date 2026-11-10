@@ -2,8 +2,10 @@
 //!
 //! SQLite enforces it: the file is opened read-only, so every write to it, its
 //! schema or its settings fails, and an `ATTACH` can't create a file. One
-//! write reaches past that and is refused here: `VACUUM INTO` copies the
-//! database to a new file even from a read-only connection. Since SQLite runs
+//! write reaches past that: `VACUUM INTO` copies the database to a new file
+//! even from a read-only connection. So only statements that start with a
+//! reading word are taken (anything else, including text the check can't
+//! read, such as a byte-order mark in front, is refused). Since SQLite runs
 //! every statement of a string, a script is refused too, which also keeps
 //! anything a statement sets up (an `ATTACH`, a `PRAGMA`) from outliving it.
 
@@ -26,13 +28,20 @@ pub async fn run_read_only(connection: &Connection, statement: &str, row_limit: 
     Ok(QueryOutcome { results: results?, elapsed_ms: started.elapsed().as_millis() as u64 })
 }
 
-/// Refuses scripts and `VACUUM`, which can write a new file.
+/// The words a statement that only reads starts with.
+const READING: [&str; 5] = ["select", "with", "values", "explain", "pragma"];
+
+/// Takes one statement starting with a reading word; refuses scripts and
+/// anything else, `VACUUM` among them.
 fn check(statement: &str) -> Result<()> {
     if has_several_statements(statement) {
         return Err(AppError::Invalid("Read-only queries run one statement at a time.".into()));
     }
-    if first_word(statement).eq_ignore_ascii_case("vacuum") {
-        return Err(AppError::Invalid("VACUUM isn't allowed in a read-only query: it can write a new file.".into()));
+    let first = first_word(statement);
+    if !READING.iter().any(|word| first.eq_ignore_ascii_case(word)) {
+        return Err(AppError::Invalid(
+            "Read-only queries on SQLite start with SELECT, WITH, VALUES, EXPLAIN or PRAGMA.".into(),
+        ));
     }
     Ok(())
 }
@@ -67,6 +76,14 @@ mod tests {
         assert!(check("/* x */ VACUUM INTO '/tmp/copy.db'").is_err());
         assert!(check("vacuum").is_err());
         assert!(check("EXPLAIN VACUUM").is_ok());
+        // A byte-order mark the check can't read past is refused, not skipped.
+        assert!(check("\u{feff}VACUUM INTO '/tmp/copy.db'").is_err());
+        for write in ["ATTACH 'x.db' AS x", "INSERT INTO t VALUES (1)", "REINDEX", "ANALYZE"] {
+            assert!(check(write).is_err(), "{write}");
+        }
+        for read in ["with x as (select 1) select * from x", "VALUES (1)", "PRAGMA table_info(t)"] {
+            assert!(check(read).is_ok(), "{read}");
+        }
     }
 
     #[tokio::test]

@@ -177,8 +177,9 @@ fn tokens(sql: &str) -> Result<Vec<Token<'_>>> {
                     }
                 }
             }
+            // The server ends a line comment at a carriage return as well as a newline.
             '-' if chars.next_if(|&(_, next)| next == '-').is_some() => {
-                while chars.next_if(|&(_, next)| next != '\n').is_some() {}
+                while chars.next_if(|&(_, next)| next != '\n' && next != '\r').is_some() {}
             }
             '/' if chars.next_if(|&(_, next)| next == '*').is_some() => {
                 let mut depth = 1;
@@ -191,27 +192,15 @@ fn tokens(sql: &str) -> Result<Vec<Token<'_>>> {
                     }
                 }
             }
-            '0'..='9' | '.' if c != '.' || chars.peek().is_some_and(|(_, next)| next.is_ascii_digit()) => {
-                let hex = c == '0' && chars.next_if(|&(_, next)| next == 'x' || next == 'X').is_some();
-                while chars.next_if(|&(_, next)| next.is_ascii_hexdigit() && (hex || next.is_ascii_digit())).is_some() {
-                }
-                if !hex {
-                    while chars.next_if(|&(_, next)| next.is_ascii_digit() || next == '.').is_some() {}
-                    // An exponent: `1e5`, `1E-3`.
-                    let mut ahead = chars.clone();
-                    if ahead.next_if(|&(_, next)| next == 'e' || next == 'E').is_some() {
-                        ahead.next_if(|&(_, next)| next == '+' || next == '-');
-                        if ahead.peek().is_some_and(|(_, next)| next.is_ascii_digit()) {
-                            chars = ahead;
-                            while chars.next_if(|&(_, next)| next.is_ascii_digit()).is_some() {}
-                        }
-                    }
-                }
-                if chars.peek().is_some_and(|&(_, next)| is_word_char(next)) {
-                    return Err(AppError::Invalid("Put a space between a number and the word after it.".into()));
-                }
+            // `$1.50` is a money literal: the server reads `$1COMMIT` as `$1` then `COMMIT`.
+            '$' if chars.peek().is_some_and(|(_, next)| next.is_ascii_digit() || *next == '.') => {
+                let (_, first) = chars.next().expect("peeked");
+                number(first, &mut chars)?;
             }
-            c if is_word_char(c) => {
+            '0'..='9' | '.' if c != '.' || chars.peek().is_some_and(|(_, next)| next.is_ascii_digit()) => {
+                number(c, &mut chars)?;
+            }
+            c if is_word_start(c) => {
                 let mut end = start + c.len_utf8();
                 while let Some((at, next)) = chars.next_if(|&(_, next)| is_word_char(next)) {
                     end = at + next.len_utf8();
@@ -222,15 +211,54 @@ fn tokens(sql: &str) -> Result<Vec<Token<'_>>> {
                     tokens.push(Token::Word(word));
                 }
             }
-            _ => {}
+            // Blanks and punctuation separate words the same way here and on the server.
+            c if c.is_ascii() && (c.is_ascii_whitespace() || c.is_ascii_punctuation()) => {}
+            // Anything else outside a string, a [name] or a comment (a byte-order
+            // mark, a non-breaking or zero-width space, a letter outside ASCII) the
+            // server might read differently from here, so it isn't guessed at.
+            _ => {
+                return Err(AppError::Invalid(
+                    "Outside strings and comments, read-only queries take plain ASCII; put other names in [brackets]."
+                        .into(),
+                ));
+            }
         }
     }
     Ok(tokens)
 }
 
-/// Letters, digits and the symbols T-SQL allows in names and variables.
+/// Reads the rest of a number that starts with `first`: digits, a decimal
+/// point, an exponent, or `0x` hex. A word right after it is refused: the
+/// server reads `1INTO` as `1 INTO`.
+fn number(first: char, chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> Result<()> {
+    let hex = first == '0' && chars.next_if(|&(_, next)| next == 'x' || next == 'X').is_some();
+    while chars.next_if(|&(_, next)| next.is_ascii_hexdigit() && (hex || next.is_ascii_digit())).is_some() {}
+    if !hex {
+        while chars.next_if(|&(_, next)| next.is_ascii_digit() || next == '.').is_some() {}
+        // An exponent: `1e5`, `1E-3`.
+        let mut ahead = chars.clone();
+        if ahead.next_if(|&(_, next)| next == 'e' || next == 'E').is_some() {
+            ahead.next_if(|&(_, next)| next == '+' || next == '-');
+            if ahead.peek().is_some_and(|(_, next)| next.is_ascii_digit()) {
+                *chars = ahead;
+                while chars.next_if(|&(_, next)| next.is_ascii_digit()).is_some() {}
+            }
+        }
+    }
+    if chars.peek().is_some_and(|&(_, next)| is_word_char(next)) {
+        return Err(AppError::Invalid("Put a space between a number and the word after it.".into()));
+    }
+    Ok(())
+}
+
+/// What a name or variable starts with: a letter, `_`, `@` or `#` (never a digit or `$`).
+fn is_word_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || matches!(c, '_' | '@' | '#')
+}
+
+/// Letters, digits and the symbols T-SQL allows inside names and variables.
 fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '_' | '@' | '#' | '$')
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '@' | '#' | '$')
 }
 
 #[cfg(test)]
@@ -258,12 +286,28 @@ mod tests {
         assert_eq!(words("SELECT 1.5e-3, 0xFF, .5, @x, #t FROM t"), ["SELECT", "@x", "#t", "FROM", "t"]);
         assert_eq!(words("SELECT [a]INTO"), ["SELECT", "INTO"]);
         assert_eq!(words("SELECT 'a'INTO"), ["SELECT", "INTO"]);
-        assert_eq!(words("SELECT naïve"), ["SELECT", "naïve"]);
+        assert_eq!(words("SELECT [naïve]"), ["SELECT"]);
+        assert!(tokens("SELECT naïve").is_err(), "names outside ASCII go in brackets");
         for unclosed in ["SELECT 'a", "SELECT [a", "SELECT \"a", "SELECT /* a /* b */"] {
             assert!(tokens(unclosed).is_err(), "{unclosed}");
         }
         assert!(tokens("SELECT 1INTO t").is_err());
         assert!(tokens("SELECT 1e INTO t").is_err());
+    }
+
+    #[test]
+    fn statements_hidden_from_the_check_are_refused() {
+        // The server reads `$1COMMIT` as the money literal `$1`, then COMMIT.
+        assert!(check("SELECT $1COMMIT SELECT $1DELETE FROM items").is_err());
+        assert!(check("SELECT $1ROLLBACK SELECT $1DELETE FROM items").is_err());
+        // A line comment ends at a bare carriage return on the server.
+        assert!(check("SELECT 1 --x\rCOMMIT DELETE FROM items").is_err());
+        // Characters the server may read differently are refused, not guessed at.
+        for hidden in ["\u{feff}SELECT 1", "SELECT\u{a0}1", "SELECT 1\u{200b}", "SELECT ñ FROM t"] {
+            assert!(check(hidden).is_err(), "{hidden:?}");
+        }
+        // Money, $PARTITION and Unicode inside strings or brackets still read.
+        check("SELECT $1.50, $PARTITION.f(1), N'ñ', [ñ] FROM t -- ñ\r\n").unwrap();
     }
 
     #[test]

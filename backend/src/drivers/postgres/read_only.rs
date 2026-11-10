@@ -9,10 +9,13 @@
 //! statement takes only one) before it runs, so a script such as
 //! `SET default_transaction_read_only = off; COMMIT; DELETE …` never starts.
 //!
+//! The server also stops it after [`READ_ONLY_TIME_LIMIT`] (`statement_timeout`).
+//!
 //! Not prevented: what a read-only transaction allows but reaches outside the
 //! database's tables, such as `pg_terminate_backend`, `pg_cancel_backend`,
-//! `dblink`, or `COPY … TO PROGRAM` for superusers. Connect agents with a role
-//! that has no such privileges.
+//! `dblink`, creating a replication slot (`pg_create_physical_replication_slot`,
+//! which a rollback doesn't undo), or `COPY … TO '<file>'`/`TO PROGRAM` for
+//! superusers. Connect agents with a role that has no such privileges.
 
 use std::time::Instant;
 
@@ -20,7 +23,7 @@ use sqlx::{AssertSqlSafe, Executor, SqlSafeStr};
 
 use super::{connect_with, read_results};
 use crate::connections::model::Connection;
-use crate::drivers::{QueryOutcome, with_timeout};
+use crate::drivers::{QueryOutcome, READ_ONLY_TIME_LIMIT, with_timeout};
 use crate::error::Result;
 
 /// Runs `statement` on a new read-only connection that is closed afterwards.
@@ -32,8 +35,10 @@ pub async fn run_read_only(
     row_limit: usize,
 ) -> Result<QueryOutcome> {
     let started = Instant::now();
-    let read_only =
-        |options: sqlx::postgres::PgConnectOptions| options.options([("default_transaction_read_only", "on")]);
+    let read_only = |options: sqlx::postgres::PgConnectOptions| {
+        let limit = format!("{}s", READ_ONLY_TIME_LIMIT.as_secs());
+        options.options([("default_transaction_read_only", "on"), ("statement_timeout", limit.as_str())])
+    };
     let mut conn = with_timeout(connect_with(connection, password, database, read_only)).await?;
     let mut transaction = conn.begin().await?;
     let results = async {
