@@ -178,12 +178,22 @@ pub async fn stream_table(
     Ok(())
 }
 
-async fn table_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT CAST(column_name AS CHAR), CAST(column_type AS CHAR), CAST(column_key AS CHAR), CAST(extra AS CHAR)
-         FROM information_schema.columns
-         WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-    )
+/// Whether a column belongs to its table's primary key. Not `column_key = 'PRI'`:
+/// MySQL shows that for a unique index too when the table has no primary key,
+/// and such a table's rows can't be told apart for editing.
+pub(super) const IN_PRIMARY_KEY: &str = "EXISTS (SELECT 1 FROM information_schema.statistics s
+     WHERE s.table_schema = c.table_schema AND s.table_name = c.table_name
+       AND s.index_name = 'PRIMARY' AND s.column_name = c.column_name)";
+
+/// The table's columns, in order, the primary key's marked. The grid and the
+/// editor read the same ones, so a table the grid lets you edit can be edited.
+pub(super) async fn table_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
+    let rows: Vec<(String, String, i64, String)> = sqlx::query_as(AssertSqlSafe(format!(
+        "SELECT CAST(c.column_name AS CHAR), CAST(c.column_type AS CHAR), CAST({IN_PRIMARY_KEY} AS SIGNED),
+                CAST(c.extra AS CHAR)
+         FROM information_schema.columns c
+         WHERE c.table_schema = ? AND c.table_name = ? ORDER BY c.ordinal_position"
+    )))
     .bind(&table.schema)
     .bind(&table.name)
     .fetch_all(conn)
@@ -193,10 +203,10 @@ async fn table_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>>
     }
     Ok(rows
         .into_iter()
-        .map(|(name, data_type, key, extra)| Column {
+        .map(|(name, data_type, primary, extra)| Column {
             name,
             data_type,
-            primary_key: key == "PRI",
+            primary_key: primary != 0,
             generated: is_generated(&extra),
             default: None,
         })

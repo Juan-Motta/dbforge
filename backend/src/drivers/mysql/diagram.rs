@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use super::connect;
+use sqlx::AssertSqlSafe;
+
+use super::{IN_PRIMARY_KEY, connect};
 use crate::connections::model::Connection;
 use crate::drivers::{DiagramColumn, DiagramTable, Relationship, SchemaDiagram};
 use crate::error::Result;
@@ -16,15 +18,15 @@ pub async fn schema_diagram(
 ) -> Result<SchemaDiagram> {
     let mut conn = connect(connection, password, Some(schema)).await?;
 
-    type ColumnRow = (String, Option<i64>, String, String, String, String);
-    let rows: Vec<ColumnRow> = sqlx::query_as(
+    type ColumnRow = (String, Option<i64>, String, String, String, i64);
+    let rows: Vec<ColumnRow> = sqlx::query_as(AssertSqlSafe(format!(
         "SELECT CAST(t.table_name AS CHAR), CAST(t.table_rows AS SIGNED), CAST(c.column_name AS CHAR),
-                CAST(c.column_type AS CHAR), CAST(c.is_nullable AS CHAR), CAST(c.column_key AS CHAR)
+                CAST(c.column_type AS CHAR), CAST(c.is_nullable AS CHAR), CAST({IN_PRIMARY_KEY} AS SIGNED)
          FROM information_schema.tables t
          JOIN information_schema.columns c ON c.table_schema = t.table_schema AND c.table_name = t.table_name
          WHERE t.table_schema = ? AND t.table_type = 'BASE TABLE'
-         ORDER BY t.table_name, c.ordinal_position",
-    )
+         ORDER BY t.table_name, c.ordinal_position"
+    )))
     .bind(schema)
     .fetch_all(&mut conn)
     .await?;
@@ -49,7 +51,7 @@ pub async fn schema_diagram(
             .entry(name.clone())
             .or_insert_with(|| DiagramTable { name, row_estimate: rows, columns: Vec::new() })
             .columns
-            .push(DiagramColumn { name: column, data_type, nullable: nullable == "YES", primary_key: key == "PRI" });
+            .push(DiagramColumn { name: column, data_type, nullable: nullable == "YES", primary_key: key != 0 });
     }
 
     // Constraint names are unique per table, so a key is grouped by both.

@@ -8,7 +8,7 @@
 //! undo changes to MyISAM or MEMORY tables.
 
 use super::super::sqlx_edits;
-use super::{Conn, TextForm, connect, is_generated, with_timeout};
+use super::{Conn, TextForm, connect, table_columns, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
 use crate::drivers::{ApplySummary, CellValue, Column, RowChange, TableRef};
@@ -86,9 +86,8 @@ fn check_binary_values(columns: &[Column], changes: &[RowChange]) -> Result<()> 
     Ok(())
 }
 
-/// The table's columns, marking only the real primary key (not a unique index
-/// MySQL would show as `PRI` when there is no primary key). Refuses tables whose
-/// storage engine has no transactions.
+/// The table's columns, as the grid reads them. Refuses tables whose storage
+/// engine has no transactions.
 async fn editable_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Column>> {
     let engine: Option<Option<String>> = sqlx::query_scalar(
         "SELECT CAST(engine AS CHAR) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
@@ -108,29 +107,7 @@ async fn editable_columns(conn: &mut Conn, table: &TableRef) -> Result<Vec<Colum
         }
     }
 
-    let rows: Vec<(String, String, i64, String)> = sqlx::query_as(
-        "SELECT CAST(c.column_name AS CHAR), CAST(c.column_type AS CHAR),
-                CAST(EXISTS (SELECT 1 FROM information_schema.statistics s
-                             WHERE s.table_schema = c.table_schema AND s.table_name = c.table_name
-                               AND s.index_name = 'PRIMARY' AND s.column_name = c.column_name) AS SIGNED),
-                CAST(c.extra AS CHAR)
-         FROM information_schema.columns c
-         WHERE c.table_schema = ? AND c.table_name = ? ORDER BY c.ordinal_position",
-    )
-    .bind(&table.schema)
-    .bind(&table.name)
-    .fetch_all(conn)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|(name, data_type, primary, extra)| Column {
-            name,
-            data_type,
-            primary_key: primary != 0,
-            generated: is_generated(&extra),
-            default: None,
-        })
-        .collect())
+    table_columns(conn, table).await
 }
 
 #[cfg(test)]
@@ -256,6 +233,32 @@ mod tests {
             }];
             let error = apply_changes(&server, PASSWORD, &bins, &bad).await.unwrap_err();
             assert!(error.to_string().contains("data takes binary values as 0x"), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn a_unique_key_is_not_a_primary_key_for_the_grid_either() {
+        for server in servers() {
+            let database = "dbforge_medit_unique";
+            run(
+                &server,
+                &format!(
+                    "DROP DATABASE IF EXISTS {database};
+                     CREATE DATABASE {database};
+                     CREATE TABLE {database}.tags (code varchar(5) NOT NULL UNIQUE, label text);
+                     INSERT INTO {database}.tags VALUES ('a', 'x');"
+                ),
+            )
+            .await;
+            let tags = table(database, "tags");
+            // MySQL shows `code` as PRI; the grid must not offer it as the key to edit by.
+            let page = super::super::fetch_rows(&server, PASSWORD, &tags, &crate::drivers::RowFilter::default(), 0, 10)
+                .await
+                .unwrap();
+            assert!(page.columns.iter().all(|c| !c.primary_key), "{:?}", page.columns);
+            let diagram = super::super::schema_diagram(&server, PASSWORD, database, database).await.unwrap();
+            assert!(diagram.tables[0].columns.iter().all(|c| !c.primary_key));
         }
     }
 
