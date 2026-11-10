@@ -1,8 +1,6 @@
 import {
-  ACCOUNT_ENGINES,
-  DEFAULT_PORTS,
+  ENGINES,
   isFileEngine,
-  TLS_ENGINES,
   type AgentAccess,
   type Connection,
   type Engine,
@@ -34,7 +32,7 @@ export function emptyForm(): ConnectionForm {
     engine: 'postgres',
     environment: null,
     host: 'localhost',
-    port: String(DEFAULT_PORTS.postgres),
+    port: String(ENGINES.postgres.defaultPort),
     database: '',
     username: '',
     password: '',
@@ -61,13 +59,13 @@ export function formFromConnection(connection: Connection): ConnectionForm {
  * An account engine's host is a URI, which no other engine's host field takes.
  */
 export function withEngine(form: ConnectionForm, engine: Engine): ConnectionForm {
-  const usesDefaultPort = form.port === String(DEFAULT_PORTS[form.engine])
+  const usesDefaultPort = form.port === String(ENGINES[form.engine].defaultPort)
   const host = isAccount(engine) === isAccount(form.engine) ? form.host : isAccount(engine) ? '' : 'localhost'
-  return { ...form, engine, host, port: usesDefaultPort ? String(DEFAULT_PORTS[engine]) : form.port }
+  return { ...form, engine, host, port: usesDefaultPort ? String(ENGINES[engine].defaultPort) : form.port }
 }
 
 function isAccount(engine: Engine): boolean {
-  return ACCOUNT_ENGINES.includes(engine)
+  return ENGINES[engine].reach === 'account'
 }
 
 /** An account URI: `https://<account>.documents.azure.com:443/`, or `http://` for the local emulator. */
@@ -123,11 +121,11 @@ export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
     }
   }
   const srv = usesSrv(form)
-  const tls = TLS_ENGINES.includes(form.engine) && (form.tls || srv)
+  const tls = ENGINES[form.engine].tls && (form.tls || srv)
   return {
     ...rest,
     id,
-    port: srv && !isValidPort(port) ? DEFAULT_PORTS.mongodb : Number(port),
+    port: srv && !isValidPort(port) ? ENGINES.mongodb.defaultPort : Number(port),
     // Redis databases are numbered and all listed in the explorer; there is none to pick here.
     database: form.engine === 'redis' ? '' : form.database,
     password: password === '' ? undefined : password,
@@ -182,7 +180,7 @@ export function parseConnectionUrl(
       changes: {
         engine: 'redis',
         host: decode(host),
-        port: port || String(DEFAULT_PORTS.redis),
+        port: port || String(ENGINES.redis.defaultPort),
         username: decode(user),
         password: decode(pass),
         database: decode(path),
@@ -204,7 +202,7 @@ export function parseConnectionUrl(
     changes: {
       engine: 'mongodb',
       host: decode(host),
-      port: port || String(DEFAULT_PORTS.mongodb),
+      port: port || String(ENGINES.mongodb.defaultPort),
       username: decode(user),
       password: decode(pass),
       database: decode(path),

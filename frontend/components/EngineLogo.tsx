@@ -1,5 +1,5 @@
 import type { Engine } from '../domain/connection'
-import { ENGINE_LABELS } from '../domain/connection'
+import { ENGINES } from '../domain/connection'
 import postgres from '../assets/engines/postgresql.svg'
 import mysql from '../assets/engines/mysql.svg'
 import mariadb from '../assets/engines/mariadb.svg'
@@ -24,7 +24,7 @@ export function EngineLogo({ engine, size = 16 }: { engine: Engine; size?: numbe
   return (
     <img
       src={LOGOS[engine]}
-      alt={ENGINE_LABELS[engine]}
+      alt={ENGINES[engine].label}
       width={size}
       height={size}
       draggable={false}

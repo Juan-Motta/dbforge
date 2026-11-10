@@ -15,7 +15,7 @@ import { Icon } from '../../components/Icon'
 import { drawnRows, useWindowedRows } from '../../components/useWindowedRows'
 import { keepCursor } from '../../lib/cursor'
 import { useMessages } from '../../lib/i18n/useLanguage'
-import type { SqlDialect } from '../../domain/connection'
+import { isRelationalDialect, type SqlDialect } from '../../domain/connection'
 import type { TableRef } from '../../domain/table'
 import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, rowKeys, type Cell, type CellValue, type Edits } from './edits'
@@ -85,8 +85,6 @@ interface EditableGridProps {
   /** Marks a loaded row for deletion, or keeps it again. */
   onDeleteRow?: (row: number) => void
 }
-
-const RELATIONAL_DIALECTS: SqlDialect[] = ['postgres', 'mysql', 'sqlite', 'sqlserver']
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
@@ -339,7 +337,7 @@ export function EditableGrid(props: EditableGridProps) {
                   .join(',\n')}]`,
               ),
           },
-          ...(dialect && table && RELATIONAL_DIALECTS.includes(dialect)
+          ...(dialect && table && isRelationalDialect(dialect)
             ? [
                 {
                   label: m.copySelectedInsert(rowCount),
@@ -372,7 +370,7 @@ export function EditableGrid(props: EditableGridProps) {
           ? [{ label: m.copyCondition, onSelect: () => write(valueCondition(dialect, name, 'equal', value)) }]
           : []),
         { label: m.copyRowJson, onSelect: () => write(rowAsJson(names, current())) },
-        ...(dialect && table && RELATIONAL_DIALECTS.includes(dialect)
+        ...(dialect && table && isRelationalDialect(dialect)
           ? [{ label: m.copyRowInsert, onSelect: () => write(rowAsInsert(dialect, table, names, current())) }]
           : []),
       ],

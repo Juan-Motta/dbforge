@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  ENGINES,
   defaultDatabase,
   defaultSchema,
   hasDiagram,
@@ -127,7 +128,7 @@ export function App() {
   // A new query runs against the selected connection and database. Redis has
   // no query consoles: its key browser holds the CLI.
   const newQuery = activeConnection
-    ? activeConnection.engine === 'redis'
+    ? ENGINES[activeConnection.engine].keyBrowser
       ? () =>
           setTabs((state) =>
             openKeyspaceTab(
@@ -297,7 +298,7 @@ export function App() {
                   setTabs((state) => openTableTab(state, node.connectionId, tableRefFromPath(node.path)))
                 }
                 const connection = connections.find((c) => c.id === node.connectionId)
-                if (node.kind === 'database' && connection?.engine === 'redis') {
+                if (node.kind === 'database' && connection && ENGINES[connection.engine].keyBrowser) {
                   setTabs((state) => openKeyspaceTab(state, connection.id, connection.name, node.name))
                 }
               }}

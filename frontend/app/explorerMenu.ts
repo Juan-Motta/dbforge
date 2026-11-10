@@ -2,10 +2,8 @@ import type { MenuItem } from '../components/ContextMenu'
 import {
   defaultDatabase,
   defaultSchema,
-  DUMP_ENGINES,
   hasDiagram,
-  NEW_OBJECTS,
-  RELATIONAL_ENGINES,
+  ENGINES,
   sqlDialectOf,
   type Connection,
   type NewObjectKind,
@@ -73,7 +71,7 @@ export function explorerMenu(
 
   switch (node.kind) {
     case 'connection': {
-      const create = NEW_OBJECTS[connection.engine].map((kind) => ({
+      const create = ENGINES[connection.engine].newObjects.map((kind) => ({
         label: menuLabelOf(kind, adminM),
         icon: MENU_ICONS[kind],
         onSelect: () => actions.newObject(connection, kind),
@@ -101,7 +99,7 @@ export function explorerMenu(
       ]
     }
     case 'database': {
-      const dump: MenuItem[] = DUMP_ENGINES.includes(connection.engine)
+      const dump: MenuItem[] = ENGINES[connection.engine].dump
         ? [
             {
               label: m.exportDatabase,
@@ -140,7 +138,7 @@ function tableMenu(node: TreeNode, connection: Connection, actions: MenuActions,
   const table = tableRefFromPath(node.path)
   const dialect = sqlDialectOf(connection.engine)
   const cosmos = connection.engine === 'cosmosdb'
-  const relational = RELATIONAL_ENGINES.includes(connection.engine)
+  const relational = ENGINES[connection.engine].family === 'relational'
   const columns = () => actions.structure(connection, table).then((s) => s.columns.map((c) => c.name))
 
   const copy: MenuItem[] = [

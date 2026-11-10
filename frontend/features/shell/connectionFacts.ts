@@ -1,4 +1,4 @@
-import { connectionAddress, isFileEngine, TLS_ENGINES, type Connection } from '../../domain/connection'
+import { connectionAddress, ENGINES, isFileEngine, type Connection } from '../../domain/connection'
 import type { SharedMessages } from '../../lib/messages'
 import type { ShellMessages } from './messages'
 
@@ -16,7 +16,7 @@ export function connectionFacts(
   if (isFileEngine(connection.engine)) return [...facts, [m.file, connection.database]]
   facts.push([m.address, connectionAddress(connection, shared)])
   if (connection.database) facts.push([m.database, connection.database])
-  if (TLS_ENGINES.includes(connection.engine)) {
+  if (ENGINES[connection.engine].tls) {
     const tls = connection.tls || connection.srv
     facts.push([m.tls, !tls ? m.tlsOff : connection.allowSelfSigned ? m.tlsSelfSigned : m.tlsOn])
   }

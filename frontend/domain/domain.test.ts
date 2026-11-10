@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { connectionAddress, defaultSchema, hasDiagram, sqlDialectOf, type Connection } from './connection'
+import {
+  connectionAddress,
+  defaultSchema,
+  ENGINE_LIST,
+  ENGINES,
+  hasDiagram,
+  isRelationalDialect,
+  sqlDialectOf,
+  type Connection,
+} from './connection'
 import { tableRefFromPath } from './table'
 import { messages } from '../lib/messages'
 
@@ -86,5 +95,29 @@ describe('connectionAddress', () => {
 
   it('shows the file for SQLite', () => {
     expect(connectionAddress({ ...base, engine: 'sqlite', database: '/data/app.db' })).toBe('/data/app.db')
+  })
+})
+
+describe('ENGINES', () => {
+  it('lists SQL engines first, then the others, as the connection form groups them', () => {
+    expect(ENGINE_LIST).toEqual([
+      'postgres',
+      'mysql',
+      'mariadb',
+      'sqlite',
+      'sqlserver',
+      'mongodb',
+      'cosmosdb',
+      'redis',
+    ])
+    const relational = ENGINE_LIST.filter((engine) => ENGINES[engine].family === 'relational')
+    expect(ENGINE_LIST.slice(0, relational.length)).toEqual(relational)
+  })
+
+  it('tells SQL dialects from document ones', () => {
+    expect(['postgres', 'mysql', 'sqlite', 'sqlserver'].every((d) => isRelationalDialect(d as never))).toBe(
+      true,
+    )
+    expect(isRelationalDialect('mongodb') || isRelationalDialect('cosmosdb')).toBe(false)
   })
 })

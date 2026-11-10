@@ -1,4 +1,4 @@
-import type { Engine } from '../../domain/connection'
+import { ENGINES, type Engine } from '../../domain/connection'
 import type { Origin, StatementEntry } from './api'
 
 /** As many as the backend keeps. */
@@ -50,12 +50,10 @@ export function visible(entries: StatementEntry[], kind: Kind): StatementEntry[]
   return kind === 'all' ? entries : entries.filter((entry) => kindOf(entry.origin) === kind)
 }
 
-const SQL_ENGINES: ReadonlySet<Engine> = new Set(['postgres', 'mysql', 'mariadb', 'sqlite', 'sqlserver'])
-
 /** The statement as it is pasted into a console: SQL ends with `;`, other languages as they are. */
 export function runnable(entry: StatementEntry, engine: Engine | undefined): string {
   const text = entry.text.trim()
-  return engine && SQL_ENGINES.has(engine) && !text.endsWith(';') ? `${text};` : text
+  return engine && ENGINES[engine].family === 'relational' && !text.endsWith(';') ? `${text};` : text
 }
 
 /** The statements as one script, in the order they ran. */

@@ -8,17 +8,7 @@ import { InfoTip } from '../../components/InfoTip'
 import { Modal } from '../../components/Modal'
 import { Select, type SelectOption } from '../../components/Select'
 import { TextField } from '../../components/TextField'
-import {
-  DEFAULT_PORTS,
-  ENGINE_LABELS,
-  isFileEngine,
-  ACCOUNT_ENGINES,
-  NOSQL_ENGINES,
-  RELATIONAL_ENGINES,
-  TLS_ENGINES,
-  type Connection,
-  type Engine,
-} from '../../domain/connection'
+import { ENGINE_LIST, ENGINES, isFileEngine, type Connection, type Engine } from '../../domain/connection'
 import { copyText } from '../../lib/clipboard'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
@@ -74,7 +64,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
   )
-  const account = ACCOUNT_ENGINES.includes(form.engine)
+  const account = ENGINES[form.engine].reach === 'account'
   const [test, setTest] = useState<TestState>({ status: 'idle' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -132,11 +122,13 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
   }
 
   const engineOptions: SelectOption<Engine>[] = [
-    ...RELATIONAL_ENGINES.map((engine) => ({ engine, group: m.relational })),
-    ...NOSQL_ENGINES.map((engine) => ({ engine, group: m.nosql })),
+    ...ENGINE_LIST.map((engine) => ({
+      engine,
+      group: ENGINES[engine].family === 'relational' ? m.relational : m.nosql,
+    })),
   ].map(({ engine, group }) => ({
     value: engine,
-    label: ENGINE_LABELS[engine],
+    label: ENGINES[engine].label,
     group,
     icon: <EngineLogo engine={engine} size={16} />,
   }))
@@ -243,7 +235,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                 />
                 <TextField
                   label={m.port}
-                  info={m.portInfo(DEFAULT_PORTS[form.engine])}
+                  info={m.portInfo(ENGINES[form.engine].defaultPort)}
                   mono
                   inputMode="numeric"
                   disabled={srv}
@@ -300,7 +292,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
             {/* The line is kept while the storage loads, so the form never moves. */}
             <p className={styles.hint}>{storageNote(storage, account, m)}</p>
 
-            {TLS_ENGINES.includes(form.engine) && (
+            {ENGINES[form.engine].tls && (
               <fieldset className={styles.options}>
                 <legend className={styles.legend}>{m.security}</legend>
                 {form.engine === 'mongodb' && (

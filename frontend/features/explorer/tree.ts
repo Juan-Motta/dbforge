@@ -1,4 +1,4 @@
-import type { Connection } from '../../domain/connection'
+import { ENGINES, type Connection } from '../../domain/connection'
 import type { DbObject } from './api'
 import type { messages } from './messages'
 
@@ -52,7 +52,7 @@ const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
  */
 export function toChildNodes(parent: TreeNode, objects: DbObject[], m: Messages): TreeNode[] {
   // A Redis database holds keys, not schemas: it opens in the key browser.
-  const keyspaces = parent.kind === 'connection' && parent.connection.engine === 'redis'
+  const keyspaces = parent.kind === 'connection' && ENGINES[parent.connection.engine].keyBrowser
   const toNode = (object: DbObject): TreeNode => ({
     id: parent.id + SEP + object.name,
     name: object.name,
