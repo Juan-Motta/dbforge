@@ -94,7 +94,11 @@ export function explorerMenu(
           icon: 'external',
           onSelect: () => actions.copy(connectionUrl(connection)),
         },
-        { label: m.duplicateConnection, onSelect: () => actions.duplicateConnection(connection) },
+        {
+          label: m.duplicateConnection,
+          icon: 'duplicate',
+          onSelect: () => actions.duplicateConnection(connection),
+        },
         { label: m.editConnection, icon: 'edit', onSelect: () => actions.editConnection(connection) },
         { label: m.deleteConnection, icon: 'trash', onSelect: () => actions.deleteConnection(connection) },
       ]
