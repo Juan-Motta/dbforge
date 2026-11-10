@@ -12,6 +12,7 @@ use reqwest::Method;
 use serde_json::{Map, Value, json};
 
 use super::client::{Client, Target};
+use super::logged::{PARTITION_KEY, partition_header};
 use super::query::{Feed, Items, Select, documents};
 use super::{shared_type, text, type_name, without_system_properties};
 use crate::connections::model::Connection;
@@ -142,18 +143,18 @@ async fn execute(client: &Client, table: &TableRef, write: &Write) -> Result<()>
     let (database, container) = (&table.database, &table.name);
     match write {
         Write::Replace { id, partition, etag, item } => {
-            let key = partition.to_string();
-            let headers = [("x-ms-documentdb-partitionkey", key.as_str()), ("if-match", etag.as_str())];
+            let key = partition_header(partition);
+            let headers = [(PARTITION_KEY, key.as_str()), ("if-match", etag.as_str())];
             client.send(Method::PUT, &Target::item(database, container, id), &headers, Some(item)).await?;
         }
         Write::Create { partition, item } => {
-            let key = partition.to_string();
-            let headers = [("x-ms-documentdb-partitionkey", key.as_str())];
+            let key = partition_header(partition);
+            let headers = [(PARTITION_KEY, key.as_str())];
             client.send(Method::POST, &Target::items(database, container), &headers, Some(item)).await?;
         }
         Write::Delete { id, partition, etag } => {
-            let key = partition.to_string();
-            let headers = [("x-ms-documentdb-partitionkey", key.as_str()), ("if-match", etag.as_str())];
+            let key = partition_header(partition);
+            let headers = [(PARTITION_KEY, key.as_str()), ("if-match", etag.as_str())];
             client.send(Method::DELETE, &Target::item(database, container, id), &headers, None).await?;
         }
     }
@@ -344,6 +345,28 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the Cosmos DB emulator on port 58081"]
+    async fn partition_keys_beyond_ascii_reach_their_items() {
+        let items =
+            vec![json!({"id": "1", "customer": "México", "total": 1}), json!({"id": "2", "customer": "東京 😀"})];
+        let connection = database("dbforge_edit_unicode", &[("orders", "/customer", items)]).await;
+        let table = table("dbforge_edit_unicode", "orders");
+        let changes = vec![
+            RowChange::Update {
+                key: map(&[("id", Some("1")), ("customer", Some("México"))]),
+                values: map(&[("total", Some("2"))]),
+            },
+            RowChange::Delete { key: map(&[("id", Some("2")), ("customer", Some("東京 😀"))]) },
+            RowChange::Insert { values: map(&[("id", Some("3")), ("customer", Some("Zürich"))]) },
+        ];
+        apply_changes(&connection, KEY, &table, &changes).await.unwrap();
+        let rows = rows(&connection, "dbforge_edit_unicode").await;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][..3], [Some("1".into()), Some("México".into()), Some("2".into())]);
+        assert_eq!(rows[1][..2], [Some("3".into()), Some("Zürich".into())]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Cosmos DB emulator on port 58081"]
     async fn applies_updates_inserts_and_deletes() {
         let connection = database("dbforge_edit", &[("orders", "/customer", orders())]).await;
         let table = table("dbforge_edit", "orders");
@@ -375,9 +398,11 @@ mod tests {
         assert_eq!(summary, ApplySummary { updated: 1, inserted: 2, deleted: 1 });
         let rows = rows(&connection, "dbforge_edit").await;
         assert_eq!(rows.len(), 4);
+        // By id: a generated one may sort before "1".
+        let row = |id: &str| rows.iter().find(|row| row[0].as_deref() == Some(id)).unwrap();
         // The columns are id, customer, total, tags: `note` is gone, `tags` is null.
-        assert_eq!(rows[0], [Some("1".into()), Some("a".into()), Some("15".into()), None]);
-        assert_eq!(rows[2][..3], [Some("4".into()), Some("c".into()), Some("40".into())]);
+        assert_eq!(row("1"), &[Some("1".into()), Some("a".into()), Some("15".into()), None]);
+        assert_eq!(row("4")[..3], [Some("4".into()), Some("c".into()), Some("40".into())]);
         // The new item without an id got one.
         assert!(rows.iter().any(|row| row[1].as_deref() == Some("d") && row[0].as_ref().unwrap().len() == 36));
     }
@@ -466,10 +491,9 @@ mod tests {
         let filter = RowFilter { filter: String::new(), order: "c.id".into() };
         let page = fetch_rows(&connection, KEY, &table, &filter, 0, 50).await.unwrap();
         let documents = page.documents.unwrap();
-        assert_eq!(
-            serde_json::from_str::<Value>(&documents[0]).unwrap(),
-            json!({"id": "1", "customer": "a", "total": 11, "items": [{"sku": "x"}]})
-        );
+        // By id: a generated one may sort before "1".
+        let first = documents.iter().map(|d| serde_json::from_str::<Value>(d).unwrap()).find(|d| d["id"] == "1");
+        assert_eq!(first.unwrap(), json!({"id": "1", "customer": "a", "total": 11, "items": [{"sku": "x"}]}));
         assert!(documents.iter().any(|d| d.contains("\"deep\": true")));
 
         let bad = |document: &str| {

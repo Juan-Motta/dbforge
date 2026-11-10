@@ -38,7 +38,23 @@ use crate::error::Result;
 use crate::statement_log::Recording;
 
 /// The header naming the partition an item request is for, as a JSON array.
-const PARTITION_KEY: &str = "x-ms-documentdb-partitionkey";
+pub const PARTITION_KEY: &str = "x-ms-documentdb-partitionkey";
+
+/// A partition key as its header carries it: JSON with every character past
+/// ASCII escaped (`\u00e9`), as the service reads header values as ASCII.
+pub fn partition_header(key: &serde_json::Value) -> String {
+    let mut text = String::new();
+    for c in key.to_string().chars() {
+        if c.is_ascii() {
+            text.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                text.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    text
+}
 /// The header that turns a query into a request for its plan.
 const PLAN_REQUEST: &str = "x-ms-cosmos-is-query-plan-request";
 
@@ -133,7 +149,11 @@ impl<'a> Request<'a> {
         };
         if let Some(key) = self.header(PARTITION_KEY) {
             text.push_str(" PARTITION ");
-            text.push_str(key);
+            // Written back without the escapes the header needs: `["México"]`.
+            match serde_json::from_str::<serde_json::Value>(key) {
+                Ok(key) => text.push_str(&key.to_string()),
+                Err(_) => text.push_str(key),
+            }
         }
         if let Some(body) = self.body.filter(|body| operation != Operation::Create || !only_an_id(body)) {
             text.push(' ');
@@ -240,6 +260,15 @@ fn written_in(sql: &str, parameters: &[Value]) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn partition_keys_past_ascii_are_escaped_for_the_header() {
+        let key = serde_json::json!(["México", "東京 😀", 1]);
+        let header = partition_header(&key);
+        assert_eq!(header, r#"["M\u00e9xico","\u6771\u4eac \ud83d\ude00",1]"#);
+        assert!(header.is_ascii());
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&header).unwrap(), key);
+    }
 
     use super::*;
 

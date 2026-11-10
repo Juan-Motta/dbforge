@@ -340,12 +340,12 @@ pub(super) mod tests {
             client.send(Method::POST, &Target::containers(name), &[], Some(&definition)).await.unwrap();
             for item in items {
                 let value = item.pointer(key).cloned().unwrap_or(Value::Null);
-                let partition = json!([value]).to_string();
+                let partition = super::logged::partition_header(&json!([value]));
                 client
                     .send(
                         Method::POST,
                         &Target::items(name, container),
-                        &[("x-ms-documentdb-partitionkey", &partition)],
+                        &[(super::logged::PARTITION_KEY, &partition)],
                         Some(item),
                     )
                     .await
