@@ -27,8 +27,11 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
   const m = useMessages(messages)
   const db = Number(database.replace(/^db/, '')) || 0
   const [selected, setSelected] = useState<string | null>(null)
-  // A key's menu opens one of its detail's dialogs; `n` mounts the detail again for each request.
-  const [request, setRequest] = useState<{ action: KeyAction; n: number } | null>(null)
+  // A key's menu opens one of its detail's dialogs. The request is for that one
+  // mount of the detail: `mounts` mounts it again, and choosing a key drops it,
+  // so the dialog can't open again on the next key.
+  const [request, setRequest] = useState<KeyAction | null>(null)
+  const [mounts, setMounts] = useState(0)
   const [overview, setOverview] = useState<Overview | null>(null)
   const [overviewError, setOverviewError] = useState<string | null>(null)
   const [keysToken, setKeysToken] = useState(0)
@@ -58,6 +61,7 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
 
   const keysChanged = (next: string | null) => {
     setSelected(next)
+    setRequest(null)
     setKeysToken((n) => n + 1)
     void refreshOverview()
   }
@@ -68,12 +72,16 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
         connectionId={connectionId}
         db={db}
         selected={selected}
-        onSelect={(key) => setSelected(key.name)}
+        onSelect={(key) => {
+          setSelected(key.name)
+          setRequest(null)
+        }}
         onAddKey={() => setAdding(true)}
         reloadToken={keysToken}
         onKeyAction={(key, action) => {
           setSelected(key.name)
-          setRequest((current) => ({ action, n: (current?.n ?? 0) + 1 }))
+          setRequest(action)
+          setMounts((n) => n + 1)
         }}
       />
 
@@ -107,8 +115,8 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
           {selected ? (
             <KeyDetail
               // A new key starts with its first element picked.
-              key={`${selected}#${request?.n ?? 0}`}
-              initialDialog={request?.action}
+              key={`${selected}#${mounts}`}
+              initialDialog={request ?? undefined}
               connectionId={connectionId}
               db={db}
               name={selected}
