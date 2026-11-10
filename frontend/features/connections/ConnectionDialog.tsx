@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
@@ -21,7 +21,7 @@ import {
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { messages as sharedMessages } from '../../lib/messages'
-import { connectionsApi, type ConnectionInput } from './api'
+import { connectionsApi, type ConnectionInput, type CredentialStorage } from './api'
 import {
   canSubmit,
   canTest,
@@ -60,6 +60,18 @@ function hostHintOf(engine: Engine, m: ConnectionMessages): string | undefined {
 
 export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDialogProps) {
   const m = useMessages(messages)
+  const [storage, setStorage] = useState<CredentialStorage | null>(null)
+
+  useEffect(() => {
+    let current = true
+    connectionsApi
+      .credentialStorage()
+      .then((info) => current && setStorage(info.storage))
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [])
   const shared = useMessages(sharedMessages)
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
@@ -284,7 +296,8 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                   onChange={(e) => update({ password: e.target.value })}
                 />
               </div>
-              <p className={styles.hint}>{account ? m.keysStored : m.passwordsStored}</p>
+              {/* The line is kept while the storage loads, so the form never moves. */}
+              <p className={styles.hint}>{storageNote(storage, account, m)}</p>
 
               {TLS_ENGINES.includes(form.engine) && (
                 <div className={styles.options}>
@@ -349,4 +362,11 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
       </footer>
     </Modal>
   )
+}
+
+/** Where the password (or account key) will be kept; a blank line while that loads. */
+function storageNote(storage: CredentialStorage | null, account: boolean, m: ConnectionMessages): string {
+  if (storage === null) return '\u00a0'
+  if (storage === 'file') return account ? m.keysStoredFile : m.passwordsStoredFile
+  return account ? m.keysStored : m.passwordsStored
 }

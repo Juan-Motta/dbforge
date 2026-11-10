@@ -14,6 +14,17 @@ export const messages = defineMessages({
     languageIntro: 'The language of menus, dialogs and messages.',
     interfaceLanguage: 'Interface language',
     interfaceLanguageHelp: 'Messages from database servers stay in the language the server uses.',
+    passwords: 'Passwords',
+    passwordsIntro: 'Where DBForge saves the passwords and keys of your connections.',
+    storage: 'Where passwords are saved',
+    keychain: 'System keychain',
+    file: 'Encrypted file',
+    keychainHelp:
+      'Your system protects them: Keychain on macOS, Credential Manager on Windows, Secret Service on Linux.',
+    fileHelp:
+      'A file only this computer can read, so a copy elsewhere is useless. Nothing is ever asked. Anyone using your account on this computer could still read it.',
+    fileLocation: 'Encrypted file',
+    moving: 'Moving your passwords…',
     about: 'About',
     tagline: 'A fast desktop viewer and editor for your databases.',
     version: 'Version',
@@ -34,6 +45,17 @@ export const messages = defineMessages({
     interfaceLanguage: 'Idioma de la interfaz',
     interfaceLanguageHelp:
       'Los mensajes de los servidores de bases de datos llegan en el idioma del servidor.',
+    passwords: 'Contraseñas',
+    passwordsIntro: 'Dónde guarda DBForge las contraseñas y claves de tus conexiones.',
+    storage: 'Dónde se guardan las contraseñas',
+    keychain: 'Llavero del sistema',
+    file: 'Archivo cifrado',
+    keychainHelp:
+      'Las protege tu sistema: Llavero en macOS, Administrador de credenciales en Windows, Secret Service en Linux.',
+    fileHelp:
+      'Un archivo que solo este equipo puede leer, así que una copia en otro lado no sirve. Nunca se pide nada. Alguien que use tu cuenta en este equipo sí podría leerlo.',
+    fileLocation: 'Archivo cifrado',
+    moving: 'Moviendo tus contraseñas…',
     about: 'Acerca de',
     tagline: 'Un visor y editor de escritorio rápido para tus bases de datos.',
     version: 'Versión',

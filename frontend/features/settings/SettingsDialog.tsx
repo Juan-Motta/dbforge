@@ -3,15 +3,17 @@ import { getVersion } from '@tauri-apps/api/app'
 import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { ENGINE_LABELS } from '../../domain/connection'
+import { errorMessage } from '../../lib/errors'
 import { LANGUAGES } from '../../lib/i18n/language'
 import { useLanguage, useMessages } from '../../lib/i18n/useLanguage'
+import { connectionsApi, type CredentialStorage, type CredentialStorageInfo } from '../connections/api'
 import { messages } from './messages'
 import type { ThemePreference } from './theme'
 import styles from './SettingsDialog.module.css'
 
-type Section = 'appearance' | 'language' | 'about'
+type Section = 'appearance' | 'language' | 'passwords' | 'about'
 
-const SECTIONS: Section[] = ['appearance', 'language', 'about']
+const SECTIONS: Section[] = ['appearance', 'language', 'passwords', 'about']
 
 const THEMES: ThemePreference[] = ['dark', 'light', 'system']
 
@@ -46,6 +48,7 @@ export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialog
         <main className={styles.content}>
           {section === 'appearance' && <Appearance theme={theme} onThemeChange={onThemeChange} />}
           {section === 'language' && <LanguageSection />}
+          {section === 'passwords' && <Passwords />}
           {section === 'about' && <About />}
         </main>
       </div>
@@ -116,6 +119,80 @@ function LanguageSection() {
           ))}
         </div>
       </div>
+    </>
+  )
+}
+
+const STORAGES: CredentialStorage[] = ['keychain', 'file']
+
+function Passwords() {
+  const m = useMessages(messages)
+  const [info, setInfo] = useState<CredentialStorageInfo | null>(null)
+  const [moving, setMoving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let current = true
+    connectionsApi
+      .credentialStorage()
+      .then((value) => current && setInfo(value))
+      .catch((failure) => current && setError(errorMessage(failure)))
+    return () => {
+      current = false
+    }
+  }, [])
+
+  const choose = async (storage: CredentialStorage) => {
+    if (moving || info?.storage === storage) return
+    setMoving(true)
+    setError(null)
+    try {
+      setInfo(await connectionsApi.setCredentialStorage(storage))
+    } catch (failure) {
+      setError(errorMessage(failure))
+      // A partly finished switch may still have changed the choice.
+      setInfo(await connectionsApi.credentialStorage().catch(() => info))
+    } finally {
+      setMoving(false)
+    }
+  }
+
+  return (
+    <>
+      <h3 className={styles.heading}>{m.passwords}</h3>
+      <p className={styles.intro}>{m.passwordsIntro}</p>
+      <div className={`${styles.row} ${styles.stacked}`}>
+        <span className={styles.label} id="settings-storage">
+          {m.storage}
+        </span>
+        {/* Each choice shows what it protects against, side by side. */}
+        <div role="radiogroup" aria-labelledby="settings-storage" className={styles.choices}>
+          {STORAGES.map((storage) => (
+            <button
+              key={storage}
+              type="button"
+              role="radio"
+              aria-checked={info?.storage === storage}
+              disabled={info === null || moving}
+              className={styles.choice}
+              onClick={() => void choose(storage)}
+            >
+              <strong>{m[storage]}</strong>
+              <span className={styles.help}>{storage === 'file' ? m.fileHelp : m.keychainHelp}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <span className={styles.label}>{m.fileLocation}</span>
+        <span className={`${styles.value} ${styles.path}`} title={info?.filePath}>
+          {/* Right to left, so a long path shows its end; the path itself stays left to right. */}
+          <bdi>{info?.filePath ?? '\u00a0'}</bdi>
+        </span>
+      </div>
+      <p className={styles.status} role="status">
+        {moving ? m.moving : error && <span className={styles.error}>{error}</span>}
+      </p>
     </>
   )
 }

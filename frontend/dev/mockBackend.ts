@@ -341,6 +341,11 @@ export function installMockBackend() {
           else accounts.add(object.name)
           return delay(null)
         }
+        case 'credential_storage':
+          return delay(credentials)
+        case 'set_credential_storage':
+          credentials = { ...credentials, storage: payload.storage as 'keychain' | 'file' }
+          return delay(credentials)
         case 'plugin:app|version':
           return '0.1.0'
         case 'cancel_dump':
@@ -356,6 +361,11 @@ export function installMockBackend() {
 
 /** Jobs the dialogs asked to stop. */
 const cancelled = new Set<string>()
+// Where passwords are kept, as the settings choose.
+let credentials = {
+  storage: 'keychain' as 'keychain' | 'file',
+  filePath: '/Users/demo/Library/Application Support/dev.dbforge.app/credentials.bin',
+}
 // Roles and users created from a connection's menu.
 const accounts = new Set(['postgres'])
 
