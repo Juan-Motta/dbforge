@@ -3,15 +3,7 @@ import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import type { HistoryEntry } from './api'
-import {
-  firstLine,
-  formatDuration,
-  formatTime,
-  groupByDay,
-  inScope,
-  outcomeLabel,
-  type HistoryScope,
-} from './format'
+import { firstLine, formatDuration, formatTime, groupByDay, outcomeLabel, type HistoryScope } from './format'
 import { messages } from './messages'
 import { useHistory } from './useHistory'
 import styles from './HistoryPanel.module.css'
@@ -43,8 +35,13 @@ export function HistoryPanel({
   const [search, setSearch] = useState('')
   const [errorsOnly, setErrorsOnly] = useState(false)
   const [scope, setScope] = useState<HistoryScope>('connection')
-  const { entries: all, loadedAt, error, loading } = useHistory(search, errorsOnly, reloadKey)
-  const entries = all && inScope(all, scope, connectionId)
+  // The backend keeps to the connection before it takes the newest 500.
+  const { entries, loadedAt, error, loading } = useHistory(
+    search,
+    scope === 'connection' ? connectionId : null,
+    errorsOnly,
+    reloadKey,
+  )
 
   return (
     <aside className={styles.panel} aria-label={m.queryHistory}>

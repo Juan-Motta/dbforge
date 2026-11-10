@@ -312,7 +312,10 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       const search = String(payload.search).toLowerCase()
       return delay(
         mockHistory.filter(
-          (entry) => entry.sql.toLowerCase().includes(search) && (!payload.errorsOnly || entry.error),
+          (entry) =>
+            entry.sql.toLowerCase().includes(search) &&
+            (!payload.connectionId || entry.connectionId === payload.connectionId) &&
+            (!payload.errorsOnly || entry.error),
         ),
       )
     }

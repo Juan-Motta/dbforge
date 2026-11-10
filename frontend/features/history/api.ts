@@ -19,7 +19,10 @@ export interface HistoryEntry {
 }
 
 export const historyApi = {
-  /** Newest first; at most 500. `search` matches the SQL text, ignoring case. */
-  list: (search: string, errorsOnly: boolean) =>
-    invoke<HistoryEntry[]>('list_history', { search, errorsOnly }),
+  /**
+   * Newest first; at most 500. `search` matches the SQL text, ignoring case;
+   * with `connectionId`, only that connection's runs.
+   */
+  list: (search: string, connectionId: string | null, errorsOnly: boolean) =>
+    invoke<HistoryEntry[]>('list_history', { search, connectionId, errorsOnly }),
 }

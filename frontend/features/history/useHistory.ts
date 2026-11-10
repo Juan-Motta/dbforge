@@ -4,22 +4,30 @@ import { historyApi, type HistoryEntry } from './api'
 
 type Result = { key: string } & ({ entries: HistoryEntry[]; loadedAt: number } | { error: string })
 
-/** Loads matching history entries, again whenever the filters or `reloadKey` change, or on `reload()`. */
-export function useHistory(search: string, errorsOnly: boolean, reloadKey?: unknown) {
+/**
+ * Loads matching history entries, again whenever the filters or `reloadKey`
+ * change, or on `reload()`. `connectionId` keeps to that connection's runs.
+ */
+export function useHistory(
+  search: string,
+  connectionId: string | null,
+  errorsOnly: boolean,
+  reloadKey?: unknown,
+) {
   const [reloads, setReloads] = useState(0)
   const [result, setResult] = useState<Result | null>(null)
-  const key = JSON.stringify([search, errorsOnly, reloads, reloadKey ?? null])
+  const key = JSON.stringify([search, connectionId, errorsOnly, reloads, reloadKey ?? null])
 
   useEffect(() => {
     const request = { cancelled: false }
     historyApi
-      .list(search, errorsOnly)
+      .list(search, connectionId, errorsOnly)
       .then((entries) => !request.cancelled && setResult({ key, entries, loadedAt: Date.now() }))
       .catch((error) => !request.cancelled && setResult({ key, error: errorMessage(error) }))
     return () => {
       request.cancelled = true
     }
-  }, [search, errorsOnly, key])
+  }, [search, connectionId, errorsOnly, key])
 
   const loading = result?.key !== key
   return {
