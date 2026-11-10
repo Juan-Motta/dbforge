@@ -73,7 +73,9 @@ pub fn credential_storage(store: State<'_, ConnectionStore>) -> StorageInfo {
 pub async fn set_credential_storage(app: AppHandle, storage: Storage) -> Result<StorageInfo> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<ConnectionStore>();
-        let ids: Vec<String> = store.list().into_iter().map(|connection| connection.id).collect();
+        let mut ids: Vec<String> = store.list().into_iter().map(|connection| connection.id).collect();
+        // The MCP server's token is a secret too, kept wherever the passwords are.
+        ids.push(crate::mcp::token::CREDENTIAL_ID.into());
         let report = |progress: SwitchProgress| {
             let _ = app.emit("credential-progress", progress);
         };

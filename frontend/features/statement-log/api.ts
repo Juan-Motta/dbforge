@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 /** What a statement was sent for. */
-export type Origin = 'console' | 'browse' | 'edit' | 'metadata' | 'admin' | 'export' | 'dump' | 'connect'
+export type Origin =
+  'console' | 'browse' | 'edit' | 'metadata' | 'admin' | 'export' | 'dump' | 'connect' | 'agent'
 
 /** One statement DBForge sent to a database, as the backend recorded it. */
 export interface StatementEntry {

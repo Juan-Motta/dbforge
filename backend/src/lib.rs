@@ -10,6 +10,7 @@ mod explorer;
 mod export;
 mod history;
 mod keyspace;
+mod mcp;
 mod query;
 mod statement_log;
 
@@ -31,6 +32,14 @@ pub fn run() {
             app.manage(dump::ToolPaths::load(config.join("tools.json"))?);
             app.manage(query::QuerySessions::default());
             app.manage(dump::DumpJobs::default());
+            let mcp_settings = mcp::SettingsFile::load(config.join("mcp.json"))?;
+            let settings = mcp_settings.get();
+            app.manage(mcp_settings);
+            app.manage(mcp::McpServer::default());
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                mcp::commands::apply(&handle, settings).await;
+            });
             app.manage(statement_log::StatementLog::new(2000, statement_log::EventSink(app.handle().clone())));
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
             app.manage(history::HistoryStore::load(history_path)?);
@@ -78,6 +87,10 @@ pub fn run() {
             cursor::keep_cursor,
             statement_log::commands::list_statements,
             statement_log::commands::clear_statements,
+            mcp::commands::mcp_state,
+            mcp::commands::set_mcp_settings,
+            mcp::commands::mcp_token,
+            mcp::commands::regenerate_mcp_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");

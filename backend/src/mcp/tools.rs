@@ -1,0 +1,222 @@
+//! What agents can do: the MCP tools, each checking the connection's agent
+//! access and running in a statement-log scope, so every statement an agent
+//! causes shows in the app's console as the agent's.
+//!
+//! Tools never return a password or anything the app keeps secret: agents
+//! name a connection by its id, and the app opens it with its own credentials.
+
+use rmcp::handler::server::wrapper::{Json, Parameters};
+use rmcp::schemars::{self, JsonSchema};
+use rmcp::{tool, tool_handler, tool_router};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
+
+use crate::connections::model::{AgentAccess, Connection};
+use crate::connections::store::ConnectionStore;
+use crate::connections::tags::TagStore;
+use crate::drivers::{self, ObjectKind, TableRef};
+use crate::statement_log::{self, Origin, StatementLog};
+
+/// The MCP server's handler: one per agent session, all sharing the app.
+#[derive(Clone)]
+pub struct Tools {
+    app: AppHandle,
+}
+
+impl Tools {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+
+    /// The connection `id` with its password, when agents may at least read it.
+    /// One they may not use reads as unknown, so its existence isn't given away.
+    fn open(&self, id: &str) -> Result<(Connection, Option<String>), String> {
+        let store = self.app.state::<ConnectionStore>();
+        let connection =
+            store.get(id).ok().filter(|connection| connection.agent_access != AgentAccess::None).ok_or_else(|| {
+                format!("No connection with id {id}. Call list_connections to see the ones you can use.")
+            })?;
+        let password = store.password(&connection.id).map_err(|error| error.to_string())?;
+        Ok((connection, password))
+    }
+
+    /// Runs `work` with its statements recorded as the agent's, on `connection`.
+    async fn as_agent<T>(
+        &self,
+        connection: &Connection,
+        work: impl Future<Output = crate::error::Result<T>>,
+    ) -> Result<T, String> {
+        let log = self.app.state::<StatementLog>();
+        statement_log::scoped(&log, &connection.id, Origin::Agent, work).await.map_err(|error| error.to_string())
+    }
+}
+
+/// A connection as agents see it: enough to choose it and write to it in its language.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionView {
+    /// What every other tool takes as `connectionId`.
+    pub id: String,
+    pub name: String,
+    /// PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, MongoDB, Redis or Azure Cosmos DB.
+    pub engine: String,
+    /// The language statements are written in for this engine.
+    pub language: String,
+    /// The tag the user gave it (e.g. PROD), if any.
+    pub tag: Option<String>,
+    /// `read`: `query` only. `write`: `execute` too.
+    pub access: String,
+    /// Changes wait for the user to approve them in the app.
+    pub asks_before_changes: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ConnectionList {
+    pub connections: Vec<ConnectionView>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListObjectsRequest {
+    /// From `list_connections`.
+    pub connection_id: String,
+    /// Where to look, as names from the root: `[]` lists databases, `["shop"]`
+    /// its schemas (or tables, for engines without schemas), `["shop", "public"]`
+    /// the tables and views of that schema.
+    #[serde(default)]
+    pub path: Vec<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectView {
+    pub name: String,
+    /// `database`, `schema`, `table` or `view`.
+    pub kind: String,
+    /// Approximate rows, when the server knows it.
+    pub row_estimate: Option<i64>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ObjectList {
+    pub objects: Vec<ObjectView>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DescribeTableRequest {
+    pub connection_id: String,
+    pub database: String,
+    /// The schema; for engines without schemas, the same as `database`.
+    pub schema: String,
+    pub table: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TableView {
+    /// `table` or `view`.
+    pub kind: String,
+    pub row_estimate: Option<i64>,
+    /// A script that creates it: columns, keys, indexes, foreign keys, triggers.
+    pub definition: String,
+}
+
+fn kind_name(kind: ObjectKind) -> &'static str {
+    match kind {
+        ObjectKind::Database => "database",
+        ObjectKind::Schema => "schema",
+        ObjectKind::Table => "table",
+        ObjectKind::View => "view",
+    }
+}
+
+fn language_of(connection: &Connection) -> &'static str {
+    use crate::connections::model::Engine;
+    match connection.engine {
+        Engine::Postgres => "PostgreSQL SQL",
+        Engine::Mysql | Engine::Mariadb => "MySQL SQL",
+        Engine::Sqlite => "SQLite SQL",
+        Engine::Sqlserver => "T-SQL",
+        Engine::Mongodb => "mongosh, e.g. db.getCollection(\"orders\").find({ status: \"paid\" })",
+        Engine::Redis => "one redis-cli command per call, e.g. HGETALL user:1",
+        Engine::Cosmosdb => "Cosmos DB SQL on one container, e.g. SELECT * FROM c WHERE c.status = \"paid\"",
+    }
+}
+
+#[tool_router]
+impl Tools {
+    #[tool(
+        description = "Lists the database connections saved in DBForge that you may use, with the language each one takes and whether you may change data. Call this first."
+    )]
+    async fn list_connections(&self) -> Json<ConnectionList> {
+        let tags = self.app.state::<TagStore>().list();
+        let connections = self
+            .app
+            .state::<ConnectionStore>()
+            .list()
+            .into_iter()
+            .filter(|connection| connection.agent_access != AgentAccess::None)
+            .map(|connection| {
+                let tag = tags.iter().find(|tag| Some(&tag.id) == connection.environment.as_ref());
+                ConnectionView {
+                    language: language_of(&connection).into(),
+                    engine: connection.engine.label().into(),
+                    tag: tag.map(|tag| tag.name.clone()),
+                    access: match connection.agent_access {
+                        AgentAccess::Write => "write",
+                        _ => "read",
+                    }
+                    .into(),
+                    asks_before_changes: tag.is_some_and(|tag| tag.confirm),
+                    id: connection.id,
+                    name: connection.name,
+                }
+            })
+            .collect();
+        Json(ConnectionList { connections })
+    }
+
+    #[tool(description = "Lists what a connection holds at a path: databases, then schemas, then tables and views.")]
+    async fn list_objects(
+        &self,
+        Parameters(request): Parameters<ListObjectsRequest>,
+    ) -> Result<Json<ObjectList>, String> {
+        let (connection, password) = self.open(&request.connection_id)?;
+        let objects = self
+            .as_agent(&connection, drivers::list_objects(&connection, password.as_deref(), &request.path))
+            .await?
+            .into_iter()
+            .map(|object| ObjectView {
+                name: object.name,
+                kind: kind_name(object.kind).into(),
+                row_estimate: object.row_estimate,
+            })
+            .collect();
+        Ok(Json(ObjectList { objects }))
+    }
+
+    #[tool(
+        description = "Describes a table or view: a script that creates it, with its columns, types, keys, indexes and foreign keys."
+    )]
+    async fn describe_table(
+        &self,
+        Parameters(request): Parameters<DescribeTableRequest>,
+    ) -> Result<Json<TableView>, String> {
+        let (connection, password) = self.open(&request.connection_id)?;
+        let table = TableRef { database: request.database, schema: request.schema, name: request.table };
+        let structure =
+            self.as_agent(&connection, drivers::table_structure(&connection, password.as_deref(), &table)).await?;
+        Ok(Json(TableView {
+            kind: kind_name(structure.kind).into(),
+            row_estimate: structure.row_estimate,
+            definition: structure.ddl,
+        }))
+    }
+}
+
+#[tool_handler(
+    name = "DBForge",
+    instructions = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console."
+)]
+impl rmcp::ServerHandler for Tools {}

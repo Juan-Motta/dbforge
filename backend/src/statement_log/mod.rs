@@ -37,6 +37,8 @@ pub enum Origin {
     Dump,
     /// Testing a connection.
     Connect,
+    /// Sent by an AI agent through the MCP server.
+    Agent,
 }
 
 /// One statement as the console shows it.

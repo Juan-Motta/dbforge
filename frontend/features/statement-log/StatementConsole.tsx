@@ -14,6 +14,7 @@ import styles from './StatementConsole.module.css'
 /** What a statement was for, at a glance: user's own, changes, reads, metadata. */
 const KIND_TONES: Record<Exclude<Kind, 'all'>, Tone> = {
   console: 'info',
+  agents: 'accent',
   changes: 'warn',
   reads: 'ok',
   metadata: 'muted',
@@ -28,6 +29,7 @@ const ORIGIN_LABELS: Record<Origin, `origin${Capitalize<Origin>}`> = {
   export: 'originExport',
   dump: 'originDump',
   connect: 'originConnect',
+  agent: 'originAgent',
 }
 
 interface StatementConsoleProps {

@@ -5,9 +5,9 @@ import type { Origin, StatementEntry } from './api'
 export const CAPACITY = 2000
 
 /** The console's filter: what the statements were for, grouped as people think of them. */
-export type Kind = 'all' | 'console' | 'changes' | 'reads' | 'metadata'
+export type Kind = 'all' | 'console' | 'agents' | 'changes' | 'reads' | 'metadata'
 
-export const KINDS: Kind[] = ['all', 'console', 'changes', 'reads', 'metadata']
+export const KINDS: Kind[] = ['all', 'console', 'agents', 'changes', 'reads', 'metadata']
 
 const KIND_OF: Record<Origin, Exclude<Kind, 'all'>> = {
   console: 'console',
@@ -18,6 +18,7 @@ const KIND_OF: Record<Origin, Exclude<Kind, 'all'>> = {
   export: 'reads',
   metadata: 'metadata',
   connect: 'metadata',
+  agent: 'agents',
 }
 
 export function kindOf(origin: Origin): Exclude<Kind, 'all'> {

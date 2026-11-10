@@ -7,6 +7,7 @@ export const messages = defineMessages({
     filter: 'Show',
     all: 'All',
     console: 'Console',
+    agents: 'Agents',
     changes: 'Changes',
     reads: 'Reads',
     metadata: 'Metadata',
@@ -28,6 +29,7 @@ export const messages = defineMessages({
     originExport: 'Export',
     originDump: 'Dump',
     originConnect: 'Connect',
+    originAgent: 'Agent',
   },
   es: {
     title: 'Sentencias',
@@ -35,6 +37,7 @@ export const messages = defineMessages({
     filter: 'Mostrar',
     all: 'Todas',
     console: 'Consola',
+    agents: 'Agentes',
     changes: 'Cambios',
     reads: 'Lecturas',
     metadata: 'Metadatos',
@@ -57,5 +60,6 @@ export const messages = defineMessages({
     originExport: 'Export',
     originDump: 'Dump',
     originConnect: 'Conexión',
+    originAgent: 'Agente',
   },
 })

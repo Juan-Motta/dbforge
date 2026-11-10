@@ -1,0 +1,96 @@
+//! Whether the MCP server runs and on which port, kept in `mcp.json`. The
+//! token is a secret, so it lives in the credential store instead (see
+//! [`super::token`]).
+
+use std::fs;
+use std::io::{ErrorKind, Write};
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{AppError, Result};
+
+/// The port agents are told to use unless the user picks another.
+pub const DEFAULT_PORT: u16 = 7419;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettings {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for McpSettings {
+    /// Off until the user turns it on: nothing listens unasked.
+    fn default() -> Self {
+        Self { enabled: false, port: DEFAULT_PORT }
+    }
+}
+
+pub struct SettingsFile {
+    file: PathBuf,
+    settings: Mutex<McpSettings>,
+}
+
+impl SettingsFile {
+    /// The settings saved at `file`; the defaults until the user changes them.
+    pub fn load(file: PathBuf) -> Result<Self> {
+        let settings = match fs::read_to_string(&file) {
+            Ok(json) => serde_json::from_str(&json)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => McpSettings::default(),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Self { file, settings: Mutex::new(settings) })
+    }
+
+    pub fn get(&self) -> McpSettings {
+        *self.lock()
+    }
+
+    /// Keeps `settings`, written whole to a temporary file first so a crash never leaves half a file.
+    pub fn set(&self, settings: McpSettings) -> Result<()> {
+        if settings.port < 1024 {
+            return Err(AppError::Invalid("Choose a port from 1024 to 65535.".into()));
+        }
+        let mut current = self.lock();
+        if let Some(dir) = self.file.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let tmp = self.file.with_extension("json.tmp");
+        let mut file = fs::File::create(&tmp)?;
+        file.write_all(serde_json::to_string_pretty(&settings)?.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&tmp, &self.file)?;
+        *current = settings;
+        Ok(())
+    }
+
+    fn lock(&self) -> MutexGuard<'_, McpSettings> {
+        self.settings.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_until_turned_on_and_kept_across_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mcp.json");
+        let settings = SettingsFile::load(file.clone()).unwrap();
+        assert_eq!(settings.get(), McpSettings { enabled: false, port: DEFAULT_PORT });
+
+        settings.set(McpSettings { enabled: true, port: 9000 }).unwrap();
+        assert_eq!(SettingsFile::load(file).unwrap().get(), McpSettings { enabled: true, port: 9000 });
+    }
+
+    #[test]
+    fn refuses_privileged_ports() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = SettingsFile::load(dir.path().join("mcp.json")).unwrap();
+        assert!(settings.set(McpSettings { enabled: true, port: 80 }).is_err());
+        assert_eq!(settings.get().port, DEFAULT_PORT);
+    }
+}
