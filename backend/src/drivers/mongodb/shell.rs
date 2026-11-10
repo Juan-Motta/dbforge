@@ -9,9 +9,12 @@
 //! mongosh: whole numbers that fit 32 bits are `int`, every other number is a
 //! `double`. Nothing is evaluated; variables and functions are not supported.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime as ChronoDateTime, NaiveDate, NaiveDateTime};
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{Bson, DateTime, Decimal128, Document, Regex};
+use mongodb::bson::spec::BinarySubtype;
+use mongodb::bson::{Binary, Bson, DateTime, Decimal128, Document, JavaScriptCodeWithScope, Regex, Timestamp};
 
 /// One statement of a script.
 #[derive(Debug, Clone, PartialEq)]
@@ -365,9 +368,33 @@ impl Parser<'_> {
                 Ok(n) => Ok(Bson::Decimal128(n)),
                 Err(_) => fail(self, &format!("Unreadable decimal \"{text}\"")),
             },
+            ("UUID", [Bson::String(text)]) => match uuid::Uuid::parse_str(text) {
+                Ok(id) => Ok(Bson::Binary(Binary { subtype: BinarySubtype::Uuid, bytes: id.as_bytes().to_vec() })),
+                Err(_) => fail(self, &format!("Unreadable UUID \"{text}\"")),
+            },
+            ("BinData", [kind, Bson::String(text)]) => {
+                match (whole(kind).and_then(|n| u8::try_from(n).ok()), BASE64.decode(text)) {
+                    (Some(kind), Ok(bytes)) => Ok(Bson::Binary(Binary { subtype: BinarySubtype::from(kind), bytes })),
+                    _ => fail(self, "BinData takes a subtype from 0 to 255 and base64 text"),
+                }
+            }
+            ("Timestamp", [Bson::Document(parts)]) => match (part(parts, "t"), part(parts, "i")) {
+                (Some(time), Some(increment)) => Ok(Bson::Timestamp(Timestamp { time, increment })),
+                _ => fail(self, "Timestamp takes {t: seconds, i: increment}"),
+            },
+            ("RegExp", [Bson::String(pattern)]) => Ok(regex(pattern, "")),
+            ("RegExp", [Bson::String(pattern), Bson::String(flags)]) => Ok(regex(pattern, flags)),
+            ("MinKey", []) => Ok(Bson::MinKey),
+            ("MaxKey", []) => Ok(Bson::MaxKey),
+            ("Code", [Bson::String(code)]) => Ok(Bson::JavaScriptCode(code.clone())),
+            ("Code", [Bson::String(code), Bson::Document(scope)]) => {
+                Ok(Bson::JavaScriptCodeWithScope(JavaScriptCodeWithScope { code: code.clone(), scope: scope.clone() }))
+            }
+            ("BSONSymbol", [Bson::String(symbol)]) => Ok(Bson::Symbol(symbol.clone())),
             (
                 "ObjectId" | "ISODate" | "Date" | "NumberLong" | "Long" | "NumberInt" | "Int32" | "NumberDecimal"
-                | "Decimal128",
+                | "Decimal128" | "UUID" | "BinData" | "Timestamp" | "RegExp" | "MinKey" | "MaxKey" | "Code"
+                | "BSONSymbol",
                 _,
             ) => fail(self, &format!("Unexpected arguments for {word}")),
             _ => fail(self, &format!("Unknown function `{word}`")),
@@ -450,6 +477,18 @@ fn is_identifier_start(c: char) -> bool {
 
 fn is_identifier_part(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// One of a Timestamp's two parts: a whole number that fits in 32 bits.
+fn part(parts: &Document, name: &str) -> Option<u32> {
+    parts.get(name).and_then(whole).and_then(|n| u32::try_from(n).ok())
+}
+
+/// A regular expression; the server expects its flags in alphabetical order.
+fn regex(pattern: &str, flags: &str) -> Bson {
+    let mut options: Vec<char> = flags.chars().collect();
+    options.sort_unstable();
+    Bson::RegularExpression(Regex { pattern: pattern.to_string(), options: options.into_iter().collect() })
 }
 
 /// A whole number from a literal: `5`, `5.0` or `"5"`.

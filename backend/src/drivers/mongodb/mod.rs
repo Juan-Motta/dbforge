@@ -25,7 +25,10 @@ pub use structure::table_structure;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use futures_util::TryStreamExt;
+use mongodb::bson::spec::BinarySubtype;
 use mongodb::bson::{Bson, Document, doc};
 use mongodb::options::{ClientOptions, Credential, ServerAddress, Tls, TlsOptions};
 
@@ -351,7 +354,9 @@ fn text(value: &Bson) -> Option<String> {
 }
 
 /// A value in the syntax mongosh reads back: JSON plus `ObjectId("…")`,
-/// `ISODate("…")`, `NumberDecimal("…")` and friends for the types JSON lacks.
+/// `ISODate("…")`, `UUID("…")` and friends for the types JSON lacks. What is
+/// written here is what `shell::parse_value` reads as the same value, since an
+/// edit sends back the text the grid showed.
 pub fn literal(value: &Bson) -> String {
     let quote = |text: &str| serde_json::Value::from(text).to_string();
     match value {
@@ -359,7 +364,9 @@ pub fn literal(value: &Bson) -> String {
         Bson::String(text) => quote(text),
         Bson::Int32(n) => n.to_string(),
         Bson::Int64(n) => format!("NumberLong({n})"),
-        Bson::Double(n) if n.is_finite() && n.fract() == 0.0 && n.abs() < 1e15 => format!("{n:.1}"),
+        Bson::Double(n) if n.is_nan() => "NaN".into(),
+        Bson::Double(n) if n.is_infinite() => if *n > 0.0 { "Infinity" } else { "-Infinity" }.into(),
+        Bson::Double(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{n:.1}"),
         Bson::Double(n) => n.to_string(),
         Bson::Decimal128(n) => format!("NumberDecimal({})", quote(&n.to_string())),
         Bson::Boolean(b) => b.to_string(),
@@ -368,10 +375,23 @@ pub fn literal(value: &Bson) -> String {
             Ok(iso) => format!("ISODate({})", quote(&iso)),
             Err(_) => format!("new Date({})", date.timestamp_millis()),
         },
+        Bson::Binary(binary) => match uuid::Uuid::from_slice(&binary.bytes) {
+            Ok(id) if binary.subtype == BinarySubtype::Uuid => format!("UUID({})", quote(&id.to_string())),
+            _ => format!("BinData({}, {})", u8::from(binary.subtype), quote(&BASE64.encode(&binary.bytes))),
+        },
+        Bson::Timestamp(stamp) => format!("Timestamp({{t: {}, i: {}}})", stamp.time, stamp.increment),
+        Bson::RegularExpression(regex) => format!("RegExp({}, {})", quote(&regex.pattern), quote(&regex.options)),
+        Bson::MinKey => "MinKey()".into(),
+        Bson::MaxKey => "MaxKey()".into(),
+        Bson::JavaScriptCode(code) => format!("Code({})", quote(code)),
+        Bson::JavaScriptCodeWithScope(code) => {
+            format!("Code({}, {})", quote(&code.code), literal(&Bson::Document(code.scope.clone())))
+        }
+        Bson::Symbol(symbol) => format!("BSONSymbol({})", quote(symbol)),
         Bson::Array(items) => format!("[{}]", items.iter().map(literal).collect::<Vec<_>>().join(", ")),
         Bson::Document(document) => object_literal(document.iter().map(|(key, value)| (key.as_str(), literal(value)))),
-        // The rest has no short mongosh form worth reading; Extended JSON says it exactly.
-        other => other.clone().into_relaxed_extjson().to_string(),
+        // A pointer to another collection, long deprecated: shown, and refused if sent back.
+        Bson::DbPointer(_) => format!("DBPointer({})", value.clone().into_relaxed_extjson()),
     }
 }
 
@@ -632,6 +652,53 @@ pub(super) mod tests {
         assert_eq!(
             literal(&value),
             r#"{"id": ObjectId("65a0f0f0f0f0f0f0f0f0f0f0"), "n": NumberLong(2), "x": 1.0, "s": "a\"b", "d": ISODate("1970-01-01T00:00:00Z"), "list": [1, null]}"#
+        );
+    }
+
+    /// What the grid and the JSON view show is what an edit sends back: every
+    /// type must come out of the parser as it went into `literal`.
+    #[test]
+    fn every_type_reads_back_as_it_was_written() {
+        use mongodb::bson::{Binary, JavaScriptCodeWithScope, Regex, Timestamp};
+
+        let uuid = Binary { subtype: BinarySubtype::Uuid, bytes: (0..16).collect() };
+        let values = [
+            Bson::Null,
+            Bson::String("a\"b\n".into()),
+            Bson::Int32(-3),
+            Bson::Int64(1 << 40),
+            Bson::Double(1.0),
+            Bson::Double(-2.5e-7),
+            Bson::Double(f64::INFINITY),
+            Bson::Double(f64::NEG_INFINITY),
+            Bson::Decimal128("12.50".parse().unwrap()),
+            Bson::Boolean(true),
+            Bson::ObjectId(ObjectId::parse_str("65a0f0f0f0f0f0f0f0f0f0f0").unwrap()),
+            Bson::DateTime(DateTime::from_millis(1_700_000_000_123)),
+            Bson::Binary(uuid.clone()),
+            Bson::Binary(Binary { subtype: BinarySubtype::Generic, bytes: vec![0xAC, 0xED, 0, 5] }),
+            Bson::Binary(Binary { subtype: BinarySubtype::UserDefined(0x80), bytes: vec![] }),
+            Bson::Timestamp(Timestamp { time: 1_700_000_000, increment: 7 }),
+            Bson::RegularExpression(Regex { pattern: "^a/b\\d\"$".into(), options: "im".into() }),
+            Bson::MinKey,
+            Bson::MaxKey,
+            Bson::JavaScriptCode("function () { return 'x' }".into()),
+            Bson::JavaScriptCodeWithScope(JavaScriptCodeWithScope { code: "x".into(), scope: doc! { "n": 1 } }),
+            Bson::Symbol("sym".into()),
+            Bson::Array(vec![Bson::Binary(uuid.clone()), Bson::Null]),
+            Bson::Document(doc! { "id": uuid, "$weird key": { "n": 1_i64 } }),
+        ];
+        for value in values {
+            let text = literal(&value);
+            assert_eq!(shell::parse_value(&text), Ok(value.clone()), "{text}");
+            assert_eq!(shell::parse_value(&pretty_literal(&value)), Ok(value), "{text}");
+        }
+        assert_eq!(
+            literal(&Bson::Binary(Binary { subtype: BinarySubtype::Uuid, bytes: (0..16).collect() })),
+            r#"UUID("00010203-0405-0607-0809-0a0b0c0d0e0f")"#
+        );
+        assert!(
+            shell::parse_value(&literal(&Bson::Double(f64::NAN))).is_ok_and(|v| v.as_f64().is_some_and(f64::is_nan))
         );
     }
     #[tokio::test]

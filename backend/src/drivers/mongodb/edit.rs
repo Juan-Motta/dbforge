@@ -384,6 +384,39 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs a local MongoDB on port 57017"]
+    async fn a_document_keyed_by_a_uuid_is_found_and_keeps_its_types() {
+        use mongodb::bson::spec::BinarySubtype;
+        use mongodb::bson::{Binary, Timestamp};
+
+        let id = Binary { subtype: BinarySubtype::Uuid, bytes: (0..16).collect() };
+        let stamp = Timestamp { time: 5, increment: 1 };
+        let document = doc! { "_id": id.clone(), "name": "Ann", "raw": Binary { subtype: BinarySubtype::Generic, bytes: vec![0xFF, 0] }, "at": stamp };
+        let connection = database("dbforge_edit_uuid", &[("people", vec![document])]).await;
+        let people = table("dbforge_edit_uuid", "people");
+        let page = super::super::fetch_rows(&connection, PASSWORD, &people, &Default::default(), 0, 10).await.unwrap();
+        // The key as the grid shows it.
+        let shown = page.rows[0][0].clone().unwrap();
+        assert_eq!(shown, r#"UUID("00010203-0405-0607-0809-0a0b0c0d0e0f")"#);
+
+        let rename = [RowChange::Update { key: map(&[("_id", Some(&shown))]), values: map(&[("name", Some("Bea"))]) }];
+        apply_changes(&connection, PASSWORD, &people, &rename).await.unwrap();
+        // The whole document, saved as the JSON view writes it, keeps every type.
+        let text =
+            super::super::pretty_literal(&Bson::Document(documents(&connection, "dbforge_edit_uuid").await[0].clone()));
+        let replace = [RowChange::Replace { key: map(&[("_id", Some(&shown))]), document: text.replace("Bea", "Cy") }];
+        apply_changes(&connection, PASSWORD, &people, &replace).await.unwrap();
+
+        let saved = documents(&connection, "dbforge_edit_uuid").await;
+        assert_eq!(
+            saved,
+            [
+                doc! { "_id": id, "name": "Cy", "raw": Binary { subtype: BinarySubtype::Generic, bytes: vec![0xFF, 0] }, "at": stamp }
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
     async fn a_bad_value_or_a_missing_document_stops_everything() {
         let connection = people("dbforge_edit_reject").await;
         let before = documents(&connection, "dbforge_edit_reject").await;
