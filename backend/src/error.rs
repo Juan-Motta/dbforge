@@ -31,7 +31,7 @@ pub enum AppError {
 
 /// Why an HTTP request (Cosmos DB) never got an answer, from the innermost cause:
 /// reqwest's own text only says that sending failed.
-fn http_message(error: &reqwest::Error) -> String {
+pub(crate) fn http_message(error: &reqwest::Error) -> String {
     let mut cause = error.to_string();
     let mut source = std::error::Error::source(error);
     while let Some(inner) = source {
@@ -55,7 +55,7 @@ fn http_message(error: &reqwest::Error) -> String {
 }
 
 /// The server's reply as redis-cli prints it (`WRONGTYPE Operation against…`).
-fn redis_message(error: &redis::RedisError) -> String {
+pub(crate) fn redis_message(error: &redis::RedisError) -> String {
     match (error.code(), error.detail()) {
         (Some("NOAUTH"), _) => "This server requires a password. Enter it in Password.".into(),
         (Some(code), Some(detail)) => format!("{code} {detail}"),
@@ -75,7 +75,7 @@ fn redis_message(error: &redis::RedisError) -> String {
 }
 
 /// The server's own message, without the driver's kind and labels.
-fn mongodb_message(error: &mongodb::error::Error) -> String {
+pub(crate) fn mongodb_message(error: &mongodb::error::Error) -> String {
     use mongodb::error::{ErrorKind, WriteFailure};
     match error.kind.as_ref() {
         ErrorKind::Command(command) => command.message.clone(),
