@@ -1,5 +1,7 @@
 .label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin-bottom: 6px;
   font-size: 12px;
   font-weight: 500;
@@ -30,4 +32,10 @@
 
 .input[aria-invalid='true'] {
   border-color: var(--err);
+}
+
+.help {
+  margin: 5px 0 0;
+  color: var(--text3);
+  font-size: 12px;
 }

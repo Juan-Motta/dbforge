@@ -65,6 +65,12 @@ const PATHS = {
     </>
   ),
   plus: <path d="M8 3v10M3 8h10" />,
+  info: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 7.25v3.75M8 5h.01" />
+    </>
+  ),
   duplicate: (
     <>
       <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />

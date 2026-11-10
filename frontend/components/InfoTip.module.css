@@ -1,0 +1,5 @@
+.info {
+  display: inline-flex;
+  color: var(--text3);
+  cursor: help;
+}
