@@ -1,7 +1,7 @@
 /* A fixed size, so switching sections never resizes the window. */
 .dialog {
-  width: min(720px, calc(100% - 32px));
-  height: min(460px, calc(100% - 32px));
+  width: min(880px, calc(100% - 32px));
+  height: min(620px, calc(100% - 32px));
 }
 
 .body {
