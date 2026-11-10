@@ -36,8 +36,13 @@ export function tagOf(tags: Tag[], id: string | null): Tag | null {
   return (id && tags.find((tag) => tag.id === id)) || null
 }
 
-/** The name of the tag that makes changes on a connection tagged `id` ask first; `null` when they don't. */
-export function confirmingTag(tags: Tag[], id: string | null): string | null {
+/**
+ * The name of the tag that makes changes on a connection tagged `id` ask
+ * first; `null` when they don't. Until the tags have loaded nobody knows,
+ * so any tagged connection asks (named by its tag's id).
+ */
+export function confirmingTag(tags: Tag[], id: string | null, loaded = true): string | null {
+  if (!loaded) return id
   const tag = tagOf(tags, id)
   return tag?.confirm ? tag.name : null
 }

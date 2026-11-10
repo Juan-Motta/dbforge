@@ -50,7 +50,7 @@ export function Workspace({
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
   const m = useMessages(messages)
-  const { tags } = useTags()
+  const { tags, loaded } = useTags()
 
   if (tabs.length === 0) {
     return (
@@ -110,7 +110,7 @@ export function Workspace({
             <TablePage
               connectionId={tab.connectionId}
               table={tab.table}
-              confirmTag={confirmingTag(tags, connectionOf(tab.connectionId)?.environment ?? null)}
+              confirmTag={confirmingTag(tags, connectionOf(tab.connectionId)?.environment ?? null, loaded)}
               dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
               diagram={hasDiagram(connectionOf(tab.connectionId)?.engine ?? 'redis')}
               onOpenSchemaDiagram={() =>

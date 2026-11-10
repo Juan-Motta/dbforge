@@ -14,6 +14,12 @@ describe('tags', () => {
     expect(confirmingTag([prod, dev], null)).toBeNull()
   })
 
+  it('asks for any tagged connection until the tags have loaded', () => {
+    expect(confirmingTag([], 'production', false)).toBe('production')
+    expect(confirmingTag([], null, false)).toBeNull()
+    expect(confirmingTag([prod, dev], 'development', true)).toBeNull()
+  })
+
   it('gives a new tag a color no other tag uses', () => {
     expect(newTag([prod, dev], 'UAT', 'x')).toEqual({ id: 'x', name: 'UAT', color: 'orange', confirm: false })
   })

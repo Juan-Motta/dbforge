@@ -71,12 +71,14 @@ impl ConnectionStore {
         Ok(copy)
     }
 
-    /// Connections tagged with one of `tags` lose that tag (it was deleted).
-    pub fn clear_tags(&self, tags: &[String]) -> Result<()> {
+    /// Connections whose tag is not one of `tags` (it was deleted) lose it.
+    /// Checking against every tag that exists, not only the ones just
+    /// deleted, also catches a clear that failed after an earlier delete.
+    pub fn keep_only_tags(&self, tags: &[String]) -> Result<()> {
         let mut connections = self.lock();
         let mut changed = false;
         for connection in connections.iter_mut() {
-            if connection.environment.as_ref().is_some_and(|tag| tags.contains(tag)) {
+            if connection.environment.as_ref().is_some_and(|tag| !tags.contains(tag)) {
                 connection.environment = None;
                 changed = true;
             }
@@ -172,9 +174,10 @@ mod tests {
         store.upsert(tagged("a", Some("test"))).unwrap();
         store.upsert(tagged("b", Some("production"))).unwrap();
         store.upsert(tagged("c", None)).unwrap();
-        store.clear_tags(&["test".into(), "uat".into()]).unwrap();
+        store.upsert(tagged("d", Some("left from a failed clear"))).unwrap();
+        store.keep_only_tags(&["production".into(), "staging".into()]).unwrap();
         let tags: Vec<_> = load(path).list().into_iter().map(|c| c.environment).collect();
-        assert_eq!(tags, [None, Some("production".into()), None]);
+        assert_eq!(tags, [None, Some("production".into()), None, None]);
     }
 
     #[test]

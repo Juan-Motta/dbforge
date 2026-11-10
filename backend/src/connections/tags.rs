@@ -72,16 +72,13 @@ impl TagStore {
         self.lock().clone()
     }
 
-    /// Replaces the tags with `tags`, in that order, after checking them;
-    /// returns the ids that are gone, so connections can drop them.
-    pub fn replace(&self, tags: Vec<Tag>) -> Result<Vec<String>> {
+    /// Replaces the tags with `tags`, in that order, after checking them.
+    pub fn replace(&self, tags: Vec<Tag>) -> Result<()> {
         let tags = check(tags)?;
         let mut current = self.lock();
-        let kept: HashSet<&str> = tags.iter().map(|tag| tag.id.as_str()).collect();
-        let removed = current.iter().filter(|tag| !kept.contains(tag.id.as_str())).map(|tag| tag.id.clone()).collect();
         self.persist(&tags)?;
         *current = tags;
-        Ok(removed)
+        Ok(())
     }
 
     /// Through a temporary file synced to disk, so a crash never leaves half a file.
@@ -161,7 +158,7 @@ mod tests {
         next[0].name = "  Live ".into();
         next.push(Tag { id: "uat".into(), name: "UAT".into(), color: TagColor::Teal, confirm: true });
 
-        assert_eq!(tags.replace(next).unwrap(), ["test"]);
+        tags.replace(next).unwrap();
         let reloaded = TagStore::load(path).unwrap().list();
         let names: Vec<_> = reloaded.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, ["Live", "STAGE", "DEV", "UAT"]);

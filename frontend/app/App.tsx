@@ -328,7 +328,7 @@ export function App() {
             connectionId={dump.connection.id}
             connectionName={dump.connection.name}
             database={dump.database}
-            confirmTag={confirmingTag(tagsState.tags, dump.connection.environment)}
+            confirmTag={confirmingTag(tagsState.tags, dump.connection.environment, tagsState.loaded)}
             onClose={() => setDump(null)}
             onImported={dump.refresh}
           />

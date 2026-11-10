@@ -81,7 +81,8 @@ pub fn list_tags(tags: State<'_, TagStore>) -> Vec<Tag> {
 /// Saves the whole list of tags; connections lose the tags it no longer has.
 #[tauri::command]
 pub fn save_tags(store: State<'_, ConnectionStore>, tags: State<'_, TagStore>, list: Vec<Tag>) -> Result<Vec<Tag>> {
-    let removed = tags.replace(list)?;
-    store.clear_tags(&removed)?;
+    tags.replace(list)?;
+    let kept: Vec<String> = tags.list().into_iter().map(|tag| tag.id).collect();
+    store.keep_only_tags(&kept)?;
     Ok(tags.list())
 }

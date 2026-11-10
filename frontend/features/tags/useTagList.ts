@@ -8,7 +8,7 @@ import type { TagsState } from './useTags'
  * after a save deleted a tag: the connections that had it changed too.
  */
 export function useTagList(onRemoved: () => void): TagsState {
-  const [tags, setTags] = useState<Tag[]>([])
+  const [tags, setTags] = useState<Tag[] | null>(null)
 
   useEffect(() => {
     tagsApi
@@ -18,10 +18,10 @@ export function useTagList(onRemoved: () => void): TagsState {
   }, [])
 
   const save = async (next: Tag[]) => {
-    const removed = tags.some((tag) => !next.some((kept) => kept.id === tag.id))
+    const removed = (tags ?? []).some((tag) => !next.some((kept) => kept.id === tag.id))
     setTags(await tagsApi.save(next))
     if (removed) onRemoved()
   }
 
-  return { tags, save }
+  return { tags: tags ?? [], loaded: tags !== null, save }
 }
