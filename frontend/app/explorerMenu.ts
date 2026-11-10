@@ -108,7 +108,11 @@ export function explorerMenu(
               icon: 'download',
               onSelect: () => actions.dump('export', connection, node.name),
             },
-            { label: m.importSqlFile, onSelect: () => actions.dump('import', connection, node.name) },
+            {
+              label: m.importSqlFile,
+              icon: 'upload',
+              onSelect: () => actions.dump('import', connection, node.name),
+            },
           ]
         : []
       // A Redis database is a keyspace, opened by double-clicking it; it has no console of its own.

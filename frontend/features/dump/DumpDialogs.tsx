@@ -367,6 +367,7 @@ export function ImportDatabaseDialog({
           disabled={job.running || !path || target.trim() === ''}
           onClick={() => void start()}
         >
+          <Icon name="upload" />
           {job.running ? m.importing : confirming ? m.importInto(confirmTag ?? '') : m.import}
         </Button>
       </footer>

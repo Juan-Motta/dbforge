@@ -114,6 +114,7 @@ const PATHS = {
   play: <path d="M5 3.5v9l7-4.5z" fill="currentColor" />,
   stop: <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />,
   download: <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />,
+  upload: <path d="M8 10.5v-8M4.5 6 8 2.5 11.5 6M3 13.5h10" />,
   warning: <path d="M8 2.5 14 13H2zM8 6.5v3M8 11.3v.2" />,
   plan: <path d="M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5" />,
   chevronLeft: <path d="M10 4 6 8l4 4" />,
