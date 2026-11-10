@@ -71,6 +71,19 @@ impl ConnectionStore {
         Ok(copy)
     }
 
+    /// Connections tagged with one of `tags` lose that tag (it was deleted).
+    pub fn clear_tags(&self, tags: &[String]) -> Result<()> {
+        let mut connections = self.lock();
+        let mut changed = false;
+        for connection in connections.iter_mut() {
+            if connection.environment.as_ref().is_some_and(|tag| tags.contains(tag)) {
+                connection.environment = None;
+                changed = true;
+            }
+        }
+        if changed { self.persist(&connections) } else { Ok(()) }
+    }
+
     pub fn remove(&self, id: &str) -> Result<()> {
         let mut connections = self.lock();
         let before = connections.len();
@@ -148,6 +161,20 @@ mod tests {
 
         assert!(matches!(store.duplicate("a", "  "), Err(AppError::Invalid(_))));
         assert!(matches!(store.duplicate("missing", "x"), Err(AppError::NotFound(_))));
+    }
+
+    #[test]
+    fn deleted_tags_are_cleared_from_their_connections() {
+        let (_dir, path) = temp_store();
+        let store = load(path.clone());
+        let tagged =
+            |id: &str, tag: Option<&str>| Connection { environment: tag.map(String::from), ..connection(id, id) };
+        store.upsert(tagged("a", Some("test"))).unwrap();
+        store.upsert(tagged("b", Some("production"))).unwrap();
+        store.upsert(tagged("c", None)).unwrap();
+        store.clear_tags(&["test".into(), "uat".into()]).unwrap();
+        let tags: Vec<_> = load(path).list().into_iter().map(|c| c.environment).collect();
+        assert_eq!(tags, [None, Some("production".into()), None]);
     }
 
     #[test]

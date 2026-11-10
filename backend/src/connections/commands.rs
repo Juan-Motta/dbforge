@@ -2,6 +2,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::model::{Connection, ConnectionInput};
 use super::store::ConnectionStore;
+use super::tags::{Tag, TagStore};
 use crate::credentials::{Storage, StorageInfo, SwitchProgress};
 use crate::drivers;
 use crate::error::{AppError, Result};
@@ -70,4 +71,17 @@ pub async fn set_credential_storage(app: AppHandle, storage: Storage) -> Result<
     })
     .await
     .map_err(|error| AppError::Invalid(format!("Moving the passwords stopped: {error}")))?
+}
+
+#[tauri::command]
+pub fn list_tags(tags: State<'_, TagStore>) -> Vec<Tag> {
+    tags.list()
+}
+
+/// Saves the whole list of tags; connections lose the tags it no longer has.
+#[tauri::command]
+pub fn save_tags(store: State<'_, ConnectionStore>, tags: State<'_, TagStore>, list: Vec<Tag>) -> Result<Vec<Tag>> {
+    let removed = tags.replace(list)?;
+    store.clear_tags(&removed)?;
+    Ok(tags.list())
 }

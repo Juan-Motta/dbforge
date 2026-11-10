@@ -26,6 +26,7 @@ pub fn run() {
             let config = app.path().app_config_dir()?;
             let credentials = credentials::Credentials::load(config.clone())?;
             app.manage(ConnectionStore::load(config.join("connections.json"), credentials)?);
+            app.manage(connections::tags::TagStore::load(config.join("tags.json"))?);
             app.manage(query::QuerySessions::default());
             app.manage(dump::DumpJobs::default());
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
@@ -37,6 +38,8 @@ pub fn run() {
             commands::save_connection,
             commands::delete_connection,
             commands::duplicate_connection,
+            commands::list_tags,
+            commands::save_tags,
             commands::test_connection,
             commands::credential_storage,
             commands::set_credential_storage,

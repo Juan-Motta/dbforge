@@ -30,14 +30,6 @@ impl Engine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Environment {
-    Production,
-    Staging,
-    Development,
-}
-
 /// A saved connection. The password is never part of it: it lives in the OS keychain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +37,9 @@ pub struct Connection {
     pub id: String,
     pub name: String,
     pub engine: Engine,
-    pub environment: Option<Environment>,
+    /// The id of its tag (see `tags`). Connections saved before tags hold
+    /// `production`, `staging` or `development`, the default tags' ids.
+    pub environment: Option<String>,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -70,7 +64,7 @@ pub struct ConnectionInput {
     pub id: Option<String>,
     pub name: String,
     pub engine: Engine,
-    pub environment: Option<Environment>,
+    pub environment: Option<String>,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -106,7 +100,7 @@ impl ConnectionInput {
             id: self.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             name,
             engine: self.engine,
-            environment: self.environment,
+            environment: self.environment.filter(|tag| !tag.is_empty()),
             host: self.host.trim().to_string(),
             port: self.port,
             database: self.database.trim().to_string(),
@@ -139,6 +133,15 @@ mod tests {
             allow_self_signed: false,
             srv: false,
         }
+    }
+
+    #[test]
+    fn environments_saved_before_tags_are_the_default_tags_ids() {
+        let json = r#"{"id":"a","name":"n","engine":"postgres","environment":"production","host":"h","port":5432,"database":"","username":""}"#;
+        let connection: Connection = serde_json::from_str(json).unwrap();
+        assert_eq!(connection.environment.as_deref(), Some("production"));
+        let untagged = ConnectionInput { environment: Some(String::new()), ..input("r", None) };
+        assert_eq!(untagged.into_parts().unwrap().0.environment, None);
     }
 
     #[test]
