@@ -56,6 +56,30 @@ fn temporary(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Where a file is written until it is whole: `shop.sql.dbforge-partial`.
+pub fn partial_path(path: &Path) -> PathBuf {
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".dbforge-partial");
+    PathBuf::from(partial)
+}
+
+/// Runs `write` on a partial file beside `path`, which takes `path`'s place
+/// only once `write` succeeds: until then, a file already at `path` is left
+/// as it was, and a failed or cancelled write leaves no file behind.
+pub async fn write_finished<T>(path: &Path, write: impl AsyncFnOnce(&Path) -> Result<T>) -> Result<T> {
+    let partial = partial_path(path);
+    match write(&partial).await {
+        Ok(value) => {
+            fs::rename(&partial, path)?;
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&partial);
+            Err(error)
+        }
+    }
+}
+
 /// A value kept in memory and in a JSON file. A change reaches memory only
 /// once the file holds it, so what the app shows is always what is saved.
 pub struct JsonFile<T> {
@@ -142,6 +166,29 @@ mod tests {
         });
         assert!(saved.is_err());
         assert_eq!(file.get(), [1]);
+    }
+
+    #[tokio::test]
+    async fn a_file_takes_its_place_only_once_written_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rows.csv");
+        fs::write(&path, "older export").unwrap();
+
+        let failed = write_finished(&path, async |partial| {
+            fs::write(partial, "half")?;
+            Err::<(), _>(AppError::Invalid("connection refused".into()))
+        });
+        assert!(failed.await.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "older export");
+        assert!(!partial_path(&path).exists());
+
+        let written = write_finished(&path, async |partial| {
+            fs::write(partial, "whole")?;
+            Ok(5)
+        });
+        assert_eq!(written.await.unwrap(), 5);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "whole");
+        assert!(!partial_path(&path).exists());
     }
 
     #[test]

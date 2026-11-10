@@ -28,6 +28,7 @@ use crate::connections::model::{Connection, Engine};
 use crate::connections::store::ConnectionStore;
 use crate::drivers::postgres;
 use crate::error::{AppError, Result};
+use crate::files::partial_path;
 use crate::statement_log::{Origin, StatementLog};
 
 /// What a dump holds.
@@ -164,13 +165,6 @@ pub async fn import(
         problems.push(format!("The database {database} created for the import couldn't be removed: {problem}"));
     }
     if problems.is_empty() { Err(error) } else { Err(AppError::Invalid(format!("{error}\n{}", problems.join("\n")))) }
-}
-
-/// Where a dump is written until it is complete: beside the file asked for.
-fn partial_path(path: &Path) -> PathBuf {
-    let mut partial = path.as_os_str().to_owned();
-    partial.push(".dbforge-partial");
-    PathBuf::from(partial)
 }
 
 /// The `application_name` a tool's sessions carry, unique per run, so a

@@ -12,6 +12,7 @@ use tauri::State;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, Column, RowFilter, RowSink, TableRef};
 use crate::error::Result;
+use crate::files::write_finished;
 use crate::statement_log::{Origin, StatementLog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -231,14 +232,18 @@ pub async fn export_table(
 ) -> Result<u64> {
     let opened = store.open(&connection_id)?;
     let name = format!("{}.{}", quote_ident(&table.schema), quote_ident(&table.name));
-    let mut writer = RowWriter::new(BufWriter::new(File::create(path)?), format, &name);
     let filter = filter.unwrap_or_default();
-    opened
-        .run(&log, Origin::Export, async |connection, password| {
-            drivers::stream_table(connection, password, &table, &filter, &mut writer).await
-        })
-        .await?;
-    writer.finish()
+    // A wrong password or a dropped connection leaves the file already there as it was.
+    write_finished(&path, async |partial| {
+        let mut writer = RowWriter::new(BufWriter::new(File::create(partial)?), format, &name);
+        opened
+            .run(&log, Origin::Export, async |connection, password| {
+                drivers::stream_table(connection, password, &table, &filter, &mut writer).await
+            })
+            .await?;
+        writer.finish()
+    })
+    .await
 }
 
 #[cfg(test)]
