@@ -45,11 +45,7 @@ pub async fn run_read_only(
     let mut conn = with_timeout(browse(connection, password, db)).await?;
     let (name, flags) = command_flags(&mut conn, &words).await?;
     check_flags(&name, &flags)?;
-    let mut result = run_command(&mut conn, &words).await?;
-    if result.rows.len() > row_limit {
-        result.rows.truncate(row_limit);
-        result.truncated = true;
-    }
+    let result = run_command(&mut conn, &words, row_limit).await?;
     Ok(QueryOutcome { results: vec![result], elapsed_ms: started.elapsed().as_millis() as u64 })
 }
 

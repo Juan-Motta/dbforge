@@ -40,7 +40,7 @@ impl Session {
     }
 
     /// Each command's reply as lines in a one-column result named `reply`.
-    pub async fn run(&mut self, script: &str, _row_limit: usize) -> Result<QueryOutcome> {
+    pub async fn run(&mut self, script: &str, row_limit: usize) -> Result<QueryOutcome> {
         let started = Instant::now();
         let commands = script
             .lines()
@@ -52,7 +52,7 @@ impl Session {
         }
         let mut results = Vec::new();
         for words in commands {
-            results.push(run_command(&mut self.conn, &words).await?);
+            results.push(run_command(&mut self.conn, &words, row_limit).await?);
         }
         Ok(QueryOutcome { results, elapsed_ms: started.elapsed().as_millis() as u64 })
     }
@@ -63,9 +63,14 @@ impl Session {
 }
 
 /// Runs one command, given as its words, and returns its reply as lines in a
-/// one-column result named `reply`, as redis-cli prints it. An error the server
-/// replies with is printed too; only a lost connection is an `Err`.
-pub(super) async fn run_command(conn: &mut LoggedConnection, words: &[Vec<u8>]) -> Result<StatementResult> {
+/// one-column result named `reply`, as redis-cli prints it, the first
+/// `row_limit` of them. An error the server replies with is printed too; only
+/// a lost connection is an `Err`.
+pub(super) async fn run_command(
+    conn: &mut LoggedConnection,
+    words: &[Vec<u8>],
+    row_limit: usize,
+) -> Result<StatementResult> {
     let name = String::from_utf8_lossy(&words[0]).to_ascii_uppercase();
     let lines = if STREAMING.contains(&name.as_str()) {
         vec![format!("(error) {name} isn't supported in the CLI panel.")]
@@ -81,10 +86,11 @@ pub(super) async fn run_command(conn: &mut LoggedConnection, words: &[Vec<u8>]) 
     };
     let column =
         Column { name: "reply".into(), data_type: "redis".into(), primary_key: false, generated: false, default: None };
+    let truncated = lines.len() > row_limit;
     Ok(StatementResult {
         columns: vec![column],
-        rows: lines.into_iter().map(|line| vec![Some(line)]).collect(),
-        truncated: false,
+        rows: lines.into_iter().take(row_limit).map(|line| vec![Some(line)]).collect(),
+        truncated,
         rows_affected: 1,
     })
 }
@@ -251,6 +257,22 @@ mod tests {
 
     fn lines(outcome: &QueryOutcome) -> Vec<Vec<String>> {
         outcome.results.iter().map(|r| r.rows.iter().map(|row| row[0].clone().unwrap()).collect()).collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local Redis on port 56379"]
+    async fn a_long_reply_keeps_the_first_lines_up_to_the_limit() {
+        let items: Vec<String> = (0..10).map(|n| n.to_string()).collect();
+        let mut push = vec!["RPUSH", "long"];
+        push.extend(items.iter().map(String::as_str));
+        let (connection, _) = database(15, &[&push]).await;
+        let mut session = open_session(&connection, PASSWORD, Some("db15")).await.unwrap();
+        let outcome = session.run("LRANGE long 0 -1\nGET missing", 3).await.unwrap();
+        let [long, short] = outcome.results.as_slice() else { panic!("{outcome:?}") };
+        assert_eq!(long.rows.len(), 3);
+        assert!(long.truncated);
+        assert_eq!(long.rows[0], [Some(" 1) \"0\"".into())]);
+        assert!(!short.truncated);
     }
 
     #[tokio::test]
