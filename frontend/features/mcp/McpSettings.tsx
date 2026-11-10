@@ -9,7 +9,8 @@ import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { mcpApi, type McpState } from './api'
 import { messages } from './messages'
-import { claudeCommand, codexCommand, codexToken, parsePort, serverUrl } from './setup'
+import { AgentSetup } from './AgentSetup'
+import { parsePort, serverUrl } from './setup'
 import styles from './Mcp.module.css'
 
 /**
@@ -80,22 +81,6 @@ export function McpSettings() {
 
   const url = serverUrl(state?.settings.port ?? 7419)
   const secret = token ?? ''
-  const commands = [
-    {
-      id: 'claude',
-      title: m.claudeCode,
-      text: claudeCommand(url, shown ? secret : '<token>'),
-      copy: claudeCommand(url, secret),
-    },
-    { id: 'codex', title: m.codex, text: codexCommand(url), copy: codexCommand(url) },
-    {
-      id: 'codexToken',
-      title: m.codexToken,
-      text: codexToken(shown ? secret : '<token>'),
-      copy: codexToken(secret),
-    },
-  ]
-
   return (
     <div className={styles.settings}>
       <OptionList>
@@ -165,21 +150,8 @@ export function McpSettings() {
         </div>
       </section>
 
-      <section className={styles.section}>
-        <h4 className={styles.sectionTitle}>{m.addToAgents}</h4>
-        {commands.map((command) => (
-          <div key={command.id} className={styles.command}>
-            <span className={styles.commandTitle}>{command.title}</span>
-            <div className={styles.row}>
-              <code className={styles.value}>{command.text}</code>
-              <IconButton label={m.copy} disabled={!token} onClick={() => copy(command.id, command.copy)}>
-                <Icon name={copied === command.id ? 'check' : 'duplicate'} />
-              </IconButton>
-            </div>
-          </div>
-        ))}
-        <p className={styles.note}>{m.accessNote}</p>
-      </section>
+      <AgentSetup url={url} token={token} showToken={shown} onCopy={copy} copied={copied} />
+      <p className={styles.note}>{m.accessNote}</p>
     </div>
   )
 }

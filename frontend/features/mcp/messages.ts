@@ -27,7 +27,17 @@ export const messages = defineMessages({
     addToAgents: 'Add DBForge to an agent',
     claudeCode: 'Claude Code',
     codex: 'Codex',
-    codexToken: 'Codex reads the token from the environment (e.g. in ~/.zshrc)',
+    opencode: 'OpenCode',
+    pi: 'Pi',
+    otherAgent: 'Other agent',
+    stepTerminal: 'Run in a terminal',
+    stepProfile: 'Put the token in your shell profile (e.g. ~/.zshrc); the agent reads it from there',
+    stepConfig: (file: string) => `Add to ${file}`,
+    stepConnect: 'Its address and header, for any agent that takes MCP servers over HTTP',
+    promptTitle: 'Or let the agent set it up: paste this prompt into it',
+    promptHelp:
+      'The prompt carries the token; it adds DBForge for every project and notes it in the current one.',
+    noteTitle: (file: string) => `So it uses DBForge in a project: add to its ${file}`,
     accessNote:
       'Agents only see connections you give them access to: open a connection’s settings and choose Agent access. Read only blocks writes, not everything an administrator account can do (ending sessions, server settings); for agents, a database user with only the rights they need is safest.',
   },
@@ -58,8 +68,19 @@ export const messages = defineMessages({
     addToAgents: 'Añadir DBForge a un agente',
     claudeCode: 'Claude Code',
     codex: 'Codex',
-    codexToken: 'Codex lee el token del entorno (por ejemplo, en ~/.zshrc)',
+    opencode: 'OpenCode',
+    pi: 'Pi',
+    otherAgent: 'Otro agente',
+    stepTerminal: 'Ejecuta en una terminal',
+    stepProfile: 'Pon el token en tu perfil de la shell (por ejemplo, ~/.zshrc); el agente lo lee de ahí',
+    stepConfig: (file: string) => `Añade a ${file}`,
+    stepConnect: 'Su dirección y cabecera, para cualquier agente que acepte servidores MCP por HTTP',
+    promptTitle: 'O deja que el agente lo configure: pega este prompt en él',
+    promptHelp: 'El prompt lleva el token; añade DBForge para todos los proyectos y lo anota en el actual.',
+    noteTitle: (file: string) => `Para que use DBForge en un proyecto: añade a su ${file}`,
     accessNote:
       'Los agentes solo ven las conexiones a las que les des acceso: abre la configuración de una conexión y elige Acceso de agentes. Solo lectura bloquea las escrituras, no todo lo que puede hacer una cuenta de administrador (cerrar sesiones, ajustes del servidor); para agentes, lo más seguro es un usuario con solo los permisos que necesitan.',
   },
 })
+
+export type McpMessages = typeof messages.en

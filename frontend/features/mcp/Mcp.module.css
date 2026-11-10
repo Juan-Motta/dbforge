@@ -108,3 +108,36 @@
   color: var(--text2);
   font-size: 12px;
 }
+
+.agents {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.agents button {
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text2);
+  font: 500 12.5px var(--font-sans);
+  cursor: pointer;
+}
+
+.agents button[aria-checked='true'] {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Prompts and notes run several lines: kept as written, scrolled when long. */
+.tall {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
