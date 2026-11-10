@@ -3,7 +3,6 @@ import { Button } from '../../components/Button'
 import { Icon, type IconName } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { TextField } from '../../components/TextField'
-import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi } from '../explorer/api'
 import { formatMs } from '../query/plan'
@@ -13,53 +12,10 @@ import { exportFileName, joinPath } from './exportFolder'
 import { ToolRow } from './ToolRow'
 import { useExportFolder } from './useExportFolder'
 import { contentsOf, targetNote } from './dump'
+import { DumpStatus } from './DumpStatus'
+import { endedStatus, useDumpJob, type Status } from './dumpJob'
 import { messages } from './messages'
 import styles from './DumpDialogs.module.css'
-
-type Status = { state: 'idle' } | { state: 'done'; message: string } | { state: 'failed'; error: string }
-
-/** A pg_dump or psql run: its job id while it runs, and the last line it wrote. */
-function useDumpJob() {
-  const [job, setJob] = useState<string | null>(null)
-  const [line, setLine] = useState('')
-
-  const run = async <T,>(task: (jobId: string) => Promise<T>): Promise<T> => {
-    const jobId = crypto.randomUUID()
-    setJob(jobId)
-    setLine('')
-    const stopListening = await dumpApi.onProgress(jobId, setLine)
-    try {
-      return await task(jobId)
-    } finally {
-      stopListening()
-      setJob(null)
-    }
-  }
-
-  const cancel = () => {
-    if (job) void dumpApi.cancel(job)
-  }
-
-  return { running: job !== null, line, run, cancel }
-}
-
-/** One line under the form: what the tool is doing, the result, or what went wrong. */
-function StatusLine({ running, line, status }: { running: boolean; line: string; status: Status }) {
-  const m = useMessages(messages)
-  return (
-    <p className={styles.status} role="status">
-      {running ? (
-        <span className={styles.progress} title={line}>
-          {line || m.starting}
-        </span>
-      ) : status.state === 'done' ? (
-        status.message
-      ) : status.state === 'failed' ? (
-        <span className={styles.error}>{status.error}</span>
-      ) : null}
-    </p>
-  )
-}
 
 interface ExportDatabaseDialogProps {
   connectionId: string
@@ -104,10 +60,12 @@ export function ExportDatabaseDialog({
       )
       setStatus({
         state: 'done',
-        message: m.exported(formatBytes(done.bytes), path, formatMs(done.elapsedMs)),
+        title: m.exported(database, formatBytes(done.bytes), formatMs(done.elapsedMs)),
+        detail: path,
+        mono: true,
       })
     } catch (error) {
-      setStatus({ state: 'failed', error: errorMessage(error) })
+      setStatus(endedStatus(error, m.exportStopped, m.exportFailed))
     }
   }
 
@@ -216,10 +174,16 @@ export function ExportDatabaseDialog({
 
         <ToolRow name="pg_dump" disabled={job.running} />
 
-        <StatusLine
+        <DumpStatus
           running={job.running}
+          runningTitle={m.exportingInto(database)}
           line={job.line}
-          status={replacing ? { state: 'failed', error: m.fileExists(fileName.trim()) } : status}
+          startedAt={job.startedAt}
+          status={
+            replacing
+              ? { state: 'warning', title: m.fileExists(fileName.trim()), detail: m.fileExistsDetail }
+              : status
+          }
         />
       </div>
 
@@ -239,6 +203,11 @@ export function ExportDatabaseDialog({
       </footer>
     </Modal>
   )
+}
+
+/** The last part of a path, for a result line. */
+function fileNameOf(path: string) {
+  return path.split(/[\\/]/).pop() ?? path
 }
 
 interface ImportDatabaseDialogProps {
@@ -309,12 +278,14 @@ export function ImportDatabaseDialog({
       const time = formatMs(done.elapsedMs)
       setStatus({
         state: 'done',
-        message: done.created ? m.createdAndRestored(name, time) : m.restored(name, time),
+        title: done.created ? m.createdAndRestored(name, time) : m.restored(name, time),
+        detail: fileNameOf(path),
+        mono: true,
       })
       setImports((n) => n + 1)
       onImported()
     } catch (error) {
-      setStatus({ state: 'failed', error: errorMessage(error) })
+      setStatus(endedStatus(error, m.importStopped, m.importFailed))
     }
   }
 
@@ -354,22 +325,28 @@ export function ImportDatabaseDialog({
           <p className={styles.note}>{targetNote(target, databases, m)}</p>
         </div>
 
-        <p className={styles.note}>
-          {m.importNoteBefore}
-          <code>\!</code>
-          {m.importNoteAfter}
+        <p className={`${styles.note} ${styles.safety}`}>
+          <Icon name="info" size={13} />
+          <span>
+            {m.importNoteBefore}
+            <code>\!</code>
+            {m.importNoteAfter}
+          </span>
         </p>
 
         <ToolRow name="psql" disabled={job.running} />
 
-        <StatusLine
+        <DumpStatus
           running={job.running}
+          runningTitle={m.importingInto(target.trim())}
           line={job.line}
+          startedAt={job.startedAt}
           status={
             confirming
               ? {
-                  state: 'failed',
-                  error: m.confirmImport(connectionName, confirmTag ?? ''),
+                  state: 'warning',
+                  title: m.confirmImport(connectionName, confirmTag ?? ''),
+                  detail: m.confirmImportDetail(confirmTag ?? ''),
                 }
               : status
           }

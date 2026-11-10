@@ -62,29 +62,129 @@
   font-size: 12px;
 }
 
-/* One line, always there, so the dialog never jumps while a tool writes. */
-.status {
-  min-height: 36px;
-  margin: 0;
+/* Always there, so the dialog never jumps when a run starts or ends. */
+.callout {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-height: 52px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--text2);
   font-size: 12.5px;
+}
+
+.callout > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.running {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.done {
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+  background: color-mix(in srgb, var(--ok) 9%, transparent);
+}
+
+.done > svg {
+  color: var(--ok);
+}
+
+.warning {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.warning > svg {
+  color: var(--warn);
+}
+
+.failed {
+  border-color: color-mix(in srgb, var(--err) 40%, transparent);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+}
+
+.failed > svg {
+  color: var(--err);
+}
+
+.stopped {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.calloutText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.calloutTitle {
+  display: flex;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.calloutDetail {
+  max-height: 120px;
+  overflow: auto;
+  color: var(--text3);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
 }
 
-.progress {
-  display: block;
-  font: 12px var(--font-mono);
-  color: var(--text3);
+.mono {
+  font: 11.5px var(--font-mono);
+}
+
+.oneLine {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.error {
-  color: var(--err);
-  white-space: pre-wrap;
+.elapsed {
+  margin-left: auto;
+  color: var(--text3);
+  font: 11.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.safety {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.safety > svg {
+  flex: none;
+  margin-top: 2px;
 }
 
 .footer {
