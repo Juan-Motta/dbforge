@@ -1,5 +1,7 @@
 import type { PointerEvent } from 'react'
 import styles from './ResizeHandle.module.css'
+import { useMessages } from '../lib/i18n/useLanguage'
+import { messages } from './messages'
 
 interface ResizeHandleProps {
   /** The edge of the sized element the handle sits on; dragging it outward widens the element. */
@@ -14,6 +16,7 @@ interface ResizeHandleProps {
 
 /** A thin strip on an element's edge: drag it to size the element. Its parent must be positioned. */
 export function ResizeHandle({ edge, onResize, onReset, label, className }: ResizeHandleProps) {
+  const m = useMessages(messages)
   const start = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
@@ -39,7 +42,7 @@ export function ResizeHandle({ edge, onResize, onReset, label, className }: Resi
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
-      title={onReset ? `${label} · double-click to reset` : label}
+      title={onReset ? m.resetHint(label) : label}
       className={[styles.handle, styles[edge], className].filter(Boolean).join(' ')}
       onPointerDown={start}
       onDoubleClick={onReset}

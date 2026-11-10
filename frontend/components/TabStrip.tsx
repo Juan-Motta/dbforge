@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Icon, type IconName } from './Icon'
 import styles from './TabStrip.module.css'
+import { useMessages } from '../lib/i18n/useLanguage'
+import { messages } from './messages'
 
 export interface TabItem {
   id: string
@@ -18,6 +20,8 @@ interface TabStripProps {
 }
 
 export function TabStrip({ tabs, activeId, onSelect, onClose, children }: TabStripProps) {
+  const m = useMessages(messages)
+
   return (
     <div role="tablist" className={styles.strip}>
       {tabs.map((tab) => (
@@ -35,7 +39,7 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, children }: TabStr
           {tab.title}
           <button
             type="button"
-            aria-label={`Close ${tab.title}`}
+            aria-label={m.closeTab(tab.title)}
             className={styles.close}
             onClick={(event) => {
               event.stopPropagation()

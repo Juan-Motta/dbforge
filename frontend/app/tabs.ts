@@ -1,5 +1,6 @@
 import type { TableRef } from '../domain/table'
 import type { RowFilter } from '../features/table-data/rowFilter'
+import type { AppMessages } from './messages'
 
 export type Tab = { id: string; title: string; connectionId: string } & (
   | { kind: 'query'; database?: string; initialSql?: string; container?: string }
@@ -20,6 +21,7 @@ export const NO_TABS: TabsState = { tabs: [], activeId: null, queriesCreated: 0 
 /** Opens a new query console, optionally prefilled with `initialSql` (on a Cosmos DB `container`). */
 export function newQueryTab(
   state: TabsState,
+  m: AppMessages,
   connectionId: string,
   database?: string,
   initialSql?: string,
@@ -29,7 +31,7 @@ export function newQueryTab(
   const tab: Tab = {
     id: `query:${n}`,
     kind: 'query',
-    title: `Query ${n}`,
+    title: m.queryTab(n),
     connectionId,
     database,
     initialSql,
@@ -55,12 +57,13 @@ export function openTableTab(
 /** Opens a schema's ER diagram, or switches to it when it is already open. */
 export function openDiagramTab(
   state: TabsState,
+  m: AppMessages,
   connectionId: string,
   database: string,
   schema: string,
 ): TabsState {
   const id = `diagram:${connectionId}:${database}.${schema}`
-  return openTab(state, { id, kind: 'diagram', title: `${schema} diagram`, connectionId, database, schema })
+  return openTab(state, { id, kind: 'diagram', title: m.diagramTab(schema), connectionId, database, schema })
 }
 
 /** Opens a Redis database in the key browser, or switches to it when it is already open. */

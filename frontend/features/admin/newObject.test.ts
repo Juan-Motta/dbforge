@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_VALUES, fieldsOf, isComplete, toNewObject } from './newObject'
+import { messages } from './messages'
+import { EMPTY_VALUES, fieldsOf, isComplete, noteOf, titleOf, toNewObject } from './newObject'
 
 describe('fieldsOf', () => {
   it('asks each engine only for what it needs', () => {
@@ -45,5 +46,16 @@ describe('toNewObject', () => {
       name: 'ann',
       collection: undefined,
     })
+  })
+})
+
+describe('texts', () => {
+  it('writes the dialog in the interface language', () => {
+    expect(titleOf('user', 'local', messages.en)).toBe('New user on local')
+    expect(titleOf('database', 'local', messages.es)).toBe('Nueva base de datos en local')
+    expect(noteOf('postgres', 'role', messages.en)).toBe(
+      'A role without privileges. Grant them in the console.',
+    )
+    expect(noteOf('postgres', 'role', messages.es)).toBe('Un rol sin privilegios. Otórgalos en la consola.')
   })
 })

@@ -50,11 +50,11 @@ export function chooseDumpFile(database: string): Promise<string | null> {
   return save({ defaultPath: `${database}.sql`, filters: SQL_FILES })
 }
 
-/** A .sql file to restore, with the native dialog; `null` when the user cancels. */
-export function chooseSqlFile(): Promise<string | null> {
+/** A .sql file to restore, with the native dialog; `null` when the user cancels. `allFiles` names the catch-all filter. */
+export function chooseSqlFile(allFiles: string): Promise<string | null> {
   return open({
     multiple: false,
     directory: false,
-    filters: [...SQL_FILES, { name: 'All files', extensions: ['*'] }],
+    filters: [...SQL_FILES, { name: allFiles, extensions: ['*'] }],
   })
 }

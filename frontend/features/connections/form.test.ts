@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { messages } from './messages'
 import {
   canSubmit,
   canTest,
@@ -128,6 +129,9 @@ describe('parseConnectionUrl', () => {
     )!
     expect(replica.changes).toMatchObject({ host: 'a', port: '27017', tls: true, allowSelfSigned: true })
     expect(replica.ignored).toEqual(['hosts b:27018'])
+    expect(parseConnectionUrl('mongodb://a:27017,b:27018/', messages.es)!.ignored).toEqual([
+      'hosts adicionales b:27018',
+    ])
   })
 
   it('reads a Cosmos DB connection string, key padding included', () => {

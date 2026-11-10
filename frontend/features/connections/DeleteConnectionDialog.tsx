@@ -3,6 +3,8 @@ import { Button } from '../../components/Button'
 import { Modal } from '../../components/Modal'
 import type { Connection } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
 import styles from './DeleteConnectionDialog.module.css'
 
 interface DeleteConnectionDialogProps {
@@ -13,6 +15,7 @@ interface DeleteConnectionDialogProps {
 
 /** Asks before removing a saved connection; its databases on the server are untouched. */
 export function DeleteConnectionDialog({ connection, onDelete, onClose }: DeleteConnectionDialogProps) {
+  const m = useMessages(messages)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -28,20 +31,17 @@ export function DeleteConnectionDialog({ connection, onDelete, onClose }: Delete
   }
 
   return (
-    <Modal title={`Delete ${connection.name}?`} onClose={onClose} className={styles.dialog}>
+    <Modal title={m.deleteTitle(connection.name)} onClose={onClose} className={styles.dialog}>
       <div className={styles.body}>
-        <p>
-          DBForge forgets this connection and its saved password, and closes its tabs. Nothing on the server
-          changes.
-        </p>
+        <p>{m.deleteNote}</p>
         <p className={styles.error} role="alert">
           {error}
         </p>
       </div>
       <footer className={styles.footer}>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>{m.cancel}</Button>
         <Button variant="primary" data-autofocus disabled={deleting} onClick={() => void remove()}>
-          {deleting ? 'Deleting…' : 'Delete connection'}
+          {deleting ? m.deleting : m.deleteConnection}
         </Button>
       </footer>
     </Modal>

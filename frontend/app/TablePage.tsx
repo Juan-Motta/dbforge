@@ -7,9 +7,12 @@ import { DiagramView } from '../features/diagram/DiagramView'
 import { NO_FILTER, type RowFilter } from '../features/table-data/rowFilter'
 import { TableView } from '../features/table-data/TableView'
 import { StructureSection } from '../features/table-structure/StructureSection'
-import { SECTIONS, sectionCount, type Section } from '../features/table-structure/sections'
+import { messages as tableStructureMessages } from '../features/table-structure/messages'
+import { SECTIONS, sectionCount, sectionLabel, type Section } from '../features/table-structure/sections'
 import { summary } from '../features/table-structure/format'
 import { useTableStructure } from '../features/table-structure/useTableStructure'
+import { useMessages } from '../lib/i18n/useLanguage'
+import { messages } from './messages'
 import styles from './TablePage.module.css'
 
 type View = 'data' | 'diagram' | Section
@@ -43,6 +46,8 @@ export function TablePage({
   initialFilter,
   onOpenTable,
 }: TablePageProps) {
+  const m = useMessages(messages)
+  const structureM = useMessages(tableStructureMessages)
   const [view, setView] = useState<View>('data')
   const [filter, setFilter] = useState<RowFilter>(initialFilter ?? NO_FILTER)
   // The data view puts its row actions here, next to Export.
@@ -55,28 +60,28 @@ export function TablePage({
       <div className={styles.bar}>
         {/* The table's actions on the left, its views on the right. */}
         <span ref={setActionsSlot} className={styles.actions} />
-        <IconButton label="Export rows" onClick={() => onExport(filter)}>
+        <IconButton label={m.exportRows} onClick={() => onExport(filter)}>
           <Icon name="download" />
         </IconButton>
         {view !== 'data' && view !== 'diagram' && (
-          <IconButton label="Reload structure" disabled={loading} onClick={reload}>
+          <IconButton label={m.reloadStructure} disabled={loading} onClick={reload}>
             <Icon name="refresh" />
           </IconButton>
         )}
         <span className={styles.spacer} />
-        <div role="tablist" aria-label="Table views" className={styles.views}>
-          <ViewTab label="Data" selected={view === 'data'} onSelect={() => setView('data')} />
-          {SECTIONS.map(({ id, label }) => (
+        <div role="tablist" aria-label={m.tableViews} className={styles.views}>
+          <ViewTab label={m.data} selected={view === 'data'} onSelect={() => setView('data')} />
+          {SECTIONS.map(({ id }) => (
             <ViewTab
               key={id}
-              label={label}
+              label={sectionLabel(id, structureM)}
               count={structure && sectionCount(structure, id)}
               selected={view === id}
               onSelect={() => setView(id)}
             />
           ))}
           {diagram && (
-            <ViewTab label="Diagram" selected={view === 'diagram'} onSelect={() => setView('diagram')} />
+            <ViewTab label={m.diagram} selected={view === 'diagram'} onSelect={() => setView('diagram')} />
           )}
         </div>
       </div>
@@ -92,7 +97,7 @@ export function TablePage({
           onFilterChange={setFilter}
           actionsSlot={actionsSlot}
           active={view === 'data'}
-          summary={structure ? summary(structure) : ''}
+          summary={structure ? summary(structure, structureM) : ''}
           foreignKeys={structure?.foreignKeys ?? []}
           columnInfo={structure?.columns}
           onOpenTable={onOpenTable}
@@ -116,7 +121,7 @@ export function TablePage({
           ) : structure ? (
             <StructureSection structure={structure} section={view} dialect={dialect} />
           ) : (
-            <p className={styles.loading}>Loading…</p>
+            <p className={styles.loading}>{m.loading}</p>
           )}
         </div>
       )}

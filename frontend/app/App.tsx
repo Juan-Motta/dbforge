@@ -10,7 +10,8 @@ import {
 } from '../domain/connection'
 import { tableRefFromPath } from '../domain/table'
 import { NewObjectDialog } from '../features/admin/NewObjectDialog'
-import { MENU_ICONS, MENU_LABELS } from '../features/admin/newObject'
+import { messages as adminMessages } from '../features/admin/messages'
+import { MENU_ICONS, menuLabelOf } from '../features/admin/newObject'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { DeleteConnectionDialog } from '../features/connections/DeleteConnectionDialog'
 import { ExportDatabaseDialog, ImportDatabaseDialog } from '../features/dump/DumpDialogs'
@@ -33,6 +34,8 @@ import {
   openKeyspaceTab,
   openTableTab,
 } from './tabs'
+import { useMessages } from '../lib/i18n/useLanguage'
+import { messages } from './messages'
 import { Workspace } from './Workspace'
 import styles from './App.module.css'
 
@@ -74,6 +77,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const theme = useTheme()
+  const m = useMessages(messages)
+  const adminM = useMessages(adminMessages)
 
   const activeConnection = connections.find((c) => c.id === selection?.connectionId)
   const activePath = activeConnection ? (selection?.path ?? []) : []
@@ -97,13 +102,14 @@ export function App() {
             setTabs((state) =>
               newQueryTab(
                 state,
+                m,
                 activeConnection.id,
                 activePath[0] ?? (activeConnection.database || undefined),
                 undefined,
                 activePath[1],
               ),
             )
-        : () => setTabs((state) => newQueryTab(state, activeConnection.id, activePath[0]))
+        : () => setTabs((state) => newQueryTab(state, m, activeConnection.id, activePath[0]))
     : undefined
 
   // The diagram of the selected schema, or the default one when only a connection or database is selected.
@@ -114,7 +120,8 @@ export function App() {
       : undefined
   const openDiagram =
     activeConnection && diagramDatabase && hasDiagram(activeConnection.engine)
-      ? () => setTabs((state) => openDiagramTab(state, activeConnection.id, diagramDatabase, diagramSchema!))
+      ? () =>
+          setTabs((state) => openDiagramTab(state, m, activeConnection.id, diagramDatabase, diagramSchema!))
       : undefined
 
   // ⌘K / Ctrl+K toggles the palette from anywhere, the SQL editor included.
@@ -135,24 +142,24 @@ export function App() {
 
   const commands: Command[] = [
     ...(newQuery
-      ? [{ id: 'new-query', label: 'New query', detail: activeConnection?.name, run: newQuery }]
+      ? [{ id: 'new-query', label: m.newQuery, detail: activeConnection?.name, run: newQuery }]
       : []),
     ...(openDiagram
       ? [
           {
             id: 'diagram',
-            label: 'Show ER diagram',
+            label: m.showDiagram,
             detail:
               diagramDatabase === diagramSchema ? diagramDatabase : `${diagramDatabase}.${diagramSchema}`,
             run: openDiagram,
           },
         ]
       : []),
-    { id: 'new-connection', label: 'New connection', run: () => setDialog({}) },
-    { id: 'theme-dark', label: 'Theme: Dark', run: () => theme.choose('dark') },
-    { id: 'theme-light', label: 'Theme: Light', run: () => theme.choose('light') },
-    { id: 'theme-system', label: 'Theme: Match system', run: () => theme.choose('system') },
-    { id: 'settings', label: 'Open settings', run: () => setSettingsOpen(true) },
+    { id: 'new-connection', label: m.newConnection, run: () => setDialog({}) },
+    { id: 'theme-dark', label: m.themeDark, run: () => theme.choose('dark') },
+    { id: 'theme-light', label: m.themeLight, run: () => theme.choose('light') },
+    { id: 'theme-system', label: m.themeSystem, run: () => theme.choose('system') },
+    { id: 'settings', label: m.openSettings, run: () => setSettingsOpen(true) },
   ]
 
   /** A tree node's right-click menu: a connection's actions, or a database's export and import. */
@@ -160,14 +167,14 @@ export function App() {
     if (node.kind === 'connection') {
       const connection = node.connection
       const create = NEW_OBJECTS[connection.engine].map((kind) => ({
-        label: MENU_LABELS[kind],
+        label: menuLabelOf(kind, adminM),
         icon: MENU_ICONS[kind],
         onSelect: () => setCreating({ connection, kind, refresh }),
       }))
       return [
-        { label: 'Edit connection', icon: 'edit', onSelect: () => setDialog({ connection }) },
-        ...(create.length > 0 ? [{ label: 'New', icon: 'plus' as const, items: create }] : []),
-        { label: 'Delete connection', icon: 'trash', onSelect: () => setDeleting(connection) },
+        { label: m.editConnection, icon: 'edit', onSelect: () => setDialog({ connection }) },
+        ...(create.length > 0 ? [{ label: m.newMenu, icon: 'plus' as const, items: create }] : []),
+        { label: m.deleteConnection, icon: 'trash', onSelect: () => setDeleting(connection) },
       ]
     }
     const connection = connections.find((c) => c.id === node.connectionId)
@@ -175,8 +182,8 @@ export function App() {
     const open = (mode: 'export' | 'import') => () =>
       setDump({ mode, connection, database: node.name, refresh })
     return [
-      { label: 'Export database…', onSelect: open('export') },
-      { label: 'Import SQL file…', onSelect: open('import') },
+      { label: m.exportDatabase, onSelect: open('export') },
+      { label: m.importSqlFile, onSelect: open('import') },
     ]
   }
 
@@ -202,7 +209,7 @@ export function App() {
         <div className={styles.explorerSlot} hidden={!explorerOpen} style={{ width: explorerWidth }}>
           <ResizeHandle
             edge="right"
-            label="Resize the explorer"
+            label={m.resizeExplorer}
             onResize={setExplorerWidth}
             onReset={resetExplorerWidth}
           />
@@ -230,7 +237,7 @@ export function App() {
                     ? database
                     : null
               if (!schema) return null
-              return () => setTabs((state) => openDiagramTab(state, connection.id, database, schema))
+              return () => setTabs((state) => openDiagramTab(state, m, connection.id, database, schema))
             }}
             onNewConnection={() => setDialog({})}
             menuOf={menuOf}
@@ -238,7 +245,7 @@ export function App() {
         </div>
         <main className={`island ${styles.main}`}>
           {loadError ? (
-            <p className={styles.error}>Could not load connections: {loadError}</p>
+            <p className={styles.error}>{m.loadConnectionsFailed(loadError)}</p>
           ) : (
             <Workspace
               tabs={tabs.tabs}
@@ -251,12 +258,13 @@ export function App() {
                 setTabs((state) => openTableTab(state, connectionId, table, filter))
               }
               onOpenDiagram={(connectionId, database, schema) =>
-                setTabs((state) => openDiagramTab(state, connectionId, database, schema))
+                setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
               }
               onOpenQuery={(entry) =>
                 setTabs((state) =>
                   newQueryTab(
                     state,
+                    m,
                     entry.connectionId,
                     entry.database ?? undefined,
                     entry.sql,

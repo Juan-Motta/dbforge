@@ -10,6 +10,8 @@ import type { RowFilter } from '../features/table-data/rowFilter'
 import type { TableRef } from '../domain/table'
 import { KeyBrowser } from '../features/keyspace/KeyBrowser'
 import { QueryConsole } from '../features/query/QueryConsole'
+import { useMessages } from '../lib/i18n/useLanguage'
+import { messages } from './messages'
 import { TablePage } from './TablePage'
 import type { Tab } from './tabs'
 import styles from './App.module.css'
@@ -43,11 +45,14 @@ export function Workspace({
   onOpenTable,
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
+  const m = useMessages(messages)
 
   if (tabs.length === 0) {
     return (
       <p className={styles.empty}>
-        Double-click a table to see its rows, or press <strong>New query</strong>.
+        {m.emptyBefore}
+        <strong>{m.newQuery}</strong>
+        {m.emptyAfter}
       </p>
     )
   }
@@ -60,7 +65,7 @@ export function Workspace({
         onSelect={onSelect}
         onClose={onClose}
       >
-        <IconButton label="New query" disabled={!onNewQuery} onClick={onNewQuery} className={styles.newTab}>
+        <IconButton label={m.newQuery} disabled={!onNewQuery} onClick={onNewQuery} className={styles.newTab}>
           <Icon name="plus" />
         </IconButton>
       </TabStrip>

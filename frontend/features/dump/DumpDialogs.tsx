@@ -4,11 +4,13 @@ import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { TextField } from '../../components/TextField'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi } from '../explorer/api'
 import { formatMs } from '../query/plan'
 import { formatBytes } from '../table-structure/format'
 import { chooseDumpFile, chooseSqlFile, dumpApi, type DumpOptions } from './api'
-import { CONTENTS, targetNote } from './dump'
+import { contentsOf, targetNote } from './dump'
+import { messages } from './messages'
 import styles from './DumpDialogs.module.css'
 
 type Status = { state: 'idle' } | { state: 'done'; message: string } | { state: 'failed'; error: string }
@@ -40,11 +42,12 @@ function useDumpJob() {
 
 /** One line under the form: what the tool is doing, the result, or what went wrong. */
 function StatusLine({ running, line, status }: { running: boolean; line: string; status: Status }) {
+  const m = useMessages(messages)
   return (
     <p className={styles.status} role="status">
       {running ? (
         <span className={styles.progress} title={line}>
-          {line || 'Starting…'}
+          {line || m.starting}
         </span>
       ) : status.state === 'done' ? (
         status.message
@@ -69,6 +72,7 @@ export function ExportDatabaseDialog({
   database,
   onClose,
 }: ExportDatabaseDialogProps) {
+  const m = useMessages(messages)
   const [options, setOptions] = useState<DumpOptions>({ content: 'all', clean: false, keepOwners: false })
   const [status, setStatus] = useState<Status>({ state: 'idle' })
   const job = useDumpJob()
@@ -83,7 +87,7 @@ export function ExportDatabaseDialog({
       )
       setStatus({
         state: 'done',
-        message: `Exported ${formatBytes(done.bytes)} to ${path} in ${formatMs(done.elapsedMs)}.`,
+        message: m.exported(formatBytes(done.bytes), path, formatMs(done.elapsedMs)),
       })
     } catch (error) {
       setStatus({ state: 'failed', error: errorMessage(error) })
@@ -96,20 +100,20 @@ export function ExportDatabaseDialog({
   }
 
   return (
-    <Modal title={`Export ${database}`} onClose={close} className={styles.dialog}>
+    <Modal title={m.exportTitle(database)} onClose={close} className={styles.dialog}>
       <div className={styles.body}>
         <p className={styles.source}>
           <Icon name="database" />
           {database}
-          <span className="muted">· {connectionName} · pg_dump, plain SQL</span>
+          <span className="muted">{m.exportSource(connectionName)}</span>
         </p>
 
         <div>
           <span className={styles.label} id="dump-content">
-            Include
+            {m.include}
           </span>
           <div role="radiogroup" aria-labelledby="dump-content" className={styles.choices}>
-            {CONTENTS.map((option) => (
+            {contentsOf(m).map((option) => (
               <button
                 key={option.id}
                 type="button"
@@ -136,8 +140,8 @@ export function ExportDatabaseDialog({
               onChange={(event) => setOptions({ ...options, clean: event.target.checked })}
             />
             <span>
-              Drop objects before creating them
-              <span className={styles.description}>So the file restores over an existing database.</span>
+              {m.clean}
+              <span className={styles.description}>{m.cleanDescription}</span>
             </span>
           </label>
           <label className={styles.check}>
@@ -148,8 +152,8 @@ export function ExportDatabaseDialog({
               onChange={(event) => setOptions({ ...options, keepOwners: event.target.checked })}
             />
             <span>
-              Keep owners and privileges
-              <span className={styles.description}>Restoring then needs the same roles on that server.</span>
+              {m.keepOwners}
+              <span className={styles.description}>{m.keepOwnersDescription}</span>
             </span>
           </label>
         </div>
@@ -161,14 +165,14 @@ export function ExportDatabaseDialog({
         {job.running ? (
           <Button onClick={job.cancel}>
             <Icon name="stop" />
-            Stop
+            {m.stop}
           </Button>
         ) : (
-          <Button onClick={onClose}>{status.state === 'done' ? 'Done' : 'Cancel'}</Button>
+          <Button onClick={onClose}>{status.state === 'done' ? m.done : m.cancel}</Button>
         )}
         <Button variant="primary" disabled={job.running} onClick={() => void start()}>
           <Icon name="download" />
-          {job.running ? 'Exporting…' : 'Export…'}
+          {job.running ? m.exporting : m.export}
         </Button>
       </footer>
     </Modal>
@@ -196,6 +200,7 @@ export function ImportDatabaseDialog({
   onClose,
   onImported,
 }: ImportDatabaseDialogProps) {
+  const m = useMessages(messages)
   const [path, setPath] = useState<string | null>(null)
   const [target, setTarget] = useState(database)
   const [databases, setDatabases] = useState<string[] | null>(null)
@@ -218,7 +223,7 @@ export function ImportDatabaseDialog({
   }, [connectionId, imports])
 
   const choose = async () => {
-    const chosen = await chooseSqlFile()
+    const chosen = await chooseSqlFile(m.allFiles)
     if (chosen) {
       setPath(chosen)
       setStatus({ state: 'idle' })
@@ -239,10 +244,11 @@ export function ImportDatabaseDialog({
       const done = await job.run((jobId) =>
         dumpApi.importDatabase({ jobId, connectionId, database: name, path }),
       )
-      const what = done.created
-        ? `Created ${name} and restored the file into it`
-        : `Restored the file into ${name}`
-      setStatus({ state: 'done', message: `${what} in ${formatMs(done.elapsedMs)}.` })
+      const time = formatMs(done.elapsedMs)
+      setStatus({
+        state: 'done',
+        message: done.created ? m.createdAndRestored(name, time) : m.restored(name, time),
+      })
       setImports((n) => n + 1)
       onImported()
     } catch (error) {
@@ -256,24 +262,24 @@ export function ImportDatabaseDialog({
   }
 
   return (
-    <Modal title="Import SQL file" onClose={close} className={styles.dialog}>
+    <Modal title={m.importTitle} onClose={close} className={styles.dialog}>
       <div className={styles.body}>
         <div>
-          <span className={styles.label}>File</span>
+          <span className={styles.label}>{m.file}</span>
           <div className={styles.fileRow}>
             <span className={path ? styles.path : `${styles.path} muted`} title={path ?? undefined}>
               {/* Right to left, so a long path shows its end; the path itself stays left to right. */}
-              <bdi>{path ?? 'A .sql file, as pg_dump writes it'}</bdi>
+              <bdi>{path ?? m.filePlaceholder}</bdi>
             </span>
             <Button data-autofocus disabled={job.running} onClick={() => void choose()}>
-              Choose…
+              {m.choose}
             </Button>
           </div>
         </div>
 
         <div>
           <TextField
-            label={`Database on ${connectionName}`}
+            label={m.databaseOn(connectionName)}
             mono
             value={target}
             disabled={job.running}
@@ -283,13 +289,13 @@ export function ImportDatabaseDialog({
               setConfirming(false)
             }}
           />
-          <p className={styles.note}>{targetNote(target, databases)}</p>
+          <p className={styles.note}>{targetNote(target, databases, m)}</p>
         </div>
 
         <p className={styles.note}>
-          psql runs the file in one transaction and stops at the first error, so a failed import changes
-          nothing; a database created for it is removed again. Import only files you trust: psql also runs its
-          own commands, such as <code>\!</code> for the shell.
+          {m.importNoteBefore}
+          <code>\!</code>
+          {m.importNoteAfter}
         </p>
 
         <StatusLine
@@ -299,7 +305,7 @@ export function ImportDatabaseDialog({
             confirming
               ? {
                   state: 'failed',
-                  error: `${connectionName} is a production connection. Press Import into production to run the file there.`,
+                  error: m.productionConfirm(connectionName),
                 }
               : status
           }
@@ -310,17 +316,17 @@ export function ImportDatabaseDialog({
         {job.running ? (
           <Button onClick={job.cancel}>
             <Icon name="stop" />
-            Stop
+            {m.stop}
           </Button>
         ) : (
-          <Button onClick={onClose}>{status.state === 'done' ? 'Done' : 'Cancel'}</Button>
+          <Button onClick={onClose}>{status.state === 'done' ? m.done : m.cancel}</Button>
         )}
         <Button
           variant="primary"
           disabled={job.running || !path || target.trim() === ''}
           onClick={() => void start()}
         >
-          {job.running ? 'Importing…' : confirming ? 'Import into production' : 'Import'}
+          {job.running ? m.importing : confirming ? m.importIntoProduction : m.import}
         </Button>
       </footer>
     </Modal>

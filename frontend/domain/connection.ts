@@ -1,3 +1,5 @@
+import { messages, type SharedMessages } from '../lib/messages'
+
 export type Engine =
   'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'sqlserver' | 'mongodb' | 'redis' | 'cosmosdb'
 
@@ -73,11 +75,8 @@ export const NEW_OBJECTS: Record<Engine, NewObjectKind[]> = {
 export const RELATIONAL_ENGINES: Engine[] = ['postgres', 'mysql', 'mariadb', 'sqlite', 'sqlserver']
 export const NOSQL_ENGINES: Engine[] = ['mongodb', 'cosmosdb', 'redis']
 
-export const ENVIRONMENT_LABELS: Record<Environment, string> = {
-  development: 'Dev',
-  staging: 'Staging',
-  production: 'Production',
-}
+/** Environments in the order the form offers them; their names are in `lib/messages.ts`. */
+export const ENVIRONMENTS: Environment[] = ['development', 'staging', 'production']
 
 /** Engines whose databases hold tables (or collections, or containers) directly, with no schemas in between. */
 const SCHEMALESS: Engine[] = ['mysql', 'mariadb', 'mongodb', 'cosmosdb']
@@ -118,8 +117,8 @@ export function hasDiagram(engine: Engine): boolean {
 }
 
 /** Where a connection points: `user@host:port`, `host:port` for a key, or the file for SQLite. */
-export function connectionAddress(connection: Connection): string {
+export function connectionAddress(connection: Connection, m: SharedMessages = messages.en): string {
   if (isFileEngine(connection.engine)) return connection.database
   if (ACCOUNT_ENGINES.includes(connection.engine)) return `${connection.host}:${connection.port}`
-  return `${connection.username || 'default user'}@${connection.host}:${connection.port}`
+  return `${connection.username || m.defaultUser}@${connection.host}:${connection.port}`
 }

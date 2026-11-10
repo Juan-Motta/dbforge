@@ -8,6 +8,9 @@ import {
   openKeyspaceTab,
   openTableTab,
 } from './tabs'
+import { messages } from './messages'
+
+const en = messages.en
 
 const orders = { database: 'shop', schema: 'public', name: 'orders' }
 const users = { database: 'shop', schema: 'public', name: 'users' }
@@ -16,7 +19,7 @@ const titles = (state: { tabs: { title: string }[] }) => state.tabs.map((t) => t
 
 describe('tabs', () => {
   it('numbers query tabs and activates the new one', () => {
-    const state = newQueryTab(newQueryTab(NO_TABS, 'pg', 'shop'), 'pg')
+    const state = newQueryTab(newQueryTab(NO_TABS, en, 'pg', 'shop'), en, 'pg')
     expect(titles(state)).toEqual(['Query 1', 'Query 2'])
     expect(state.activeId).toBe('query:2')
   })
@@ -30,26 +33,31 @@ describe('tabs', () => {
   })
 
   it('opens one diagram tab per schema', () => {
-    let state = openDiagramTab(NO_TABS, 'pg', 'shop', 'public')
-    state = openDiagramTab(state, 'pg', 'shop', 'billing')
-    state = openDiagramTab(state, 'pg', 'shop', 'public')
+    let state = openDiagramTab(NO_TABS, en, 'pg', 'shop', 'public')
+    state = openDiagramTab(state, en, 'pg', 'shop', 'billing')
+    state = openDiagramTab(state, en, 'pg', 'shop', 'public')
     expect(titles(state)).toEqual(['public diagram', 'billing diagram'])
     expect(state.activeId).toBe('diagram:pg:shop.public')
   })
 
+  it('titles query and diagram tabs in the interface language', () => {
+    const state = openDiagramTab(newQueryTab(NO_TABS, messages.es, 'pg'), messages.es, 'pg', 'shop', 'public')
+    expect(titles(state)).toEqual(['Consulta 1', 'Diagrama de public'])
+  })
+
   it('can prefill a query tab, e.g. from the history', () => {
-    const state = newQueryTab(NO_TABS, 'pg', 'shop', 'SELECT 1')
+    const state = newQueryTab(NO_TABS, en, 'pg', 'shop', 'SELECT 1')
     expect(state.tabs[0]).toMatchObject({ kind: 'query', database: 'shop', initialSql: 'SELECT 1' })
   })
 
   it('opens a Cosmos DB console on a container', () => {
-    const state = newQueryTab(NO_TABS, 'cosmos', 'shop', 'SELECT * FROM c', 'order-items')
+    const state = newQueryTab(NO_TABS, en, 'cosmos', 'shop', 'SELECT * FROM c', 'order-items')
     expect(state.tabs[0]).toMatchObject({ database: 'shop', container: 'order-items' })
   })
 
   it('keeps numbering after a query tab closes', () => {
-    const one = newQueryTab(NO_TABS, 'pg')
-    const state = newQueryTab(closeTab(one, 'query:1'), 'pg')
+    const one = newQueryTab(NO_TABS, en, 'pg')
+    const state = newQueryTab(closeTab(one, 'query:1'), en, 'pg')
     expect(titles(state)).toEqual(['Query 2'])
   })
 
@@ -77,7 +85,7 @@ describe('tabs', () => {
   })
 
   it('activates the right neighbor, then the left, when the active tab closes', () => {
-    let state = openTableTab(openTableTab(newQueryTab(NO_TABS, 'pg'), 'pg', orders), 'pg', users)
+    let state = openTableTab(openTableTab(newQueryTab(NO_TABS, en, 'pg'), 'pg', orders), 'pg', users)
     state = closeTab({ ...state, activeId: state.tabs[1].id }, state.tabs[1].id)
     expect(state.activeId).toBe(state.tabs[1].id)
     state = closeTab(state, state.tabs[1].id)
@@ -86,12 +94,12 @@ describe('tabs', () => {
   })
 
   it('keeps the active tab when another one closes', () => {
-    const state = openTableTab(newQueryTab(NO_TABS, 'pg'), 'pg', orders)
+    const state = openTableTab(newQueryTab(NO_TABS, en, 'pg'), 'pg', orders)
     expect(closeTab(state, 'query:1').activeId).toBe(state.activeId)
   })
 
   it('closes all tabs of a connection', () => {
-    let state = newQueryTab(openTableTab(NO_TABS, 'pg', orders), 'other')
+    let state = newQueryTab(openTableTab(NO_TABS, 'pg', orders), en, 'other')
     state = closeConnectionTabs(state, 'pg')
     expect(titles(state)).toEqual(['Query 1'])
     expect(state.activeId).toBe('query:1')

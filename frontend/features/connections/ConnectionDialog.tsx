@@ -8,7 +8,7 @@ import { Modal } from '../../components/Modal'
 import { TextField } from '../../components/TextField'
 import {
   ENGINE_LABELS,
-  ENVIRONMENT_LABELS,
+  ENVIRONMENTS,
   isFileEngine,
   ACCOUNT_ENGINES,
   NOSQL_ENGINES,
@@ -19,6 +19,8 @@ import {
   type Environment,
 } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages as sharedMessages } from '../../lib/messages'
 import { connectionsApi, type ConnectionInput } from './api'
 import {
   canSubmit,
@@ -31,6 +33,7 @@ import {
   withEngine,
   type ConnectionForm,
 } from './form'
+import { messages, type ConnectionMessages } from './messages'
 import styles from './ConnectionDialog.module.css'
 
 type TestState = { status: 'idle' } | { status: 'testing' } | { status: 'ok' | 'error'; message: string }
@@ -49,12 +52,15 @@ interface ConnectionDialogProps {
 }
 
 /** Engines whose host field also takes a pasted URL, which it splits into the fields. */
-const HOST_HINTS: Partial<Record<Engine, string>> = {
-  mongodb: 'localhost, or paste a mongodb:// URL',
-  redis: 'localhost, or paste a redis:// URL',
+function hostHintOf(engine: Engine, m: ConnectionMessages): string | undefined {
+  if (engine === 'mongodb') return m.mongoHostHint
+  if (engine === 'redis') return m.redisHostHint
+  return undefined
 }
 
 export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDialogProps) {
+  const m = useMessages(messages)
+  const shared = useMessages(sharedMessages)
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
   )
@@ -72,7 +78,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
 
   /** Splits a connection URL into the fields; false when `text` isn't one. */
   const fillFromUrl = (text: string) => {
-    const parsed = parseConnectionUrl(text)
+    const parsed = parseConnectionUrl(text, m)
     if (!parsed) return false
     setForm((current) => ({ ...withEngine(current, parsed.changes.engine!), ...parsed.changes }))
     setTest({ status: 'idle' })
@@ -86,8 +92,8 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
       multiple: false,
       directory: false,
       filters: [
-        { name: 'SQLite database', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
-        { name: 'All files', extensions: ['*'] },
+        { name: m.sqliteFiles, extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
+        { name: m.allFiles, extensions: ['*'] },
       ],
     })
     if (typeof path === 'string') update({ database: path })
@@ -97,7 +103,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
     setTest({ status: 'testing' })
     try {
       const version = await connectionsApi.test(toInput(form, connection?.id))
-      setTest({ status: 'ok', message: `Connected · ${version}` })
+      setTest({ status: 'ok', message: m.connected(version) })
     } catch (error) {
       setTest({ status: 'error', message: errorMessage(error) })
     }
@@ -133,15 +139,15 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
 
   return (
     <Modal
-      title={connection ? 'Edit connection' : 'New connection'}
+      title={connection ? m.editConnection : m.newConnection}
       onClose={onClose}
       className={styles.dialog}
     >
       <div className={styles.body}>
-        <nav className={styles.engines} aria-label="Database engine">
-          <span className={styles.group}>Relational</span>
+        <nav className={styles.engines} aria-label={m.engine}>
+          <span className={styles.group}>{m.relational}</span>
           {RELATIONAL_ENGINES.map(engineButton)}
-          <span className={styles.group}>NoSQL</span>
+          <span className={styles.group}>{m.nosql}</span>
           {NOSQL_ENGINES.map(engineButton)}
         </nav>
 
@@ -155,7 +161,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
         >
           <div className={styles.row}>
             <TextField
-              label="Name"
+              label={m.name}
               data-autofocus
               required
               value={form.name}
@@ -163,10 +169,10 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
             />
             <div role="group" aria-labelledby="environment-label">
               <span id="environment-label" className={styles.label}>
-                Environment
+                {m.environment}
               </span>
               <div className={styles.chips}>
-                {(Object.keys(ENVIRONMENT_LABELS) as Environment[]).map((env) => (
+                {ENVIRONMENTS.map((env) => (
                   <button
                     key={env}
                     type="button"
@@ -175,7 +181,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                     onClick={() => update({ environment: form.environment === env ? null : env })}
                   >
                     <span className={styles.dot} style={{ background: ENVIRONMENT_TONES[env] }} />
-                    {ENVIRONMENT_LABELS[env]}
+                    {shared[env]}
                   </button>
                 ))}
               </div>
@@ -186,23 +192,23 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
             <>
               <div className={styles.fileRow}>
                 <TextField
-                  label="Database file"
+                  label={m.databaseFile}
                   mono
-                  placeholder="/path/to/database.db"
+                  placeholder={m.databaseFilePlaceholder}
                   value={form.database}
                   onChange={(e) => update({ database: e.target.value })}
                 />
-                <Button onClick={browse}>Browse…</Button>
+                <Button onClick={browse}>{m.browse}</Button>
               </div>
-              <p className={styles.hint}>The file must exist; DBForge never creates one by mistake.</p>
+              <p className={styles.hint}>{m.fileHint}</p>
             </>
           ) : (
             <>
               {account ? (
                 <TextField
-                  label="URI"
+                  label={m.uri}
                   mono
-                  placeholder="https://<account>.documents.azure.com:443/, or paste a connection string"
+                  placeholder={m.uriPlaceholder}
                   aria-invalid={form.host.trim() !== '' && !canTest(form)}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
@@ -215,9 +221,9 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
               ) : (
                 <div className={styles.hostRow}>
                   <TextField
-                    label="Host"
+                    label={m.host}
                     mono
-                    placeholder={HOST_HINTS[form.engine]}
+                    placeholder={hostHintOf(form.engine, m)}
                     value={form.host}
                     onChange={(e) => update({ host: e.target.value })}
                     // A connection URL, pasted or typed, fills the fields instead of staying in Host.
@@ -227,29 +233,29 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                     onBlur={() => fillFromUrl(form.host)}
                   />
                   <TextField
-                    label="Port"
+                    label={m.port}
                     mono
                     inputMode="numeric"
                     disabled={form.engine === 'mongodb' && form.srv}
                     aria-invalid={!(form.engine === 'mongodb' && form.srv) && !isValidPort(form.port)}
                     value={form.engine === 'mongodb' && form.srv ? '' : form.port}
-                    placeholder={form.engine === 'mongodb' && form.srv ? 'From DNS' : undefined}
+                    placeholder={form.engine === 'mongodb' && form.srv ? m.portFromDns : undefined}
                     onChange={(e) => update({ port: e.target.value })}
                   />
                 </div>
               )}
               {fromUrl && (
                 <p className={styles.hint} role="status">
-                  Filled in from the {account ? 'connection string' : 'URL'}.
+                  {account ? m.filledFromConnectionString : m.filledFromUrl}
                   {fromUrl.length > 0 && (
-                    <span className={styles.ignored}> Not carried over: {fromUrl.join(', ')}.</span>
+                    <span className={styles.ignored}>{m.notCarriedOver(fromUrl.join(', '))}</span>
                   )}
                 </p>
               )}
 
               {form.engine !== 'redis' && !account && (
                 <TextField
-                  label="Database"
+                  label={m.database}
                   mono
                   value={form.database}
                   onChange={(e) => update({ database: e.target.value })}
@@ -260,7 +266,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                 {!account && (
                   <TextField
                     // Redis 6+ has ACL users; without ACLs the password alone is enough.
-                    label={form.engine === 'redis' ? 'User (ACL, optional)' : 'User'}
+                    label={form.engine === 'redis' ? m.redisUser : m.user}
                     placeholder={form.engine === 'redis' ? 'default' : undefined}
                     mono
                     autoComplete="off"
@@ -269,18 +275,16 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                   />
                 )}
                 <TextField
-                  label={account ? 'Key' : 'Password'}
+                  label={account ? m.key : m.password}
                   mono
                   type="password"
                   autoComplete="new-password"
-                  placeholder={connection ? 'Unchanged' : account ? 'Primary or secondary key' : ''}
+                  placeholder={connection ? m.unchanged : account ? m.keyPlaceholder : ''}
                   value={form.password}
                   onChange={(e) => update({ password: e.target.value })}
                 />
               </div>
-              <p className={styles.hint}>
-                {account ? 'Keys' : 'Passwords'} are stored in your OS keychain, never in a file.
-              </p>
+              <p className={styles.hint}>{account ? m.keysStored : m.passwordsStored}</p>
 
               {TLS_ENGINES.includes(form.engine) && (
                 <div className={styles.options}>
@@ -291,7 +295,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                         checked={form.srv}
                         onChange={(e) => update({ srv: e.target.checked, tls: form.tls || e.target.checked })}
                       />
-                      DNS seed list (mongodb+srv), as Atlas uses
+                      {m.srv}
                     </label>
                   )}
                   {!account && (
@@ -302,7 +306,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                         disabled={form.engine === 'mongodb' && form.srv}
                         onChange={(e) => update({ tls: e.target.checked })}
                       />
-                      Use TLS
+                      {m.useTls}
                     </label>
                   )}
                   <label className={styles.check}>
@@ -316,7 +320,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
                       }
                       onChange={(e) => update({ allowSelfSigned: e.target.checked })}
                     />
-                    Accept self-signed certificate
+                    {m.selfSigned}
                   </label>
                 </div>
               )}
@@ -328,7 +332,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
       <footer className={styles.footer}>
         <Button onClick={runTest} disabled={test.status === 'testing' || !canTest(form)}>
           <Icon name="pulse" />
-          {test.status === 'testing' ? 'Testing…' : 'Test connection'}
+          {test.status === 'testing' ? m.testing : m.testConnection}
         </Button>
         <span role="status" className={styles.result}>
           {test.status === 'ok' && <Badge tone="ok">{test.message}</Badge>}
@@ -337,10 +341,10 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
         </span>
 
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {m.cancel}
         </Button>
         <Button type="submit" form="connection-form" variant="primary" disabled={!canSubmit(form) || saving}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? m.saving : m.save}
         </Button>
       </footer>
     </Modal>

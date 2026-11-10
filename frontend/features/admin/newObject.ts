@@ -1,5 +1,6 @@
 import type { IconName } from '../../components/Icon'
 import type { Engine, NewObjectKind } from '../../domain/connection'
+import type { AdminMessages } from './messages'
 
 /** What the backend creates; see `NewObject` in the Rust drivers. */
 export type NewObject =
@@ -14,13 +15,19 @@ export type FieldValues = Record<'name' | ExtraField, string>
 
 export const EMPTY_VALUES: FieldValues = { name: '', password: '', host: '', collection: '', database: '' }
 
-export const NOUNS: Record<NewObjectKind, string> = { database: 'database', role: 'role', user: 'user' }
+/** The connection menu's item for `kind` in its New section. */
+export function menuLabelOf(kind: NewObjectKind, m: AdminMessages): string {
+  return { database: m.menuDatabase, role: m.menuRole, user: m.menuUser }[kind]
+}
 
-/** The connection menu's items in its New section. */
-export const MENU_LABELS: Record<NewObjectKind, string> = {
-  database: 'Database',
-  role: 'Role',
-  user: 'User',
+/** The New dialog's title for `kind` on a connection. */
+export function titleOf(kind: NewObjectKind, connection: string, m: AdminMessages): string {
+  return { database: m.titleDatabase, role: m.titleRole, user: m.titleUser }[kind](connection)
+}
+
+/** The New dialog's submit button for `kind`. */
+export function createLabelOf(kind: NewObjectKind, m: AdminMessages): string {
+  return { database: m.createDatabase, role: m.createRole, user: m.createUser }[kind]
 }
 
 export const MENU_ICONS: Record<NewObjectKind, IconName> = {
@@ -42,26 +49,18 @@ export function fieldsOf(engine: Engine, kind: NewObjectKind): ExtraField[] {
 export const PLACEHOLDERS: Partial<Record<ExtraField, string>> = { host: '%', database: 'admin' }
 
 /** What creating `kind` on `engine` does, in one line under the form. */
-export function noteOf(engine: Engine, kind: NewObjectKind): string {
-  if (kind === 'database') {
-    return engine === 'mongodb'
-      ? 'MongoDB keeps a database once it holds a collection, so it is created with its first one.'
-      : 'An empty database, owned by this connection’s user.'
-  }
-  if (kind === 'role') {
-    return engine === 'sqlserver'
-      ? 'A server role, without permissions. Grant them in the console.'
-      : 'A role without privileges. Grant them in the console.'
-  }
+export function noteOf(engine: Engine, kind: NewObjectKind, m: AdminMessages): string {
+  if (kind === 'database') return engine === 'mongodb' ? m.noteMongoDatabase : m.noteDatabase
+  if (kind === 'role') return engine === 'sqlserver' ? m.noteServerRole : m.noteRole
   switch (engine) {
     case 'postgres':
-      return 'A role that can sign in, without privileges. Grant them in the console.'
+      return m.notePostgresUser
     case 'sqlserver':
-      return 'A login with SQL Server authentication, without permissions. Grant them in the console.'
+      return m.noteSqlServerUser
     case 'redis':
-      return 'An ACL user that is on, without permissions. Grant them with ACL SETUSER in the console.'
+      return m.noteRedisUser
     default:
-      return 'A user without privileges. Grant them in the console.'
+      return m.noteUser
   }
 }
 

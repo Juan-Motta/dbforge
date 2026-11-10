@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { connectionAddress, defaultSchema, hasDiagram, sqlDialectOf, type Connection } from './connection'
 import { tableRefFromPath } from './table'
+import { messages } from '../lib/messages'
 
 describe('tableRefFromPath', () => {
   it('reads database, schema and table', () => {
@@ -73,6 +74,13 @@ describe('connectionAddress', () => {
   it('shows only host and port for an account key', () => {
     const cosmos = { ...base, engine: 'cosmosdb' as const, host: 'shop.documents.azure.com', port: 443 }
     expect(connectionAddress({ ...cosmos, username: '' })).toBe('shop.documents.azure.com:443')
+  })
+
+  it('names the default user in the interface language when there is none', () => {
+    expect(connectionAddress({ ...base, username: '' })).toBe('default user@db.local:5432')
+    expect(connectionAddress({ ...base, username: '' }, messages.es)).toBe(
+      'usuario por defecto@db.local:5432',
+    )
   })
 
   it('shows the file for SQLite', () => {

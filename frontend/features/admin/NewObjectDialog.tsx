@@ -4,25 +4,25 @@ import { Modal } from '../../components/Modal'
 import { TextField } from '../../components/TextField'
 import type { Connection, NewObjectKind } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { adminApi } from './api'
 import {
   EMPTY_VALUES,
   fieldsOf,
   isComplete,
+  createLabelOf,
   noteOf,
-  NOUNS,
+  titleOf,
   PLACEHOLDERS,
   toNewObject,
   type ExtraField,
   type FieldValues,
 } from './newObject'
+import { messages, type AdminMessages } from './messages'
 import styles from './NewObjectDialog.module.css'
 
-const LABELS: Record<ExtraField, string> = {
-  password: 'Password',
-  host: 'Host',
-  collection: 'First collection',
-  database: 'Database',
+function labelOf(field: ExtraField, m: AdminMessages): string {
+  return { password: m.password, host: m.host, collection: m.firstCollection, database: m.database }[field]
 }
 
 interface NewObjectDialogProps {
@@ -39,7 +39,7 @@ export function NewObjectDialog({ connection, kind, onClose, onCreated }: NewObj
   const [values, setValues] = useState<FieldValues>(EMPTY_VALUES)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  const noun = NOUNS[kind]
+  const m = useMessages(messages)
 
   const change = (field: keyof FieldValues, value: string) => {
     setValues({ ...values, [field]: value })
@@ -61,11 +61,11 @@ export function NewObjectDialog({ connection, kind, onClose, onCreated }: NewObj
   }
 
   return (
-    <Modal title={`New ${noun} on ${connection.name}`} onClose={onClose} className={styles.dialog}>
+    <Modal title={titleOf(kind, connection.name, m)} onClose={onClose} className={styles.dialog}>
       <form onSubmit={(event) => void create(event)}>
         <div className={styles.body}>
           <TextField
-            label="Name"
+            label={m.name}
             mono
             data-autofocus
             value={values.name}
@@ -77,7 +77,7 @@ export function NewObjectDialog({ connection, kind, onClose, onCreated }: NewObj
           {fields.map((field) => (
             <TextField
               key={field}
-              label={LABELS[field]}
+              label={labelOf(field, m)}
               mono={field !== 'password'}
               type={field === 'password' ? 'password' : 'text'}
               placeholder={PLACEHOLDERS[field]}
@@ -88,7 +88,7 @@ export function NewObjectDialog({ connection, kind, onClose, onCreated }: NewObj
               onChange={(event) => change(field, event.target.value)}
             />
           ))}
-          <p className={styles.note}>{noteOf(connection.engine, kind)}</p>
+          <p className={styles.note}>{noteOf(connection.engine, kind, m)}</p>
           {/* Always there, so an error never moves the buttons. */}
           <p className={styles.error} role="alert">
             {error}
@@ -96,10 +96,10 @@ export function NewObjectDialog({ connection, kind, onClose, onCreated }: NewObj
         </div>
         <footer className={styles.footer}>
           <Button type="button" onClick={onClose}>
-            Cancel
+            {m.cancel}
           </Button>
           <Button type="submit" variant="primary" disabled={creating || !isComplete(values, fields)}>
-            {creating ? 'Creating…' : `Create ${noun}`}
+            {creating ? m.creating : createLabelOf(kind, m)}
           </Button>
         </footer>
       </form>

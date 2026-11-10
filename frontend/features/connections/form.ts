@@ -8,6 +8,7 @@ import {
   type Environment,
 } from '../../domain/connection'
 import type { ConnectionInput } from './api'
+import { messages, type ConnectionMessages } from './messages'
 
 /** Form values as typed by the user. */
 export interface ConnectionForm {
@@ -143,10 +144,11 @@ const MONGO_OPTIONS = ['tls', 'ssl', 'tlsAllowInvalidCertificates', 'tlsInsecure
  * The form values a `redis://`, `rediss://`, `mongodb://` or `mongodb+srv://`
  * URL, or a Cosmos DB connection string, stands for, and the parts of it the
  * form can't hold (`ignored`), so they can be shown rather than dropped
- * silently. `null` for anything else.
+ * silently, in the language of `m`. `null` for anything else.
  */
 export function parseConnectionUrl(
   text: string,
+  m: ConnectionMessages = messages.en,
 ): { changes: Partial<ConnectionForm>; ignored: string[] } | null {
   const cosmos = parseCosmosConnectionString(text)
   if (cosmos) return cosmos
@@ -165,7 +167,7 @@ export function parseConnectionUrl(
   const cut = first.lastIndexOf(':')
   const host = cut > 0 && !first.endsWith(']') ? first.slice(0, cut) : first
   const port = cut > 0 && !first.endsWith(']') ? first.slice(cut + 1) : ''
-  const ignored = others.length > 0 ? [`hosts ${others.join(',')}`] : []
+  const ignored = others.length > 0 ? [m.extraHosts(others.join(','))] : []
   const params = new URLSearchParams(query)
   const on = (...names: string[]) => names.some((name) => params.get(name) === 'true')
 

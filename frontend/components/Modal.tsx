@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { IconButton } from './Button'
 import { Icon } from './Icon'
 import styles from './Modal.module.css'
+import { useMessages } from '../lib/i18n/useLanguage'
+import { messages } from './messages'
 
 interface ModalProps {
   title: string
@@ -18,6 +20,7 @@ interface ModalProps {
 export function Modal({ title, onClose, children, className }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
+  const m = useMessages(messages)
 
   useEffect(() => {
     const dialog = ref.current
@@ -39,7 +42,7 @@ export function Modal({ title, onClose, children, className }: ModalProps) {
     >
       <header className={styles.header}>
         <h2 id={titleId}>{title}</h2>
-        <IconButton label="Close" onClick={onClose}>
+        <IconButton label={m.close} onClick={onClose}>
           <Icon name="close" />
         </IconButton>
       </header>
