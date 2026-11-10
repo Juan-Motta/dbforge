@@ -138,10 +138,57 @@
   opacity: 0.6;
 }
 
+/* Drawn in the app's colors rather than the system's, so focus never shows the system's blue ring. */
 .option input {
+  display: grid;
   flex: none;
+  place-content: center;
+  width: 16px;
+  height: 16px;
   margin: 0;
-  accent-color: var(--accent);
+  border: 1.5px solid var(--border2);
+  background: var(--surface);
+  appearance: none;
+  cursor: inherit;
+}
+
+.option input[type='radio'] {
+  border-radius: 50%;
+}
+
+.option input[type='checkbox'] {
+  border-radius: 4px;
+}
+
+.option input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.option input[type='radio']:checked::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  content: '';
+}
+
+.option input[type='checkbox']:checked::before {
+  width: 4px;
+  height: 8px;
+  margin-top: -2px;
+  border: solid var(--accent-ink);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  content: '';
+}
+
+.option input:focus {
+  outline: none;
+}
+
+.option input:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .optionIcon {
