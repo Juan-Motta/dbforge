@@ -15,7 +15,7 @@ import { ExportDatabaseDialog, ImportDatabaseDialog } from '../features/dump/Dum
 import { useConnections } from '../features/connections/useConnections'
 import type { MenuItem } from '../components/ContextMenu'
 import { ResizeHandle } from '../components/ResizeHandle'
-import { usePanelWidth } from '../components/usePanelWidth'
+import { usePanelSize } from '../components/usePanelSize'
 import { Explorer } from '../features/explorer/Explorer'
 import type { TreeNode } from '../features/explorer/tree'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
@@ -61,7 +61,7 @@ export function App() {
   const tagsState = useTagList(() => void reload())
   // Hidden with ⌘B for more room; it stays mounted so its expanded nodes survive.
   const [explorerOpen, setExplorerOpen] = useState(true)
-  const [explorerWidth, setExplorerWidth, resetExplorerWidth] = usePanelWidth(
+  const [explorerWidth, setExplorerWidth, resetExplorerWidth] = usePanelSize(
     'dbforge.explorerWidth',
     280,
     200,

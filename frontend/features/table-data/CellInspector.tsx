@@ -2,7 +2,7 @@ import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { Button, IconButton } from '../../components/Button'
 import { ResizeHandle } from '../../components/ResizeHandle'
-import { usePanelWidth } from '../../components/usePanelWidth'
+import { usePanelSize } from '../../components/usePanelSize'
 import { CodeEditor } from '../../components/code/CodeEditor'
 import { Icon } from '../../components/Icon'
 import { Select, type SelectOption } from '../../components/Select'
@@ -43,7 +43,7 @@ interface CellInspectorProps {
 export function CellInspector({ cell, onSave, onClose }: CellInspectorProps) {
   const m = useMessages(messages)
   const [wrap, setWrap] = useState(true)
-  const [width, setWidth, resetWidth] = usePanelWidth('dbforge.inspectorWidth', 380, 260, 900)
+  const [width, setWidth, resetWidth] = usePanelSize('dbforge.inspectorWidth', 380, 260, 900)
   return (
     <aside className={styles.panel} style={{ width }} aria-label={m.cellValue}>
       <ResizeHandle edge="left" label={m.resizePanel} onResize={setWidth} onReset={resetWidth} />
