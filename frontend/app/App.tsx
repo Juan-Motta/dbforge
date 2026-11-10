@@ -20,6 +20,9 @@ import { Explorer } from '../features/explorer/Explorer'
 import type { TreeNode } from '../features/explorer/tree'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
+import { StatementConsole } from '../features/statement-log/StatementConsole'
+import { useStatementLog } from '../features/statement-log/useStatementLog'
+import { useStoredFlag } from '../components/useStoredFlag'
 import { useTheme } from '../features/settings/useTheme'
 import { TitleBar } from '../features/shell/TitleBar'
 import {
@@ -85,6 +88,9 @@ export function App() {
   const [deleting, setDeleting] = useState<Connection | null>(null)
   const [tabs, setTabs] = useState(NO_TABS)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Recorded from the start, so opening the console shows what already ran.
+  const statements = useStatementLog()
+  const [statementsOpen, setStatementsOpen] = useStoredFlag('dbforge.statementsOpen', false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const theme = useTheme()
   const m = useMessages(messages)
@@ -158,10 +164,14 @@ export function App() {
         event.preventDefault()
         setExplorerOpen((open) => !open)
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'j') {
+        event.preventDefault()
+        setStatementsOpen((open) => !open)
+      }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [])
+  }, [setStatementsOpen])
 
   const commands: Command[] = [
     ...(newQuery
@@ -227,6 +237,8 @@ export function App() {
           path={activePath}
           onNewQuery={newQuery}
           onOpenSettings={() => setSettingsOpen(true)}
+          statementsOpen={statementsOpen}
+          onToggleStatements={() => setStatementsOpen((open) => !open)}
           onSearch={() => setPaletteOpen(true)}
           explorerOpen={explorerOpen}
           onToggleExplorer={() => setExplorerOpen((open) => !open)}
@@ -257,39 +269,55 @@ export function App() {
               menuOf={menuOf}
             />
           </div>
-          <main className={`island ${styles.main}`}>
-            {loadError ? (
-              <p className={styles.error}>{m.loadConnectionsFailed(loadError)}</p>
-            ) : (
-              <Workspace
-                tabs={tabs.tabs}
-                activeId={tabs.activeId}
-                onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
-                onClose={(id) => setTabs((state) => closeTab(state, id))}
-                onNewQuery={newQuery}
+          <div className={styles.column}>
+            <main className={`island ${styles.main}`}>
+              {loadError ? (
+                <p className={styles.error}>{m.loadConnectionsFailed(loadError)}</p>
+              ) : (
+                <Workspace
+                  tabs={tabs.tabs}
+                  activeId={tabs.activeId}
+                  onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
+                  onClose={(id) => setTabs((state) => closeTab(state, id))}
+                  onNewQuery={newQuery}
+                  connectionOf={(id) => connections.find((c) => c.id === id)}
+                  onOpenTable={(connectionId, table, filter) =>
+                    setTabs((state) => openTableTab(state, connectionId, table, filter))
+                  }
+                  onOpenDiagram={(connectionId, database, schema) =>
+                    setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
+                  }
+                  onTableView={(id, view) => setTabs((state) => setTableView(state, id, view))}
+                  onOpenQuery={(entry) =>
+                    setTabs((state) =>
+                      newQueryTab(
+                        state,
+                        m,
+                        entry.connectionId,
+                        entry.database ?? undefined,
+                        entry.sql,
+                        entry.container ?? undefined,
+                      ),
+                    )
+                  }
+                />
+              )}
+            </main>
+            {statementsOpen && (
+              <StatementConsole
+                entries={statements.entries}
                 connectionOf={(id) => connections.find((c) => c.id === id)}
-                onOpenTable={(connectionId, table, filter) =>
-                  setTabs((state) => openTableTab(state, connectionId, table, filter))
-                }
-                onOpenDiagram={(connectionId, database, schema) =>
-                  setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
-                }
-                onTableView={(id, view) => setTabs((state) => setTableView(state, id, view))}
-                onOpenQuery={(entry) =>
-                  setTabs((state) =>
-                    newQueryTab(
-                      state,
-                      m,
-                      entry.connectionId,
-                      entry.database ?? undefined,
-                      entry.sql,
-                      entry.container ?? undefined,
-                    ),
+                onCopy={(text) =>
+                  void copyText(text).then(
+                    () => notify(m.copied),
+                    (error) => notify(errorMessage(error), 'error'),
                   )
                 }
+                onClear={statements.clear}
+                onClose={() => setStatementsOpen(false)}
               />
             )}
-          </main>
+          </div>
         </div>
 
         {dialog && (

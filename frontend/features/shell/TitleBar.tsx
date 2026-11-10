@@ -14,6 +14,8 @@ interface TitleBarProps {
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
   onOpenSettings: () => void
+  statementsOpen: boolean
+  onToggleStatements: () => void
   onSearch: () => void
   explorerOpen: boolean
   onToggleExplorer: () => void
@@ -25,6 +27,8 @@ export function TitleBar({
   path,
   onNewQuery,
   onOpenSettings,
+  statementsOpen,
+  onToggleStatements,
   onSearch,
   explorerOpen,
   onToggleExplorer,
@@ -87,6 +91,13 @@ export function TitleBar({
         <Icon name="plus" />
         {m.newQuery}
       </Button>
+      <IconButton
+        label={statementsOpen ? m.hideStatements : m.showStatements}
+        active={statementsOpen}
+        onClick={onToggleStatements}
+      >
+        <Icon name="panelBottom" />
+      </IconButton>
       <IconButton label={m.settings} onClick={onOpenSettings}>
         <Icon name="settings" />
       </IconButton>

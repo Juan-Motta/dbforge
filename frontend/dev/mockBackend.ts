@@ -1,6 +1,7 @@
 // In-memory stand-in for the Rust backend, used only by `pnpm dev` in a plain
 // browser so the UI can be developed without launching the desktop app.
 import { emit } from '@tauri-apps/api/event'
+import { clearRecordedStatements, recordMock, recordedStatements } from './mockStatements'
 import { mockIPC } from '@tauri-apps/api/mocks'
 import type { Connection } from '../domain/connection'
 import type { ConnectionInput } from '../features/connections/api'
@@ -118,301 +119,318 @@ export function installMockBackend() {
   mockIPC(
     async (cmd, args) => {
       const payload = args as Record<string, unknown>
-      switch (cmd) {
-        case 'list_connections':
-          // A copy, as the real backend's JSON is: React must never share the mock's array.
-          return delay([...connections])
-        case 'save_connection': {
-          const { password: _password, ...input } = payload.input as ConnectionInput
-          const saved = { ...input, id: input.id ?? crypto.randomUUID() }
-          const index = connections.findIndex((c) => c.id === saved.id)
-          if (index >= 0) connections[index] = saved
-          else connections.push(saved)
-          return delay(saved)
-        }
-        case 'duplicate_connection': {
-          const original = connections.find((c) => c.id === payload.id)!
-          const copy = { ...original, id: crypto.randomUUID(), name: String(payload.name) }
-          connections.push(copy)
-          return delay(copy)
-        }
-        case 'delete_connection':
-          connections.splice(
-            connections.findIndex((c) => c.id === payload.id),
-            1,
-          )
-          return delay(null)
-        case 'test_connection':
-          return delay('PostgreSQL 17.0 (mock)')
-        case 'list_objects': {
-          const path = (payload.path as string[]).join('/')
-          if (payload.connectionId === 'demo-redis') {
-            const dbs = Array.from({ length: 16 }, (_, n): DbObject => ({
-              name: `db${n}`,
-              kind: 'database',
-              rowEstimate: n === 0 ? redis.overview().keys : 0,
-            }))
-            return delay(path === '' ? dbs : [])
-          }
-          if (payload.connectionId === 'demo-cosmos') {
-            const tree: Record<string, DbObject[]> = {
-              '': [{ name: 'shop', kind: 'database', rowEstimate: null }],
-              shop: [table('order-items', 120)],
-            }
-            return delay(tree[path] ?? [])
-          }
-          const source =
-            payload.connectionId === 'demo-mysql'
-              ? mysqlObjects
-              : payload.connectionId === 'demo-sqlite'
-                ? sqliteObjects
-                : objects
-          return delay(source[path] ?? [])
-        }
-        case 'fetch_rows': {
-          if (payload.connectionId === 'demo-cosmos') return delay(cosmosPage(payload.offset as number))
-          const offset = payload.offset as number
-          const limit = payload.limit as number
-          const total = 450
-          const count = Math.max(0, Math.min(limit, total - offset))
-          const rows = Array.from({ length: count }, (_, i) => {
-            const id = offset + i + 1
-            return [
-              String(id),
-              `Customer ${id}`,
-              id % 7 === 0 ? null : (id * 13.37).toFixed(2),
-              '2026-11-05 10:00:00+00',
-              id % 5 === 0 ? null : String(1000 + (id % 9)),
-              `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
-              id % 6 === 0
-                ? null
-                : `2026-${String((id % 12) + 1).padStart(2, '0')}-${String((id % 28) + 1).padStart(2, '0')}`,
-              `2026-09-16 ${String(id % 24).padStart(2, '0')}:00:27`,
-              id % 4 === 0 ? 'false' : 'true',
-              id % 9 === 0 ? null : ['lead', 'trial', 'paying', 'churned'][id % 4],
-            ]
-          })
-          return delay({
-            columns: [
-              { name: 'id', dataType: 'integer', primaryKey: true },
-              { name: 'name', dataType: 'character varying(80)', primaryKey: false },
-              { name: 'revenue', dataType: 'numeric(10,2)', primaryKey: false },
-              {
-                name: 'created_at',
-                dataType: 'timestamp with time zone',
-                primaryKey: false,
-                generated: true,
-              },
-              { name: 'customer_id', dataType: 'bigint', primaryKey: false },
-              { name: 'external_id', dataType: 'uuid', primaryKey: false },
-              { name: 'birthday', dataType: 'date', primaryKey: false },
-              { name: 'last_login', dataType: 'timestamp without time zone', primaryKey: false },
-              { name: 'active', dataType: 'boolean', primaryKey: false },
-              { name: 'status', dataType: 'customer_status', primaryKey: false },
-            ],
-            rows,
-            hasMore: offset + count < total,
-          })
-        }
-        case 'redis_overview':
-          return delay(redis.overview())
-        case 'redis_scan':
-          return delay(
-            redis.scan(
-              String(payload.pattern),
-              payload.kind as string | null,
-              String(payload.cursor),
-              Number(payload.limit),
-            ),
-          )
-        case 'redis_read_key':
-          return delay(redis.readKey(String(payload.key), String(payload.filter)))
-        case 'redis_edit_key':
-          return delay(redis.editKey(String(payload.key), String(payload.kind), payload.edit as never))
-        case 'redis_create_key':
-          return delay(redis.createKey(payload.key as never))
-        case 'run_query': {
-          const sql = String(payload.sql)
-          if (String(payload.sessionId).endsWith(':cli')) {
-            const column = { name: 'reply', dataType: 'redis' }
-            const rows = redis.cli(sql).map((line) => [line])
-            return delay({
-              elapsedMs: 1,
-              results: [{ columns: [column], rows, truncated: false, rowsAffected: 1 }],
-            })
-          }
-          if (/error/i.test(sql)) throw 'syntax error at or near "error"'
-          if (/pg_sleep/i.test(sql)) {
-            await new Promise<void>((resolve) => sleeping.set(String(payload.sessionId), resolve))
-            throw 'canceling statement due to user request'
-          }
-          return delay({
-            elapsedMs: 38,
-            results: [
-              { columns: [], rows: [], truncated: false, rowsAffected: 0 },
-              {
-                columns: [
-                  { name: 'id', dataType: 'int4' },
-                  { name: 'name', dataType: 'text' },
-                  { name: 'revenue', dataType: 'numeric' },
-                ],
-                rows: [
-                  ['1042', 'Northwind Traders', '12480.00'],
-                  ['2210', 'Blue Harbor Coffee', null],
-                ],
-                truncated: false,
-                rowsAffected: 2,
-              },
-            ],
-          })
-        }
-        case 'plugin:dialog|save':
-          return delay(`/Users/demo/Downloads/${(payload.options as { defaultPath: string }).defaultPath}`)
-        case 'export_table':
-          return delay(48213)
-        case 'export_rows':
-          return delay((payload.rows as unknown[]).length)
-        case 'format_rows':
-          return delay('id,name\n1042,Northwind Traders\n')
-        case 'list_history': {
-          const search = String(payload.search).toLowerCase()
-          return delay(
-            mockHistory.filter(
-              (entry) => entry.sql.toLowerCase().includes(search) && (!payload.errorsOnly || entry.error),
-            ),
-          )
-        }
-        case 'list_relations':
-          return delay({
-            database: payload.database ?? 'shop',
-            relations: [
-              { schema: 'analytics', name: 'v_orders_daily', kind: 'view' },
-              { schema: 'public', name: 'customers', kind: 'table' },
-              { schema: 'public', name: 'order_items', kind: 'table' },
-              { schema: 'public', name: 'orders', kind: 'table' },
-              { schema: 'public', name: 'payments', kind: 'table' },
-              { schema: 'public', name: 'sales_order', kind: 'table' },
-            ],
-          })
-        case 'apply_changes': {
-          const changes = payload.changes as { kind: string; key?: Record<string, string> }[]
-          if (changes.some((c) => c.key?.id === '13'))
-            throw 'The row with id = 13 was changed or deleted since it was loaded. Nothing was applied; reload and try again.'
-          const count = (...kinds: string[]) => changes.filter((c) => kinds.includes(c.kind)).length
-          return delay({
-            updated: count('update', 'replace'),
-            inserted: count('insert', 'insertDocument'),
-            deleted: count('delete'),
-          })
-        }
-        case 'preview_changes':
-          return delay(
-            (payload.changes as { kind: string; document?: string }[]).map((c) =>
-              c.document !== undefined
-                ? cosmosWrite(c.kind, c.document)
-                : c.kind === 'delete'
-                  ? `DELETE FROM "public"."orders" WHERE "id" = CAST('3'::text AS integer)`
-                  : c.kind === 'insert'
-                    ? `INSERT INTO "public"."orders" ("name") VALUES (CAST('New'::text AS character varying(80)))`
-                    : `UPDATE "public"."orders" SET "name" = CAST('Renamed'::text AS character varying(80)) WHERE "id" = CAST('1'::text AS integer)`,
-            ),
-          )
-        case 'schema_diagram':
-          return delay(mockDiagram)
-        case 'table_structure':
-          return delay(mockStructure)
-        case 'explain_query':
-          return delay(payload.analyze ? mockPlan : mockPlanEstimate)
-        case 'cancel_query':
-        case 'close_session':
-          sleeping.get(String(payload.sessionId))?.()
-          sleeping.delete(String(payload.sessionId))
-          return null
-        case 'keep_cursor':
-          return null
-        case 'plugin:dialog|open':
-          return delay('/Users/demo/Downloads/shop.sql')
-        case 'export_database': {
-          const { jobId, database } = payload.request as { jobId: string; database: string }
-          await toolRun(jobId, [
-            'pg_dump: last built-in OID is 16383',
-            'pg_dump: reading user-defined tables',
-            `pg_dump: dumping contents of table "public.orders"`,
-            `pg_dump: dumping contents of table "public.customers"`,
-          ])
-          if (database === 'broken')
-            throw 'pg_dump: error: connection to server failed: password authentication failed'
-          return { bytes: 9_812_345, elapsedMs: 2400 }
-        }
-        case 'import_database': {
-          const { jobId, database } = payload.request as { jobId: string; database: string }
-          await toolRun(jobId, ['SET', 'CREATE TABLE', 'COPY 450', 'ALTER TABLE', 'CREATE INDEX'])
-          return { created: !objects[''].some((o) => o.name === database), elapsedMs: 1830 }
-        }
-        case 'create_object': {
-          const { object } = payload.request as { object: { kind: string; name: string } }
-          const taken = object.kind === 'database' ? objects[''].map((o) => o.name) : [...accounts]
-          if (taken.includes(object.name)) throw `${object.kind} "${object.name}" already exists`
-          if (object.kind === 'database')
-            objects[''].push({ name: object.name, kind: 'database', rowEstimate: null })
-          else accounts.add(object.name)
-          return delay(null)
-        }
-        case 'list_tags':
-          return delay(tags)
-        case 'save_tags': {
-          const list = payload.list as typeof tags
-          const names = list.map((tag) => tag.name.trim().toLowerCase())
-          if (names.some((name) => !name)) throw 'Every tag needs a name.'
-          if (new Set(names).size < names.length) throw 'There is already a tag with that name.'
-          const kept = new Set(list.map((tag) => tag.id))
-          for (const connection of connections)
-            if (connection.environment && !kept.has(connection.environment)) connection.environment = null
-          tags = list.map((tag) => ({ ...tag, name: tag.name.trim() }))
-          return delay(tags)
-        }
-        case 'credential_storage':
-          return delay(credentials)
-        case 'set_credential_storage': {
-          for (let current = 1; current <= connections.length; current++) {
-            await emit('credential-progress', { phase: 'moving', current, total: connections.length })
-            await new Promise((resolve) => setTimeout(resolve, 400))
-          }
-          credentials = { ...credentials, storage: payload.storage as 'keychain' | 'file' }
-          return delay(credentials)
-        }
-        case 'plugin:app|version':
-          return '0.1.0'
-        case 'dump_tool':
-          return delay(mockTools[String(payload.name)])
-        case 'set_dump_tool': {
-          const name = String(payload.name)
-          const path = payload.path as string | null
-          if (path && !/pg_dump|psql/.test(path))
-            throw `The ${name} chosen in DBForge can't be run: ${path}. Choose another one, or use the one DBForge finds.`
-          mockTools[name] = path ? { path, version: '16.4', custom: true } : { ...foundTools[name] }
-          return delay(mockTools[name])
-        }
-        case 'export_folder_usage':
-          return delay(exportFiles)
-        case 'clear_export_folder': {
-          const removed = exportFiles
-          exportFiles = { count: 0, bytes: 0 }
-          return delay(removed)
-        }
-        case 'dump_file_exists':
-          return delay(String(payload.path).includes('exists'))
-        case 'plugin:path|resolve_directory':
-          return '/Users/demo/Documents'
-        case 'cancel_dump':
-          cancelled.add(String(payload.jobId))
-          return null
-        default:
-          throw new Error(`Mock backend: unknown command ${cmd}`)
+      try {
+        const result = await answer(cmd, payload)
+        void recordMock(cmd, payload)
+        return result
+      } catch (error) {
+        void recordMock(cmd, payload, String(error))
+        throw error
       }
     },
     { shouldMockEvents: true },
   )
+}
+
+/** The mock's answer to each command, as the real backend would give it. */
+async function answer(cmd: string, payload: Record<string, unknown>): Promise<unknown> {
+  switch (cmd) {
+    case 'list_statements':
+      return delay(recordedStatements())
+    case 'clear_statements':
+      clearRecordedStatements()
+      return null
+    case 'list_connections':
+      // A copy, as the real backend's JSON is: React must never share the mock's array.
+      return delay([...connections])
+    case 'save_connection': {
+      const { password: _password, ...input } = payload.input as ConnectionInput
+      const saved = { ...input, id: input.id ?? crypto.randomUUID() }
+      const index = connections.findIndex((c) => c.id === saved.id)
+      if (index >= 0) connections[index] = saved
+      else connections.push(saved)
+      return delay(saved)
+    }
+    case 'duplicate_connection': {
+      const original = connections.find((c) => c.id === payload.id)!
+      const copy = { ...original, id: crypto.randomUUID(), name: String(payload.name) }
+      connections.push(copy)
+      return delay(copy)
+    }
+    case 'delete_connection':
+      connections.splice(
+        connections.findIndex((c) => c.id === payload.id),
+        1,
+      )
+      return delay(null)
+    case 'test_connection':
+      return delay('PostgreSQL 17.0 (mock)')
+    case 'list_objects': {
+      const path = (payload.path as string[]).join('/')
+      if (payload.connectionId === 'demo-redis') {
+        const dbs = Array.from({ length: 16 }, (_, n): DbObject => ({
+          name: `db${n}`,
+          kind: 'database',
+          rowEstimate: n === 0 ? redis.overview().keys : 0,
+        }))
+        return delay(path === '' ? dbs : [])
+      }
+      if (payload.connectionId === 'demo-cosmos') {
+        const tree: Record<string, DbObject[]> = {
+          '': [{ name: 'shop', kind: 'database', rowEstimate: null }],
+          shop: [table('order-items', 120)],
+        }
+        return delay(tree[path] ?? [])
+      }
+      const source =
+        payload.connectionId === 'demo-mysql'
+          ? mysqlObjects
+          : payload.connectionId === 'demo-sqlite'
+            ? sqliteObjects
+            : objects
+      return delay(source[path] ?? [])
+    }
+    case 'fetch_rows': {
+      if (payload.connectionId === 'demo-cosmos') return delay(cosmosPage(payload.offset as number))
+      const offset = payload.offset as number
+      const limit = payload.limit as number
+      const total = 450
+      const count = Math.max(0, Math.min(limit, total - offset))
+      const rows = Array.from({ length: count }, (_, i) => {
+        const id = offset + i + 1
+        return [
+          String(id),
+          `Customer ${id}`,
+          id % 7 === 0 ? null : (id * 13.37).toFixed(2),
+          '2026-11-05 10:00:00+00',
+          id % 5 === 0 ? null : String(1000 + (id % 9)),
+          `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
+          id % 6 === 0
+            ? null
+            : `2026-${String((id % 12) + 1).padStart(2, '0')}-${String((id % 28) + 1).padStart(2, '0')}`,
+          `2026-09-16 ${String(id % 24).padStart(2, '0')}:00:27`,
+          id % 4 === 0 ? 'false' : 'true',
+          id % 9 === 0 ? null : ['lead', 'trial', 'paying', 'churned'][id % 4],
+        ]
+      })
+      return delay({
+        columns: [
+          { name: 'id', dataType: 'integer', primaryKey: true },
+          { name: 'name', dataType: 'character varying(80)', primaryKey: false },
+          { name: 'revenue', dataType: 'numeric(10,2)', primaryKey: false },
+          {
+            name: 'created_at',
+            dataType: 'timestamp with time zone',
+            primaryKey: false,
+            generated: true,
+          },
+          { name: 'customer_id', dataType: 'bigint', primaryKey: false },
+          { name: 'external_id', dataType: 'uuid', primaryKey: false },
+          { name: 'birthday', dataType: 'date', primaryKey: false },
+          { name: 'last_login', dataType: 'timestamp without time zone', primaryKey: false },
+          { name: 'active', dataType: 'boolean', primaryKey: false },
+          { name: 'status', dataType: 'customer_status', primaryKey: false },
+        ],
+        rows,
+        hasMore: offset + count < total,
+      })
+    }
+    case 'redis_overview':
+      return delay(redis.overview())
+    case 'redis_scan':
+      return delay(
+        redis.scan(
+          String(payload.pattern),
+          payload.kind as string | null,
+          String(payload.cursor),
+          Number(payload.limit),
+        ),
+      )
+    case 'redis_read_key':
+      return delay(redis.readKey(String(payload.key), String(payload.filter)))
+    case 'redis_edit_key':
+      return delay(redis.editKey(String(payload.key), String(payload.kind), payload.edit as never))
+    case 'redis_create_key':
+      return delay(redis.createKey(payload.key as never))
+    case 'run_query': {
+      const sql = String(payload.sql)
+      if (String(payload.sessionId).endsWith(':cli')) {
+        const column = { name: 'reply', dataType: 'redis' }
+        const rows = redis.cli(sql).map((line) => [line])
+        return delay({
+          elapsedMs: 1,
+          results: [{ columns: [column], rows, truncated: false, rowsAffected: 1 }],
+        })
+      }
+      if (/error/i.test(sql)) throw 'syntax error at or near "error"'
+      if (/pg_sleep/i.test(sql)) {
+        await new Promise<void>((resolve) => sleeping.set(String(payload.sessionId), resolve))
+        throw 'canceling statement due to user request'
+      }
+      return delay({
+        elapsedMs: 38,
+        results: [
+          { columns: [], rows: [], truncated: false, rowsAffected: 0 },
+          {
+            columns: [
+              { name: 'id', dataType: 'int4' },
+              { name: 'name', dataType: 'text' },
+              { name: 'revenue', dataType: 'numeric' },
+            ],
+            rows: [
+              ['1042', 'Northwind Traders', '12480.00'],
+              ['2210', 'Blue Harbor Coffee', null],
+            ],
+            truncated: false,
+            rowsAffected: 2,
+          },
+        ],
+      })
+    }
+    case 'plugin:dialog|save':
+      return delay(`/Users/demo/Downloads/${(payload.options as { defaultPath: string }).defaultPath}`)
+    case 'export_table':
+      return delay(48213)
+    case 'export_rows':
+      return delay((payload.rows as unknown[]).length)
+    case 'format_rows':
+      return delay('id,name\n1042,Northwind Traders\n')
+    case 'list_history': {
+      const search = String(payload.search).toLowerCase()
+      return delay(
+        mockHistory.filter(
+          (entry) => entry.sql.toLowerCase().includes(search) && (!payload.errorsOnly || entry.error),
+        ),
+      )
+    }
+    case 'list_relations':
+      return delay({
+        database: payload.database ?? 'shop',
+        relations: [
+          { schema: 'analytics', name: 'v_orders_daily', kind: 'view' },
+          { schema: 'public', name: 'customers', kind: 'table' },
+          { schema: 'public', name: 'order_items', kind: 'table' },
+          { schema: 'public', name: 'orders', kind: 'table' },
+          { schema: 'public', name: 'payments', kind: 'table' },
+          { schema: 'public', name: 'sales_order', kind: 'table' },
+        ],
+      })
+    case 'apply_changes': {
+      const changes = payload.changes as { kind: string; key?: Record<string, string> }[]
+      if (changes.some((c) => c.key?.id === '13'))
+        throw 'The row with id = 13 was changed or deleted since it was loaded. Nothing was applied; reload and try again.'
+      const count = (...kinds: string[]) => changes.filter((c) => kinds.includes(c.kind)).length
+      return delay({
+        updated: count('update', 'replace'),
+        inserted: count('insert', 'insertDocument'),
+        deleted: count('delete'),
+      })
+    }
+    case 'preview_changes':
+      return delay(
+        (payload.changes as { kind: string; document?: string }[]).map((c) =>
+          c.document !== undefined
+            ? cosmosWrite(c.kind, c.document)
+            : c.kind === 'delete'
+              ? `DELETE FROM "public"."orders" WHERE "id" = CAST('3'::text AS integer)`
+              : c.kind === 'insert'
+                ? `INSERT INTO "public"."orders" ("name") VALUES (CAST('New'::text AS character varying(80)))`
+                : `UPDATE "public"."orders" SET "name" = CAST('Renamed'::text AS character varying(80)) WHERE "id" = CAST('1'::text AS integer)`,
+        ),
+      )
+    case 'schema_diagram':
+      return delay(mockDiagram)
+    case 'table_structure':
+      return delay(mockStructure)
+    case 'explain_query':
+      return delay(payload.analyze ? mockPlan : mockPlanEstimate)
+    case 'cancel_query':
+    case 'close_session':
+      sleeping.get(String(payload.sessionId))?.()
+      sleeping.delete(String(payload.sessionId))
+      return null
+    case 'keep_cursor':
+      return null
+    case 'plugin:dialog|open':
+      return delay('/Users/demo/Downloads/shop.sql')
+    case 'export_database': {
+      const { jobId, database } = payload.request as { jobId: string; database: string }
+      await toolRun(jobId, [
+        'pg_dump: last built-in OID is 16383',
+        'pg_dump: reading user-defined tables',
+        `pg_dump: dumping contents of table "public.orders"`,
+        `pg_dump: dumping contents of table "public.customers"`,
+      ])
+      if (database === 'broken')
+        throw 'pg_dump: error: connection to server failed: password authentication failed'
+      return { bytes: 9_812_345, elapsedMs: 2400 }
+    }
+    case 'import_database': {
+      const { jobId, database } = payload.request as { jobId: string; database: string }
+      await toolRun(jobId, ['SET', 'CREATE TABLE', 'COPY 450', 'ALTER TABLE', 'CREATE INDEX'])
+      return { created: !objects[''].some((o) => o.name === database), elapsedMs: 1830 }
+    }
+    case 'create_object': {
+      const { object } = payload.request as { object: { kind: string; name: string } }
+      const taken = object.kind === 'database' ? objects[''].map((o) => o.name) : [...accounts]
+      if (taken.includes(object.name)) throw `${object.kind} "${object.name}" already exists`
+      if (object.kind === 'database')
+        objects[''].push({ name: object.name, kind: 'database', rowEstimate: null })
+      else accounts.add(object.name)
+      return delay(null)
+    }
+    case 'list_tags':
+      return delay(tags)
+    case 'save_tags': {
+      const list = payload.list as typeof tags
+      const names = list.map((tag) => tag.name.trim().toLowerCase())
+      if (names.some((name) => !name)) throw 'Every tag needs a name.'
+      if (new Set(names).size < names.length) throw 'There is already a tag with that name.'
+      const kept = new Set(list.map((tag) => tag.id))
+      for (const connection of connections)
+        if (connection.environment && !kept.has(connection.environment)) connection.environment = null
+      tags = list.map((tag) => ({ ...tag, name: tag.name.trim() }))
+      return delay(tags)
+    }
+    case 'credential_storage':
+      return delay(credentials)
+    case 'set_credential_storage': {
+      for (let current = 1; current <= connections.length; current++) {
+        await emit('credential-progress', { phase: 'moving', current, total: connections.length })
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      }
+      credentials = { ...credentials, storage: payload.storage as 'keychain' | 'file' }
+      return delay(credentials)
+    }
+    case 'plugin:app|version':
+      return '0.1.0'
+    case 'dump_tool':
+      return delay(mockTools[String(payload.name)])
+    case 'set_dump_tool': {
+      const name = String(payload.name)
+      const path = payload.path as string | null
+      if (path && !/pg_dump|psql/.test(path))
+        throw `The ${name} chosen in DBForge can't be run: ${path}. Choose another one, or use the one DBForge finds.`
+      mockTools[name] = path ? { path, version: '16.4', custom: true } : { ...foundTools[name] }
+      return delay(mockTools[name])
+    }
+    case 'export_folder_usage':
+      return delay(exportFiles)
+    case 'clear_export_folder': {
+      const removed = exportFiles
+      exportFiles = { count: 0, bytes: 0 }
+      return delay(removed)
+    }
+    case 'dump_file_exists':
+      return delay(String(payload.path).includes('exists'))
+    case 'plugin:path|resolve_directory':
+      return '/Users/demo/Documents'
+    case 'cancel_dump':
+      cancelled.add(String(payload.jobId))
+      return null
+    default:
+      throw new Error(`Mock backend: unknown command ${cmd}`)
+  }
 }
 
 /** Jobs the dialogs asked to stop. */

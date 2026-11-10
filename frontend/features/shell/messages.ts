@@ -12,6 +12,8 @@ export const messages = defineMessages({
     selectConnectionFirst: 'Select a connection first',
     newQuery: 'New query',
     settings: 'Settings',
+    showStatements: 'Show statements (⌘J)',
+    hideStatements: 'Hide statements (⌘J)',
     // Connection details
     connectionDialog: (name: string) => `${name} connection`,
     reachable: 'Reachable',
@@ -38,6 +40,8 @@ export const messages = defineMessages({
     selectConnectionFirst: 'Primero selecciona una conexión',
     newQuery: 'Nueva consulta',
     settings: 'Configuración',
+    showStatements: 'Mostrar sentencias (⌘J)',
+    hideStatements: 'Ocultar sentencias (⌘J)',
     connectionDialog: (name: string) => `Conexión ${name}`,
     reachable: 'Accesible',
     notReachable: 'No accesible',

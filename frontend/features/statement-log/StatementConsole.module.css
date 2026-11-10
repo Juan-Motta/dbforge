@@ -1,0 +1,182 @@
+.console {
+  position: relative;
+  container-type: inline-size;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  overflow: visible;
+  background: var(--surface);
+}
+
+.toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.count {
+  color: var(--text3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kinds {
+  display: flex;
+  margin-left: 8px;
+  padding: 2px;
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.kinds button {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text2);
+  font: 500 12px var(--font-sans);
+  cursor: pointer;
+}
+
+.kinds button[aria-checked='true'] {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: 0 0 var(--radius-island) var(--radius-island);
+  font-size: 12px;
+}
+
+.empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--text3);
+}
+
+/* Time, kind, where, the statement, duration and rows, then copy; an error under it. */
+.row {
+  display: grid;
+  grid-template-columns: 88px 70px 150px minmax(0, 1fr) 116px 26px;
+  align-items: start;
+  column-gap: 10px;
+  padding: 3px 6px 3px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.meta {
+  text-align: right;
+}
+
+.time,
+.meta {
+  padding-top: 3px;
+  color: var(--text3);
+  font: 11.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.origin {
+  padding-top: 2px;
+}
+
+.where {
+  padding-top: 3px;
+  overflow: hidden;
+  color: var(--text2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.database {
+  color: var(--text3);
+}
+
+.text {
+  min-width: 0;
+  padding: 3px 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 12px var(--font-mono);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.text.open {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.text:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--accent-soft);
+}
+
+.copy {
+  opacity: 0;
+}
+
+.row:hover .copy,
+.copy:focus-visible {
+  opacity: 1;
+}
+
+.row[data-error] .text {
+  color: var(--err);
+}
+
+.error {
+  grid-column: 4 / -1;
+  margin: 0 0 4px;
+  color: var(--err);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Narrow: the statement keeps the room, the connection stays in the tooltip of the time. */
+@container (max-width: 640px) {
+  .row {
+    grid-template-columns: 88px 70px minmax(0, 1fr) 96px 26px;
+  }
+
+  .where {
+    display: none;
+  }
+
+  .error {
+    grid-column: 3 / -1;
+  }
+}
