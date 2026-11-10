@@ -4,15 +4,22 @@ import {
   defaultSchema,
   DUMP_ENGINES,
   hasDiagram,
+  NEW_OBJECTS,
   type Connection,
+  type NewObjectKind,
 } from '../domain/connection'
 import { tableRefFromPath } from '../domain/table'
+import { NewObjectDialog } from '../features/admin/NewObjectDialog'
+import { MENU_ICONS, MENU_LABELS } from '../features/admin/newObject'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
+import { DeleteConnectionDialog } from '../features/connections/DeleteConnectionDialog'
 import { ExportDatabaseDialog, ImportDatabaseDialog } from '../features/dump/DumpDialogs'
 import { useConnections } from '../features/connections/useConnections'
+import type { MenuItem } from '../components/ContextMenu'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { usePanelWidth } from '../components/usePanelWidth'
 import { Explorer } from '../features/explorer/Explorer'
+import type { TreeNode } from '../features/explorer/tree'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
 import { useTheme } from '../features/settings/useTheme'
@@ -56,6 +63,13 @@ export function App() {
     database: string
     refresh: () => void
   } | null>(null)
+  // A database, role or user being created from a connection's menu.
+  const [creating, setCreating] = useState<{
+    connection: Connection
+    kind: NewObjectKind
+    refresh: () => void
+  } | null>(null)
+  const [deleting, setDeleting] = useState<Connection | null>(null)
   const [tabs, setTabs] = useState(NO_TABS)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -141,6 +155,31 @@ export function App() {
     { id: 'settings', label: 'Open settings', run: () => setSettingsOpen(true) },
   ]
 
+  /** A tree node's right-click menu: a connection's actions, or a database's export and import. */
+  const menuOf = (node: TreeNode, refresh: () => void): MenuItem[] => {
+    if (node.kind === 'connection') {
+      const connection = node.connection
+      const create = NEW_OBJECTS[connection.engine].map((kind) => ({
+        label: MENU_LABELS[kind],
+        icon: MENU_ICONS[kind],
+        onSelect: () => setCreating({ connection, kind, refresh }),
+      }))
+      return [
+        { label: 'Edit connection…', icon: 'edit', onSelect: () => setDialog({ connection }) },
+        ...(create.length > 0 ? [{ label: 'New', icon: 'plus' as const, items: create }] : []),
+        { label: 'Delete connection…', icon: 'trash', onSelect: () => setDeleting(connection) },
+      ]
+    }
+    const connection = connections.find((c) => c.id === node.connectionId)
+    if (node.kind !== 'database' || !connection || !DUMP_ENGINES.includes(connection.engine)) return []
+    const open = (mode: 'export' | 'import') => () =>
+      setDump({ mode, connection, database: node.name, refresh })
+    return [
+      { label: 'Export database…', onSelect: open('export') },
+      { label: 'Import SQL file…', onSelect: open('import') },
+    ]
+  }
+
   const removeConnection = async (id: string) => {
     await remove(id)
     setTabs((state) => closeConnectionTabs(state, id))
@@ -194,18 +233,7 @@ export function App() {
               return () => setTabs((state) => openDiagramTab(state, connection.id, database, schema))
             }}
             onNewConnection={() => setDialog({})}
-            onEditConnection={(connection) => setDialog({ connection })}
-            menuOf={(node, refresh) => {
-              const connection = connections.find((c) => c.id === node.connectionId)
-              if (node.kind !== 'database' || !connection || !DUMP_ENGINES.includes(connection.engine))
-                return []
-              const open = (mode: 'export' | 'import') => () =>
-                setDump({ mode, connection, database: node.name, refresh })
-              return [
-                { label: 'Export database…', onSelect: open('export') },
-                { label: 'Import SQL file…', onSelect: open('import') },
-              ]
-            }}
+            menuOf={menuOf}
           />
         </div>
         <main className={`island ${styles.main}`}>
@@ -247,6 +275,22 @@ export function App() {
           onSave={save}
           onDelete={removeConnection}
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {creating && (
+        <NewObjectDialog
+          connection={creating.connection}
+          kind={creating.kind}
+          onClose={() => setCreating(null)}
+          onCreated={creating.refresh}
+        />
+      )}
+      {deleting && (
+        <DeleteConnectionDialog
+          connection={deleting}
+          onDelete={removeConnection}
+          onClose={() => setDeleting(null)}
         />
       )}
 

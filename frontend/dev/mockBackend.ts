@@ -332,6 +332,15 @@ export function installMockBackend() {
           await toolRun(jobId, ['SET', 'CREATE TABLE', 'COPY 450', 'ALTER TABLE', 'CREATE INDEX'])
           return { created: !objects[''].some((o) => o.name === database), elapsedMs: 1830 }
         }
+        case 'create_object': {
+          const { object } = payload.request as { object: { kind: string; name: string } }
+          const taken = object.kind === 'database' ? objects[''].map((o) => o.name) : [...accounts]
+          if (taken.includes(object.name)) throw `${object.kind} "${object.name}" already exists`
+          if (object.kind === 'database')
+            objects[''].push({ name: object.name, kind: 'database', rowEstimate: null })
+          else accounts.add(object.name)
+          return delay(null)
+        }
         case 'cancel_dump':
           cancelled.add(String(payload.jobId))
           return null
@@ -345,6 +354,8 @@ export function installMockBackend() {
 
 /** Jobs the dialogs asked to stop. */
 const cancelled = new Set<string>()
+// Roles and users created from a connection's menu.
+const accounts = new Set(['postgres'])
 
 /** A pg_dump or psql run: its lines arrive one by one, and a cancel stops it. */
 async function toolRun(jobId: string, lines: string[]) {

@@ -4,9 +4,12 @@
   z-index: 50;
 }
 
-.menu {
+.anchor {
   position: fixed;
-  min-width: 160px;
+}
+
+.menu {
+  min-width: 180px;
   padding: 4px;
   border: 1px solid var(--border2);
   border-radius: 8px;
@@ -14,11 +17,17 @@
   box-shadow: var(--shadow);
 }
 
+.entry {
+  position: relative;
+}
+
 .menu button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px 0 6px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -29,7 +38,8 @@
 }
 
 .menu button:hover:not(:disabled),
-.menu button:focus-visible {
+.menu button:focus-visible,
+.menu button.active {
   background: var(--accent-soft);
   outline: none;
 }
@@ -37,4 +47,31 @@
 .menu button:disabled {
   color: var(--text3);
   cursor: default;
+}
+
+/* Reserved for every item, so labels line up whether or not they have an icon. */
+.icon {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  color: var(--text2);
+}
+
+.label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.submenuRight,
+.submenuLeft {
+  position: absolute;
+  top: -5px;
+}
+
+.submenuRight {
+  left: calc(100% + 4px);
+}
+
+.submenuLeft {
+  right: calc(100% + 4px);
 }

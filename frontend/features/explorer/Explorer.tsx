@@ -16,7 +16,6 @@ interface ExplorerProps {
   /** Opens the ER diagram of a schema node; `null` when the node has none. */
   diagramOf: (node: TreeNode) => (() => void) | null
   onNewConnection: () => void
-  onEditConnection: (connection: Connection) => void
   /** A node's right-click menu; `refresh` reloads the tree, e.g. once a database was created. */
   menuOf: (node: TreeNode, refresh: () => void) => MenuItem[]
 }
@@ -27,7 +26,6 @@ export function Explorer({
   onOpen,
   diagramOf,
   onNewConnection,
-  onEditConnection,
   menuOf,
 }: ExplorerProps) {
   const { roots, expanded, toggle, collapseAll, refresh } = useExplorerTree(connections)
@@ -84,7 +82,6 @@ export function Explorer({
               onSelect={select}
               onToggle={toggle}
               onOpen={onOpen}
-              onEdit={(node) => node.kind === 'connection' && onEditConnection(node.connection)}
               onDiagram={diagramOf(row.node) ?? undefined}
               onMenu={(node, x, y) => {
                 const items = menuOf(node, refresh)

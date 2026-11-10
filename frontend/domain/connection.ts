@@ -55,6 +55,21 @@ export const DEFAULT_PORTS: Record<Engine, number> = {
 /** Engines whose whole databases export to a .sql file and import back (pg_dump and psql). */
 export const DUMP_ENGINES: Engine[] = ['postgres']
 
+/** What a connection's menu can create on its server. */
+export type NewObjectKind = 'database' | 'role' | 'user'
+
+/** What each engine can create from a connection's menu, in menu order. */
+export const NEW_OBJECTS: Record<Engine, NewObjectKind[]> = {
+  postgres: ['database', 'role', 'user'],
+  mysql: ['database', 'role', 'user'],
+  mariadb: ['database', 'role', 'user'],
+  sqlserver: ['database', 'role', 'user'],
+  mongodb: ['database', 'role', 'user'],
+  redis: ['user'],
+  cosmosdb: ['database'],
+  sqlite: [],
+}
+
 export const RELATIONAL_ENGINES: Engine[] = ['postgres', 'mysql', 'mariadb', 'sqlite', 'sqlserver']
 export const NOSQL_ENGINES: Engine[] = ['mongodb', 'cosmosdb', 'redis']
 

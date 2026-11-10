@@ -30,7 +30,6 @@ interface TreeItemProps {
   onSelect: (node: TreeNode) => void
   onToggle: (node: TreeNode) => void
   onOpen: (node: TreeNode) => void
-  onEdit: (node: TreeNode) => void
   /** Present on schemas (or schemaless databases) whose ER diagram can open. */
   onDiagram?: (node: TreeNode) => void
   /** Opens the node's right-click menu at the pointer. */
@@ -45,7 +44,6 @@ export function TreeItem({
   onSelect,
   onToggle,
   onOpen,
-  onEdit,
   onDiagram,
   onMenu,
 }: TreeItemProps) {
@@ -104,18 +102,6 @@ export function TreeItem({
           }}
         >
           <Icon name="diagram" size={14} />
-        </IconButton>
-      )}
-      {isConnection && (
-        <IconButton
-          label="Edit connection"
-          className={styles.edit}
-          onClick={(event) => {
-            event.stopPropagation()
-            onEdit(node)
-          }}
-        >
-          <Icon name="edit" size={14} />
         </IconButton>
       )}
     </div>
