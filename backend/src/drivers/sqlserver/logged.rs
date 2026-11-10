@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures_util::Stream;
-use tiberius::{ExecuteResult, Query, QueryItem, QueryStream, Row};
+use tiberius::{Query, QueryItem, QueryStream, Row};
 
 use crate::drivers::edit_sql;
 use crate::error::sqlserver_message;
@@ -141,15 +141,27 @@ impl LoggedClient {
         }
     }
 
-    /// Runs a statement with parameters that returns no rows; says how many it changed.
-    pub async fn execute(&mut self, statement: Statement<'_>) -> tiberius::Result<ExecuteResult> {
+    /// Runs a statement with parameters that changes rows; says how many it
+    /// changed itself. The counts the server reports add those of the table's
+    /// triggers, so the statement's own is read with `@@ROWCOUNT`. Recorded as
+    /// the statement alone, with that count.
+    pub async fn execute(&mut self, statement: Statement<'_>) -> tiberius::Result<u64> {
         let mut recording = self.start(|| statement.shown());
-        let result = statement.into_query().execute(&mut self.inner).await;
+        let counted =
+            Statement { sql: format!("{};\nSELECT @@ROWCOUNT", statement.sql).into(), params: statement.params };
+        let result = Self::own_count(&mut self.inner, counted).await;
         match &result {
-            Ok(done) => recording.affected(done.rows_affected().iter().sum()),
+            Ok(changed) => recording.affected(*changed),
             Err(error) => recording.fail(sqlserver_message(error)),
         }
         result
+    }
+
+    /// The `@@ROWCOUNT` a statement ends with: the last result, past any a trigger returns.
+    async fn own_count(tds: &mut Tds, counted: Statement<'_>) -> tiberius::Result<u64> {
+        let results = counted.into_query().query(tds).await?.into_results().await?;
+        let count = results.last().and_then(|rows| rows.first()).and_then(|row| row.get::<i32, _>(0));
+        Ok(count.unwrap_or(0).max(0) as u64)
     }
 
     /// Asks the server to stop the running query. Not a statement, so not recorded.

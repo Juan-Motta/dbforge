@@ -2,7 +2,8 @@
 //! builder. Values are sent as nvarchar parameters, which SQL Server converts to
 //! each column's type; no cast with a length, so a value too long for its column
 //! is an error instead of being cut. Every change runs in one transaction, and
-//! each UPDATE or DELETE must hit exactly one row.
+//! each UPDATE or DELETE must hit exactly one row, whatever the table's
+//! triggers change besides.
 
 use super::logged::Statement;
 use super::{Client, connect, table_columns, with_timeout};
@@ -58,7 +59,7 @@ async fn run_all(client: &mut Client, statements: &[edit_sql::Statement]) -> Res
             .params
             .iter()
             .fold(Statement::new(statement.sql.as_str()), |bound, param| bound.bind(param.as_deref()));
-        let affected = client.execute(bound).await?.total();
+        let affected = client.execute(bound).await?;
         if let Some(key) = &statement.key
             && affected != 1
         {
@@ -200,6 +201,40 @@ mod tests {
         assert_eq!(ran, [("BEGIN", None), ("DELETE", Some(1)), ("UPDATE", Some(0)), ("ROLLBACK", None)]);
         assert!(entries[3].text.contains("N'it''s'"), "{}", entries[3].text);
         assert!(entries.iter().all(|e| e.database.as_deref() == Some("dbforge_edit_log") && e.error.is_none()));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
+    async fn a_trigger_that_changes_other_rows_does_not_fail_the_edit() {
+        // Each change to `items` writes a row to `audit`, which the server counts too.
+        let audited = format!(
+            "{ITEMS}
+            CREATE TABLE audit (id int IDENTITY PRIMARY KEY, what nvarchar(10));
+            EXEC('CREATE TRIGGER items_audit ON items AFTER UPDATE, DELETE AS
+                  INSERT INTO audit (what) SELECT name FROM deleted');"
+        );
+        let connection = database("dbforge_edit_trigger", &audited).await;
+        let items = table("dbforge_edit_trigger", "items");
+        let changes = vec![
+            RowChange::Update { key: map(&[("id", Some("1"))]), values: map(&[("name", Some("uno"))]) },
+            RowChange::Delete { key: map(&[("id", Some("2"))]) },
+        ];
+        let log = StatementLog::new(50, Collected::default());
+        let applied =
+            statement_log::scoped(&log, "ms", Origin::Edit, apply_changes(&connection, PASSWORD, &items, &changes));
+        assert_eq!(applied.await.unwrap(), ApplySummary { updated: 1, inserted: 0, deleted: 1 });
+        assert_eq!(rows(&connection, "items").await.len(), 2);
+        assert_eq!(rows(&connection, "audit").await.len(), 2);
+
+        // Recorded as the statement alone, with the rows it changed itself.
+        let ran: Vec<_> = log.entries().iter().skip(2).map(|e| (e.text.clone(), e.rows)).collect();
+        assert_eq!(ran[0], ("UPDATE [dbo].[items] SET [name] = N'uno' WHERE [id] = N'1'".to_string(), Some(1)));
+        assert_eq!(ran[1].1, Some(1));
+
+        // A row that is gone is still told apart from one that changed.
+        let gone = [RowChange::Delete { key: map(&[("id", Some("2"))]) }];
+        let error = apply_changes(&connection, PASSWORD, &items, &gone).await.unwrap_err();
+        assert!(error.to_string().contains("id = 2 was changed or deleted"), "{error}");
     }
 
     #[tokio::test]
