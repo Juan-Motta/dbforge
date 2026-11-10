@@ -1,13 +1,18 @@
 import type { HistoryEntry } from './api'
+import type { HistoryMessages } from './messages'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /** Splits newest-first entries into Today, Yesterday and dated groups, in local time. */
-export function groupByDay(entries: HistoryEntry[], now: Date): { label: string; entries: HistoryEntry[] }[] {
+export function groupByDay(
+  entries: HistoryEntry[],
+  now: Date,
+  m: HistoryMessages,
+): { label: string; entries: HistoryEntry[] }[] {
   const today = startOfDay(now)
   const groups: { label: string; entries: HistoryEntry[] }[] = []
   for (const entry of entries) {
-    const label = dayLabel(startOfDay(new Date(entry.executedAt)), today)
+    const label = dayLabel(startOfDay(new Date(entry.executedAt)), today, m)
     const last = groups.at(-1)
     if (last?.label === label) last.entries.push(entry)
     else groups.push({ label, entries: [entry] })
@@ -15,12 +20,12 @@ export function groupByDay(entries: HistoryEntry[], now: Date): { label: string;
   return groups
 }
 
-function dayLabel(day: number, today: number): string {
+function dayLabel(day: number, today: number, m: HistoryMessages): string {
   // Rounding absorbs the hour that daylight saving time adds or removes.
   const daysAgo = Math.round((today - day) / DAY_MS)
-  if (daysAgo === 0) return 'Today'
-  if (daysAgo === 1) return 'Yesterday'
-  return new Date(day).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  if (daysAgo === 0) return m.today
+  if (daysAgo === 1) return m.yesterday
+  return new Date(day).toLocaleDateString(m.locale, { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
 function startOfDay(date: Date): number {
@@ -40,10 +45,10 @@ export function formatDuration(ms: number): string {
 }
 
 /** What a run produced: "14 rows", "3 statements", or "error". */
-export function outcomeLabel(entry: HistoryEntry): string {
-  if (entry.error !== null) return 'error'
-  if (entry.statements > 1) return `${entry.statements} statements`
-  return entry.rows === 1 ? '1 row' : `${entry.rows.toLocaleString('en-US')} rows`
+export function outcomeLabel(entry: HistoryEntry, m: HistoryMessages): string {
+  if (entry.error !== null) return m.outcomeError
+  if (entry.statements > 1) return m.statements(entry.statements)
+  return m.rows(entry.rows, entry.rows.toLocaleString(m.locale))
 }
 
 /** The first non-empty line, so a multi-line query reads well in one row. */

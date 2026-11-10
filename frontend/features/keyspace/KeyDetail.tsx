@@ -3,6 +3,7 @@ import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { keyspaceApi, type Entry, type KeyEdit, type KeyValue } from './api'
 import { FormDialog, type FormField } from './FormDialog'
 import {
@@ -16,18 +17,23 @@ import {
   parseScore,
 } from './keyspace'
 import { kindClass } from './kindClass'
+import { messages, type KeyspaceMessages } from './messages'
 import styles from './KeyBrowser.module.css'
 
 const PAGE = 200
 
 /** How each type names its elements and columns. */
-const SHAPES: Record<string, { noun: string; add?: string; key?: string; value: string; filter: boolean }> = {
-  hash: { noun: 'fields', add: 'Add field', key: 'Field', value: 'Value', filter: true },
-  list: { noun: 'items', add: 'Add item', key: 'Index', value: 'Value', filter: false },
-  set: { noun: 'members', add: 'Add member', value: 'Member', filter: true },
-  zset: { noun: 'members', add: 'Add member', value: 'Member', filter: true },
-  stream: { noun: 'entries', add: 'Add entry', key: 'ID', value: 'Fields', filter: false },
-  string: { noun: 'bytes', value: 'Value', filter: false },
+function shapes(
+  m: KeyspaceMessages,
+): Record<string, { noun: string; add?: string; key?: string; value: string; filter: boolean }> {
+  return {
+    hash: { noun: m.nounFields, add: m.addField, key: m.field, value: m.value, filter: true },
+    list: { noun: m.nounItems, add: m.addItem, key: m.index, value: m.value, filter: false },
+    set: { noun: m.nounMembers, add: m.addMember, value: m.member, filter: true },
+    zset: { noun: m.nounMembers, add: m.addMember, value: m.member, filter: true },
+    stream: { noun: m.nounEntries, add: m.addEntry, key: m.id, value: m.fields, filter: false },
+    string: { noun: m.nounBytes, value: m.value, filter: false },
+  }
 }
 
 type Dialog = 'ttl' | 'rename' | 'add' | 'delete' | null
@@ -44,6 +50,7 @@ interface KeyDetailProps {
 
 /** One key: its type, TTL and size, its value a page at a time, and its edits. */
 export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }: KeyDetailProps) {
+  const m = useMessages(messages)
   const [value, setValue] = useState<KeyValue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -70,9 +77,9 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
   }, [connectionId, db, name, filter, reloadToken])
 
   if (error) return <p className={`${styles.detailEmpty} ${styles.error}`}>{error}</p>
-  if (!value) return <p className={styles.detailEmpty}>Loading {name}…</p>
+  if (!value) return <p className={styles.detailEmpty}>{m.loadingKey(name)}</p>
 
-  const shape = SHAPES[value.kind]
+  const shape = shapes(m)[value.kind]
   const edit = async (change: KeyEdit) => {
     await keyspaceApi.editKey(connectionId, db, name, value.kind, change)
     await load()
@@ -92,45 +99,43 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
   const entry = value.entries[picked] as Entry | undefined
 
   return (
-    <section className={styles.detail} aria-label={`Key ${name}`}>
+    <section className={styles.detail} aria-label={m.keyRegion(name)}>
       <header className={styles.detailHeader}>
         <span className={`${styles.kind} ${styles.kindLarge} ${kindClass(value.kind)}`}>
           {kindLabel(value.kind)}
         </span>
         <span className={`${styles.mono} ${styles.keyName}`}>{value.name}</span>
-        <IconButton label="Rename key" onClick={() => setDialog('rename')}>
+        <IconButton label={m.renameKey} onClick={() => setDialog('rename')}>
           <Icon name="edit" />
         </IconButton>
         <span className={styles.spacer} />
         {value.ttlMs !== null && (
           <Badge tone="warn">
             <Icon name="history" size={12} />
-            TTL {formatTtl(value.ttlMs, true)}
+            TTL {formatTtl(value.ttlMs, m, true)}
           </Badge>
         )}
         {shape && (
           <Badge>
-            {value.length.toLocaleString('en-US')} {shape.noun}
+            {value.length.toLocaleString(m.locale)} {shape.noun}
           </Badge>
         )}
         {value.bytes !== null && <Badge>{formatBytes(value.bytes)}</Badge>}
         {value.encoding && <Badge>{value.encoding}</Badge>}
-        <Button onClick={() => setDialog('ttl')}>Set TTL</Button>
+        <Button onClick={() => setDialog('ttl')}>{m.setTtl}</Button>
         <Button className={styles.danger} onClick={() => setDialog('delete')}>
-          Delete
+          {m.delete}
         </Button>
       </header>
 
       {!shape ? (
-        <p className={styles.detailEmpty}>
-          {value.kind} keys come from a server module; use the CLI below to read them.
-        </p>
+        <p className={styles.detailEmpty}>{m.moduleKeys(value.kind)}</p>
       ) : value.kind === 'string' ? (
         <div className={styles.detailBody}>
           {entry && (
             <ValueViewer
               key={name}
-              label={`Value · ${formatBytes(value.length)}${value.length > entry.size ? ' (first 1 MB)' : ''}`}
+              label={m.stringValue(formatBytes(value.length), value.length > entry.size)}
               entry={entry}
               editable={!entry.value.binary && value.length === entry.size}
               onSave={(text) => edit({ kind: 'setString', value: text })}
@@ -144,8 +149,8 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
               <input
                 className={styles.input}
                 style={{ width: 260 }}
-                placeholder={`Filter ${shape.noun}`}
-                aria-label={`Filter ${shape.noun}`}
+                placeholder={m.filterNoun(shape.noun)}
+                aria-label={m.filterNoun(shape.noun)}
                 value={filter}
                 onChange={(event) => setFilter(event.target.value)}
               />
@@ -159,14 +164,14 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
             )}
           </div>
           <div className={styles.detailBody}>
-            <div className={styles.entries} role="table" aria-label={`${shape.noun} of ${name}`}>
+            <div className={styles.entries} role="table" aria-label={m.nounOf(shape.noun, name)}>
               <div className={`${styles.entryRow} ${styles.entryHead}`} role="row">
                 <span role="columnheader">#</span>
                 {shape.key && <span role="columnheader">{shape.key}</span>}
                 <span role="columnheader">{shape.value}</span>
-                {value.kind === 'zset' && <span role="columnheader">Score</span>}
+                {value.kind === 'zset' && <span role="columnheader">{m.score}</span>}
                 <span role="columnheader" className={styles.right}>
-                  Size
+                  {m.size}
                 </span>
               </div>
               {value.entries.map((item, index) => (
@@ -187,7 +192,7 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
                   <span className={`${styles.muted} ${styles.right}`}>{formatBytes(item.size)}</span>
                 </button>
               ))}
-              {value.entries.length === 0 && <p className={styles.muted}>Nothing matches.</p>}
+              {value.entries.length === 0 && <p className={styles.muted}>{m.nothingMatches}</p>}
             </div>
             {value.next && (
               <Button
@@ -196,13 +201,13 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
                 disabled={loadingMore}
                 onClick={() => void loadMore()}
               >
-                {loadingMore ? 'Loading…' : `Load more (${value.entries.length} of ${value.length})`}
+                {loadingMore ? m.loading : m.loadMoreOf(value.entries.length, value.length)}
               </Button>
             )}
             {entry && (
               <ValueViewer
                 key={`${name}:${picked}:${entry.key?.text ?? entry.value.text}`}
-                label={`Value · ${entry.key?.text ?? entry.value.text}`}
+                label={m.entryValue(entry.key?.text ?? entry.value.text)}
                 entry={entry}
                 score={value.kind === 'zset'}
                 editable={
@@ -220,7 +225,7 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
                       value: text,
                     })
                   }
-                  return edit({ kind: 'addMember', member: entry.value.text, score: parseScore(text) })
+                  return edit({ kind: 'addMember', member: entry.value.text, score: parseScore(text, m) })
                 }}
                 onRemove={() => {
                   if (value.kind === 'hash') return edit({ kind: 'removeField', field: entry.key!.text })
@@ -238,34 +243,34 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
 
       {dialog === 'ttl' && (
         <FormDialog
-          title="Set TTL"
-          submitLabel="Set TTL"
+          title={m.setTtl}
+          submitLabel={m.setTtl}
           fields={[
             {
               name: 'seconds',
-              label: 'Expires in (seconds)',
+              label: m.expiresIn,
               type: 'number',
               initial: value.ttlMs === null ? '' : String(Math.ceil(value.ttlMs / 1000)),
             },
           ]}
           onSubmit={async ({ seconds }) => {
             const ttl = Number(seconds)
-            if (!Number.isFinite(ttl) || ttl <= 0) throw 'Enter a number of seconds greater than 0.'
+            if (!Number.isFinite(ttl) || ttl <= 0) throw m.secondsGreaterThanZero
             await edit({ kind: 'expire', ttlMs: Math.round(ttl * 1000) })
           }}
           secondary={
             value.ttlMs === null
               ? undefined
-              : { label: 'Remove TTL', run: () => edit({ kind: 'expire', ttlMs: null }) }
+              : { label: m.removeTtl, run: () => edit({ kind: 'expire', ttlMs: null }) }
           }
           onClose={() => setDialog(null)}
         />
       )}
       {dialog === 'rename' && (
         <FormDialog
-          title="Rename key"
-          submitLabel="Rename"
-          fields={[{ name: 'to', label: 'New name', initial: name }]}
+          title={m.renameKey}
+          submitLabel={m.rename}
+          fields={[{ name: 'to', label: m.newName, initial: name }]}
           onSubmit={async ({ to }) => {
             await keyspaceApi.editKey(connectionId, db, name, value.kind, { kind: 'rename', to })
             onKeysChanged(to)
@@ -275,8 +280,8 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
       )}
       {dialog === 'delete' && (
         <FormDialog
-          title="Delete key"
-          submitLabel="Delete"
+          title={m.deleteKey}
+          submitLabel={m.delete}
           danger
           fields={[]}
           onSubmit={async () => {
@@ -286,17 +291,17 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
           onClose={() => setDialog(null)}
         >
           <p>
-            Delete <strong className={styles.mono}>{name}</strong> and its{' '}
-            {value.length.toLocaleString('en-US')} {shape?.noun ?? 'elements'}? This can't be undone.
+            {m.deleteBefore} <strong className={styles.mono}>{name}</strong>
+            {m.deleteAfter(value.length.toLocaleString(m.locale), shape?.noun ?? m.nounElements)}
           </p>
         </FormDialog>
       )}
       {dialog === 'add' && shape?.add && (
         <FormDialog
           title={shape.add}
-          submitLabel="Add"
-          fields={addFields(value.kind)}
-          onSubmit={async (form) => edit(addEdit(value.kind, form))}
+          submitLabel={m.add}
+          fields={addFields(value.kind, m)}
+          onSubmit={async (form) => edit(addEdit(value.kind, form, m))}
           onClose={() => setDialog(null)}
         />
       )}
@@ -304,57 +309,57 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
   )
 }
 
-function addFields(kind: string): FormField[] {
+function addFields(kind: string, m: KeyspaceMessages): FormField[] {
   switch (kind) {
     case 'hash':
       return [
-        { name: 'field', label: 'Field' },
-        { name: 'value', label: 'Value', type: 'textarea' },
+        { name: 'field', label: m.field },
+        { name: 'value', label: m.value, type: 'textarea' },
       ]
     case 'list':
       return [
-        { name: 'value', label: 'Value', type: 'textarea' },
+        { name: 'value', label: m.value, type: 'textarea' },
         {
           name: 'end',
-          label: 'Add at',
+          label: m.addAt,
           type: 'select',
           initial: 'tail',
           options: [
-            { value: 'tail', label: 'The end (RPUSH)' },
-            { value: 'head', label: 'The start (LPUSH)' },
+            { value: 'tail', label: m.theEnd },
+            { value: 'head', label: m.theStart },
           ],
         },
       ]
     case 'zset':
       return [
-        { name: 'member', label: 'Member' },
-        { name: 'score', label: 'Score', type: 'number' },
+        { name: 'member', label: m.member },
+        { name: 'score', label: m.score, type: 'number' },
       ]
     case 'stream':
       return [
         {
           name: 'fields',
-          label: 'Fields, one field=value per line',
+          label: m.fieldsPerLine,
           type: 'textarea',
           placeholder: 'event=login',
         },
       ]
     default:
-      return [{ name: 'member', label: 'Member' }]
+      return [{ name: 'member', label: m.member }]
   }
 }
 
-function addEdit(kind: string, form: Record<string, string>): KeyEdit {
+function addEdit(kind: string, form: Record<string, string>, m: KeyspaceMessages): KeyEdit {
   switch (kind) {
     case 'hash':
-      if (!form.field) throw 'Enter a field name.'
+      if (!form.field) throw m.enterFieldName
       return { kind: 'setField', field: form.field, value: form.value }
     case 'list':
       return { kind: 'pushItem', value: form.value, head: form.end === 'head' }
     case 'zset':
-      return { kind: 'addMember', member: form.member, score: parseScore(form.score) }
+      return { kind: 'addMember', member: form.member, score: parseScore(form.score, m) }
     case 'stream':
-      return { kind: 'addEntry', fields: parseFields(form.fields) }
+      return { kind: 'addEntry', fields: parseFields(form.fields, m) }
     default:
       return { kind: 'addMember', member: form.member, score: null }
   }
@@ -372,6 +377,7 @@ interface ValueViewerProps {
 
 /** One value as text, JSON or hex, with editing where the type allows it. */
 function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }: ValueViewerProps) {
+  const m = useMessages(messages)
   const json = asJson(entry.value.text)
   const msgpack = asMsgpack(entry.value)
   const binary = entry.value.binary
@@ -412,14 +418,14 @@ function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }
       <div className={styles.viewerBar}>
         <span className={styles.label}>{label}</span>
         <span className={styles.spacer} />
-        <div className={styles.seg} role="group" aria-label="Show value as">
+        <div className={styles.seg} role="group" aria-label={m.showValueAs}>
           <button
             type="button"
             aria-pressed={mode === 'text'}
             disabled={binary}
             onClick={() => setMode('text')}
           >
-            Text
+            {m.text}
           </button>
           <button
             type="button"
@@ -436,7 +442,7 @@ function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }
             type="button"
             aria-pressed={mode === 'msgpack'}
             disabled={!msgpack}
-            title={binary ? undefined : 'MessagePack values are binary'}
+            title={binary ? undefined : m.msgpackBinary}
             onClick={() => setMode('msgpack')}
           >
             MsgPack
@@ -444,12 +450,12 @@ function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }
         </div>
         {editable && draft === null && (
           <Button onClick={() => setDraft(score ? String(entry.score ?? '') : entry.value.text)}>
-            {score ? 'Edit score' : 'Edit'}
+            {score ? m.editScore : m.edit}
           </Button>
         )}
         {onRemove && draft === null && (
           <Button className={styles.danger} disabled={busy} onClick={() => void act(onRemove)}>
-            Remove
+            {m.remove}
           </Button>
         )}
       </div>
@@ -467,15 +473,15 @@ function ValueViewer({ label, entry, editable, score = false, onSave, onRemove }
             className={`${styles.input} ${styles.textarea} ${styles.mono}`}
             value={draft}
             rows={score ? 1 : 6}
-            aria-label={score ? 'Score' : 'Value'}
+            aria-label={score ? m.score : m.value}
             autoFocus
             spellCheck={false}
             onChange={(event) => setDraft(event.target.value)}
           />
           <div className={styles.editorActions}>
-            <Button onClick={() => setDraft(null)}>Cancel</Button>
+            <Button onClick={() => setDraft(null)}>{m.cancel}</Button>
             <Button type="submit" variant="primary" disabled={busy}>
-              Save
+              {m.save}
             </Button>
           </div>
         </form>

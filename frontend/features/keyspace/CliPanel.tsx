@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { queryApi } from '../query/api'
+import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
 
 interface Line {
@@ -22,6 +24,7 @@ interface CliPanelProps {
 
 /** redis-cli in a panel: one command per Enter, replies printed as redis-cli prints them. */
 export function CliPanel({ sessionId, connectionId, db, address, onRan }: CliPanelProps) {
+  const m = useMessages(messages)
   const [lines, setLines] = useState<Line[]>([])
   const [input, setInput] = useState('')
   const [history, setHistory] = useState<string[]>([])
@@ -68,24 +71,24 @@ export function CliPanel({ sessionId, connectionId, db, address, onRan }: CliPan
   }
 
   return (
-    <section className={styles.cli} aria-label="Redis CLI">
+    <section className={styles.cli} aria-label={m.redisCli}>
       <div className={styles.cliBar}>
         <span className={styles.label}>CLI</span>
         <span className={styles.muted}>{address}</span>
         <span className={styles.spacer} />
         {running && (
           <IconButton
-            label="Cancel blocking command"
+            label={m.cancelBlocking}
             onClick={() => void queryApi.cancel(sessionId).catch(() => {})}
           >
             <Icon name="stop" />
           </IconButton>
         )}
-        <IconButton label="Clear CLI" onClick={() => setLines([])}>
+        <IconButton label={m.clearCli} onClick={() => setLines([])}>
           <Icon name="close" />
         </IconButton>
       </div>
-      <div className={styles.cliOutput} ref={output} role="log" aria-label="CLI output">
+      <div className={styles.cliOutput} ref={output} role="log" aria-label={m.cliOutput}>
         {lines.map((line, index) =>
           line.kind === 'command' ? (
             <div key={index}>
@@ -107,8 +110,8 @@ export function CliPanel({ sessionId, connectionId, db, address, onRan }: CliPan
           <span className={styles.prompt}>›</span>
           <input
             value={input}
-            aria-label="Redis command"
-            placeholder={running ? 'Running…' : 'HGETALL key'}
+            aria-label={m.redisCommand}
+            placeholder={running ? m.running : m.cliPlaceholder}
             spellCheck={false}
             autoComplete="off"
             onChange={(event) => setInput(event.target.value)}

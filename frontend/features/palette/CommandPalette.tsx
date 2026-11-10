@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Icon, type IconName } from '../../components/Icon'
 import type { TableRef } from '../../domain/table'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
 import { parseQuery, rank, splitAtMatch, type Match } from './search'
 import { useRelations } from './useRelations'
 import styles from './CommandPalette.module.css'
@@ -41,6 +43,7 @@ type Ranked = { item: Entry; match: Match }
 
 /** ⌘K: jump to a table or view of the current connection, or run a command. */
 export function CommandPalette({ source, commands, onOpenTable, onClose }: CommandPaletteProps) {
+  const m = useMessages(messages)
   const dialog = useRef<HTMLDialogElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
@@ -100,13 +103,13 @@ export function CommandPalette({ source, commands, onOpenTable, onClose }: Comma
   const tableStatus = commandsOnly
     ? null
     : !source
-      ? 'Select a connection to search its tables.'
+      ? m.selectConnection
       : relations.loading
-        ? 'Loading tables…'
+        ? m.loadingTables
         : relations.error
-          ? `Could not load tables: ${relations.error}`
+          ? m.loadTablesFailed(relations.error)
           : tables.length === 0
-            ? 'No matching tables or views.'
+            ? m.noTables
             : null
 
   const renderGroup = (title: string, items: Ranked[], offset: number, status: string | null) => (
@@ -142,7 +145,7 @@ export function CommandPalette({ source, commands, onOpenTable, onClose }: Comma
   return (
     <dialog
       ref={dialog}
-      aria-label="Command palette"
+      aria-label={m.palette}
       className={styles.palette}
       onCancel={(event) => {
         event.preventDefault()
@@ -159,8 +162,8 @@ export function CommandPalette({ source, commands, onOpenTable, onClose }: Comma
           aria-expanded="true"
           aria-controls="palette-results"
           aria-activedescendant={results[current] ? `palette-${results[current].item.id}` : undefined}
-          aria-label="Search tables and commands"
-          placeholder={source ? `Search ${source.connectionName} or type > for commands` : 'Type a command'}
+          aria-label={m.searchLabel}
+          placeholder={source ? m.searchPlaceholder(source.connectionName) : m.typeCommand}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value)
@@ -171,29 +174,24 @@ export function CommandPalette({ source, commands, onOpenTable, onClose }: Comma
       </div>
 
       <div ref={list} id="palette-results" role="listbox" className={styles.results}>
-        {!commandsOnly && renderGroup('Tables and views', tables, 0, tableStatus)}
+        {!commandsOnly && renderGroup(m.tablesAndViews, tables, 0, tableStatus)}
         {/* An empty command list is noise unless commands are all that was asked for. */}
         {(commandsOnly || commandResults.length > 0) &&
-          renderGroup(
-            'Commands',
-            commandResults,
-            tables.length,
-            commandResults.length ? null : 'No matching commands.',
-          )}
+          renderGroup(m.commands, commandResults, tables.length, commandResults.length ? null : m.noCommands)}
       </div>
 
       <footer className={styles.footer}>
         <span>
-          <kbd>↑↓</kbd> navigate
+          <kbd>↑↓</kbd> {m.navigate}
         </span>
         <span>
-          <kbd>↵</kbd> open
+          <kbd>↵</kbd> {m.open}
         </span>
         <span>
-          <kbd>esc</kbd> close
+          <kbd>esc</kbd> {m.close}
         </span>
         <span className={styles.tip}>
-          Type <code>&gt;</code> for commands
+          {m.typeBefore} <code>&gt;</code> {m.typeAfter}
         </span>
       </footer>
     </dialog>

@@ -2,6 +2,8 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 import { Modal } from '../../components/Modal'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
 
 export interface FormField {
@@ -40,6 +42,7 @@ export function FormDialog({
   onClose,
   secondary,
 }: FormDialogProps) {
+  const m = useMessages(messages)
   const [values, setValues] = useState(() => Object.fromEntries(fields.map((f) => [f.name, f.initial ?? ''])))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -114,7 +117,7 @@ export function FormDialog({
           )}
           <span className={styles.spacer} />
           <Button type="button" onClick={onClose}>
-            Cancel
+            {m.cancel}
           </Button>
           <Button
             type="submit"

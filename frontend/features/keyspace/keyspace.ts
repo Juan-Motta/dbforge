@@ -1,5 +1,6 @@
 import { decode } from '@msgpack/msgpack'
 import type { KeyInfo, Text } from './api'
+import type { KeyspaceMessages } from './messages'
 
 export type KeyNode =
   | { kind: 'folder'; label: string; prefix: string; count: number; children: KeyNode[] }
@@ -59,8 +60,8 @@ const UNITS: [number, string][] = [
 ]
 
 /** `23m`, or with `precise` `23m 41s`; `no ttl` for keys that never expire. */
-export function formatTtl(ms: number | null, precise = false): string {
-  if (ms === null) return 'no ttl'
+export function formatTtl(ms: number | null, m: KeyspaceMessages, precise = false): string {
+  if (ms === null) return m.noTtl
   if (ms < 1_000) return `${ms}ms`
   const index = UNITS.findIndex(([size]) => ms >= size)
   const [size, unit] = UNITS[index]
@@ -109,20 +110,20 @@ export function kindLabel(kind: string): string {
   return kind.toUpperCase()
 }
 
-export function parseScore(text: string): number {
+export function parseScore(text: string, m: KeyspaceMessages): number {
   const score = Number(text.trim())
-  if (text.trim() === '' || !Number.isFinite(score)) throw `"${text}" isn't a number.`
+  if (text.trim() === '' || !Number.isFinite(score)) throw m.notANumber(text)
   return score
 }
 
 /** `field=value` lines; the value may contain `=`. */
-export function parseFields(text: string): [string, string][] {
+export function parseFields(text: string, m: KeyspaceMessages): [string, string][] {
   return text
     .split('\n')
     .filter((line) => line.trim() !== '')
     .map((line) => {
       const cut = line.indexOf('=')
-      if (cut <= 0) throw `"${line}" isn't field=value.`
+      if (cut <= 0) throw m.notFieldValue(line)
       return [line.slice(0, cut).trim(), line.slice(cut + 1)]
     })
 }

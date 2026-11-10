@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from 'react'
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import type { HistoryEntry } from './api'
 import {
   firstLine,
@@ -11,6 +12,7 @@ import {
   outcomeLabel,
   type HistoryScope,
 } from './format'
+import { messages } from './messages'
 import { useHistory } from './useHistory'
 import styles from './HistoryPanel.module.css'
 
@@ -37,6 +39,7 @@ export function HistoryPanel({
   canOpen,
   onClose,
 }: HistoryPanelProps) {
+  const m = useMessages(messages)
   const [search, setSearch] = useState('')
   const [errorsOnly, setErrorsOnly] = useState(false)
   const [scope, setScope] = useState<HistoryScope>('connection')
@@ -44,10 +47,10 @@ export function HistoryPanel({
   const entries = all && inScope(all, scope, connectionId)
 
   return (
-    <aside className={styles.panel} aria-label="Query history">
+    <aside className={styles.panel} aria-label={m.queryHistory}>
       <div className={styles.header}>
-        <span className={styles.title}>History</span>
-        <IconButton label="Close history" onClick={onClose}>
+        <span className={styles.title}>{m.title}</span>
+        <IconButton label={m.close} onClick={onClose}>
           <Icon name="close" />
         </IconButton>
       </div>
@@ -57,8 +60,8 @@ export function HistoryPanel({
           <Icon name="search" className={styles.searchIcon} />
           <input
             type="search"
-            aria-label="Search SQL text"
-            placeholder="Search SQL text…"
+            aria-label={m.searchSql}
+            placeholder={m.searchSqlPlaceholder}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -69,28 +72,26 @@ export function HistoryPanel({
           className={styles.toggle}
           onClick={() => setErrorsOnly((current) => !current)}
         >
-          Errors
+          {m.errors}
         </button>
       </div>
-      <div className={styles.scope} role="group" aria-label="Whose runs">
+      <div className={styles.scope} role="group" aria-label={m.whoseRuns}>
         <button type="button" aria-pressed={scope === 'connection'} onClick={() => setScope('connection')}>
-          This connection
+          {m.thisConnection}
         </button>
         <button type="button" aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
-          All
+          {m.all}
         </button>
       </div>
 
       <div className={styles.list} aria-busy={loading}>
         {error ? (
-          <p className={styles.error}>Could not load the history: {error}</p>
+          <p className={styles.error}>{m.loadFailed(error)}</p>
         ) : entries?.length === 0 ? (
-          <p className={styles.empty}>
-            {search || errorsOnly ? 'No runs match.' : 'Queries you run appear here.'}
-          </p>
+          <p className={styles.empty}>{search || errorsOnly ? m.noRunsMatch : m.emptyHistory}</p>
         ) : (
           entries &&
-          groupByDay(entries, new Date(loadedAt)).map((group) => (
+          groupByDay(entries, new Date(loadedAt), m).map((group) => (
             <section key={group.label} aria-label={group.label}>
               <h3 className={styles.day}>{group.label}</h3>
               {group.entries.map((entry) => (
@@ -108,26 +109,27 @@ export function HistoryPanel({
           ))
         )}
       </div>
-      <p className={styles.hint}>Click to load into the editor · ⌘-click opens a new tab</p>
+      <p className={styles.hint}>{m.hint}</p>
     </aside>
   )
 }
 
 function Entry({ entry, onClick }: { entry: HistoryEntry; onClick: (event: MouseEvent) => void }) {
+  const m = useMessages(messages)
   const failed = entry.error !== null
   const tooltip = [entry.sql, entry.error].filter(Boolean).join('\n\n')
   return (
     <button type="button" className={styles.entry} title={tooltip} onClick={onClick}>
       <span
         className={`${styles.dot} ${failed ? styles.failed : styles.ok}`}
-        aria-label={failed ? 'Failed' : 'Succeeded'}
+        aria-label={failed ? m.failed : m.succeeded}
       />
       <span className={styles.sql}>{firstLine(entry.sql)}</span>
       <span className={styles.time}>{formatTime(entry.executedAt)}</span>
       <span className={styles.meta}>
         {entry.connectionName}
         {entry.database && ` · ${entry.database}`} · {formatDuration(entry.elapsedMs)} ·{' '}
-        <span className={failed ? styles.failedText : undefined}>{outcomeLabel(entry)}</span>
+        <span className={failed ? styles.failedText : undefined}>{outcomeLabel(entry, m)}</span>
       </span>
     </button>
   )

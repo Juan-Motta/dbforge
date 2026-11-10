@@ -1,0 +1,53 @@
+import { defineMessages } from '../../lib/i18n/messages'
+
+export const messages = defineMessages({
+  en: {
+    /** How dates and numbers are written. */
+    locale: 'en-US',
+    queryHistory: 'Query history',
+    title: 'History',
+    close: 'Close history',
+    searchSql: 'Search SQL text',
+    searchSqlPlaceholder: 'Search SQL text…',
+    errors: 'Errors',
+    whoseRuns: 'Whose runs',
+    thisConnection: 'This connection',
+    all: 'All',
+    loadFailed: (error: string) => `Could not load the history: ${error}`,
+    noRunsMatch: 'No runs match.',
+    emptyHistory: 'Queries you run appear here.',
+    hint: 'Click to load into the editor · ⌘-click opens a new tab',
+    failed: 'Failed',
+    succeeded: 'Succeeded',
+    today: 'Today',
+    yesterday: 'Yesterday',
+    outcomeError: 'error',
+    statements: (count: number) => `${count} statements`,
+    rows: (count: number, formatted: string) => (count === 1 ? '1 row' : `${formatted} rows`),
+  },
+  es: {
+    locale: 'es-419',
+    queryHistory: 'Historial de consultas',
+    title: 'Historial',
+    close: 'Cerrar historial',
+    searchSql: 'Buscar en el texto SQL',
+    searchSqlPlaceholder: 'Buscar en el texto SQL…',
+    errors: 'Errores',
+    whoseRuns: 'Qué ejecuciones',
+    thisConnection: 'Esta conexión',
+    all: 'Todas',
+    loadFailed: (error: string) => `No se pudo cargar el historial: ${error}`,
+    noRunsMatch: 'Ninguna ejecución coincide.',
+    emptyHistory: 'Las consultas que ejecutes aparecen aquí.',
+    hint: 'Haz clic para cargarla en el editor · ⌘-clic la abre en una pestaña nueva',
+    failed: 'Falló',
+    succeeded: 'Correcta',
+    today: 'Hoy',
+    yesterday: 'Ayer',
+    outcomeError: 'error',
+    statements: (count: number) => `${count} sentencias`,
+    rows: (count: number, formatted: string) => (count === 1 ? '1 fila' : `${formatted} filas`),
+  },
+})
+
+export type HistoryMessages = typeof messages.en

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { keyspaceApi, type Overview } from './api'
 import { CliPanel } from './CliPanel'
 import { FormDialog } from './FormDialog'
 import { KeyDetail } from './KeyDetail'
 import { formatBytes, hitRate, parseScore } from './keyspace'
 import { KeyList } from './KeyList'
+import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
 
 interface KeyBrowserProps {
@@ -22,6 +24,7 @@ interface KeyBrowserProps {
 
 /** A Redis database: its keys, the selected key, server metrics and a CLI. */
 export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowserProps) {
+  const m = useMessages(messages)
   const db = Number(database.replace(/^db/, '')) || 0
   const [selected, setSelected] = useState<string | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
@@ -69,26 +72,24 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
       />
 
       <div className={styles.side}>
-        <div className={styles.metrics} aria-label="Server metrics">
+        <div className={styles.metrics} aria-label={m.serverMetrics}>
           {overview ? (
             <>
-              <Metric label="Keys" value={overview.keys.toLocaleString('en-US')} />
+              <Metric label={m.keys} value={overview.keys.toLocaleString(m.locale)} />
               <Metric
-                label="Memory"
+                label={m.memory}
                 value={formatBytes(overview.usedMemory)}
                 detail={overview.maxMemory > 0 ? `/ ${formatBytes(overview.maxMemory)}` : undefined}
               />
-              <Metric label="Ops / sec" value={overview.opsPerSec.toLocaleString('en-US')} />
-              <Metric label="Hit rate" value={hitRate(overview.keyspaceHits, overview.keyspaceMisses)} ok />
-              <Metric label="Clients" value={overview.clients.toLocaleString('en-US')} />
+              <Metric label={m.opsPerSec} value={overview.opsPerSec.toLocaleString(m.locale)} />
+              <Metric label={m.hitRate} value={hitRate(overview.keyspaceHits, overview.keyspaceMisses)} ok />
+              <Metric label={m.clients} value={overview.clients.toLocaleString(m.locale)} />
             </>
           ) : (
-            <p className={overviewError ? styles.error : styles.muted}>
-              {overviewError ?? 'Reading server metrics…'}
-            </p>
+            <p className={overviewError ? styles.error : styles.muted}>{overviewError ?? m.readingMetrics}</p>
           )}
           <IconButton
-            label="Refresh metrics"
+            label={m.refreshMetrics}
             className={styles.refresh}
             onClick={() => void refreshOverview()}
           >
@@ -108,7 +109,7 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
               onKeysChanged={keysChanged}
             />
           ) : (
-            <p className={styles.detailEmpty}>Select a key to see its value.</p>
+            <p className={styles.detailEmpty}>{m.selectKey}</p>
           )}
         </main>
 
@@ -126,23 +127,23 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
         {overview && (
           <footer className={styles.footer}>
             <span className={styles.dot} />
-            Connected · Redis {overview.version} · {overview.mode}
+            {m.connectedTo(overview.version, overview.mode)}
             <span className={styles.spacer} />
-            Evictions {overview.evictedKeys.toLocaleString('en-US')} · Expired{' '}
-            {overview.expiredKeys.toLocaleString('en-US')}
+            {m.evictions} {overview.evictedKeys.toLocaleString(m.locale)} · {m.expired}{' '}
+            {overview.expiredKeys.toLocaleString(m.locale)}
           </footer>
         )}
       </div>
 
       {adding && (
         <FormDialog
-          title="Add key"
-          submitLabel="Add key"
+          title={m.addKey}
+          submitLabel={m.addKey}
           fields={[
-            { name: 'name', label: 'Key name', placeholder: 'session:7f3a9c21e8' },
+            { name: 'name', label: m.keyName, placeholder: 'session:7f3a9c21e8' },
             {
               name: 'kind',
-              label: 'Type',
+              label: m.type,
               type: 'select',
               initial: 'string',
               options: ['string', 'hash', 'list', 'set', 'zset', 'stream'].map((k) => ({
@@ -150,21 +151,20 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
                 label: k,
               })),
             },
-            { name: 'field', label: 'First field', when: (v) => v.kind === 'hash' || v.kind === 'stream' },
-            { name: 'value', label: 'Value', type: 'textarea' },
-            { name: 'score', label: 'Score', type: 'number', when: (v) => v.kind === 'zset' },
-            { name: 'ttl', label: 'Expires in (seconds, optional)', type: 'number' },
+            { name: 'field', label: m.firstField, when: (v) => v.kind === 'hash' || v.kind === 'stream' },
+            { name: 'value', label: m.value, type: 'textarea' },
+            { name: 'score', label: m.score, type: 'number', when: (v) => v.kind === 'zset' },
+            { name: 'ttl', label: m.expiresInOptional, type: 'number' },
           ]}
           onSubmit={async (form) => {
             const ttl = form.ttl.trim() === '' ? null : Number(form.ttl)
-            if (ttl !== null && (!Number.isFinite(ttl) || ttl <= 0))
-              throw 'Enter a number of seconds greater than 0.'
+            if (ttl !== null && (!Number.isFinite(ttl) || ttl <= 0)) throw m.secondsGreaterThanZero
             await keyspaceApi.createKey(connectionId, db, {
               name: form.name,
               kind: form.kind,
               field: form.kind === 'hash' || form.kind === 'stream' ? form.field : null,
               value: form.value,
-              score: form.kind === 'zset' ? parseScore(form.score) : null,
+              score: form.kind === 'zset' ? parseScore(form.score, m) : null,
               ttlMs: ttl === null ? null : Math.round(ttl * 1000),
             })
             keysChanged(form.name)

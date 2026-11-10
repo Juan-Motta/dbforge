@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { Button, IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { keyspaceApi, type KeyInfo } from './api'
 import { formatTtl, keyTree, kindLabel, visibleKeyRows } from './keyspace'
 import { kindClass } from './kindClass'
+import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
 
 const PAGE = 500
@@ -22,6 +24,7 @@ interface KeyListProps {
 
 /** The keys of a database found with SCAN, as a `:` tree or a flat list. */
 export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reloadToken }: KeyListProps) {
+  const m = useMessages(messages)
   const [draft, setDraft] = useState('')
   const [pattern, setPattern] = useState('')
   const [kind, setKind] = useState('')
@@ -66,7 +69,7 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
     })
 
   return (
-    <aside className={styles.keys} aria-label="Keys">
+    <aside className={styles.keys} aria-label={m.keys}>
       <form
         className={styles.keysBar}
         onSubmit={(event) => {
@@ -75,12 +78,12 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
         }}
       >
         <label className={styles.search}>
-          <span className={styles.srOnly}>Key pattern</span>
+          <span className={styles.srOnly}>{m.keyPattern}</span>
           <Icon name="search" size={14} />
           <input
             className={`${styles.input} ${styles.mono}`}
             value={draft}
-            placeholder="Pattern, e.g. session:*"
+            placeholder={m.patternPlaceholder}
             spellCheck={false}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={() => setPattern(draft.trim())}
@@ -88,42 +91,42 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
         </label>
         <select
           className={`${styles.input} ${styles.kindSelect}`}
-          aria-label="Key type"
+          aria-label={m.keyType}
           value={kind}
           onChange={(event) => setKind(event.target.value)}
         >
-          <option value="">All types</option>
+          <option value="">{m.allTypes}</option>
           {KINDS.map((k) => (
             <option key={k} value={k}>
               {k}
             </option>
           ))}
         </select>
-        <IconButton label="Add key" onClick={onAddKey}>
+        <IconButton label={m.addKey} onClick={onAddKey}>
           <Icon name="plus" />
         </IconButton>
       </form>
 
       <div className={styles.scanInfo}>
         <span>
-          {cursor === '0' ? 'SCAN complete' : `SCAN cursor ${cursor}`} · {keys.length.toLocaleString('en-US')}{' '}
-          matched
+          {cursor === '0' ? m.scanComplete : m.scanCursor(cursor)} ·{' '}
+          {m.matched(keys.length.toLocaleString(m.locale))}
         </span>
         <span className={styles.spacer} />
-        <div className={styles.seg} role="group" aria-label="Key view">
+        <div className={styles.seg} role="group" aria-label={m.keyView}>
           <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')}>
-            Tree
+            {m.tree}
           </button>
           <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>
-            List
+            {m.list}
           </button>
         </div>
       </div>
 
-      <div className={styles.keyRows} role="tree" aria-label="Keys">
+      <div className={styles.keyRows} role="tree" aria-label={m.keys}>
         {state.error && <p className={styles.error}>{state.error}</p>}
         {!state.error && !state.loading && keys.length === 0 && (
-          <p className={styles.muted}>No keys match.</p>
+          <p className={styles.muted}>{m.noKeysMatch}</p>
         )}
         {rows.map(({ node, depth }) =>
           node.kind === 'folder' ? (
@@ -140,7 +143,7 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
               <span className={styles.ellipsis}>
                 {depth > 0 ? node.label.slice(lastPrefix(node.label)) : node.label}
               </span>
-              <span className={styles.count}>{node.count.toLocaleString('en-US')}</span>
+              <span className={styles.count}>{node.count.toLocaleString(m.locale)}</span>
             </button>
           ) : (
             <button
@@ -156,7 +159,7 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
               <span className={styles.ellipsis}>
                 {view === 'tree' && depth > 0 ? node.label.slice(lastPrefix(node.label)) : node.label}
               </span>
-              <span className={styles.ttl}>{formatTtl(node.key.ttlMs)}</span>
+              <span className={styles.ttl}>{formatTtl(node.key.ttlMs, m)}</span>
             </button>
           ),
         )}
@@ -167,7 +170,7 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
             disabled={state.loading}
             onClick={() => void load(cursor, true)}
           >
-            {state.loading ? 'Scanning…' : 'Load more'}
+            {state.loading ? m.scanning : m.loadMore}
           </Button>
         )}
       </div>

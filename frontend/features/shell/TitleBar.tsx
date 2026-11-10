@@ -1,7 +1,9 @@
 import { Button, IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { Connection } from '../../domain/connection'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { ConnectionDetails } from './ConnectionDetails'
+import { messages } from './messages'
 import { hasOverlayTitleBar } from './platform'
 import styles from './Shell.module.css'
 
@@ -28,6 +30,7 @@ export function TitleBar({
   onToggleExplorer,
   onEditConnection,
 }: TitleBarProps) {
+  const m = useMessages(messages)
   return (
     <header
       className={styles.titleBar}
@@ -41,8 +44,8 @@ export function TitleBar({
         DBForge
       </span>
       <IconButton
-        label={explorerOpen ? 'Hide explorer (⌘B)' : 'Show explorer (⌘B)'}
-        title={explorerOpen ? 'Hide explorer ⌘B' : 'Show explorer ⌘B'}
+        label={explorerOpen ? m.hideExplorer : m.showExplorer}
+        title={explorerOpen ? m.hideExplorerTitle : m.showExplorerTitle}
         active={explorerOpen}
         onClick={onToggleExplorer}
       >
@@ -52,7 +55,7 @@ export function TitleBar({
       {connection ? (
         <ConnectionDetails connection={connection} onEdit={() => onEditConnection(connection)} />
       ) : (
-        <span className="muted">No connection selected</span>
+        <span className="muted">{m.noConnection}</span>
       )}
 
       {path.length > 0 && (
@@ -72,19 +75,19 @@ export function TitleBar({
 
       <Button className={styles.search} onClick={onSearch}>
         <Icon name="search" />
-        Search everywhere…
+        {m.searchEverywhere}
         <kbd className={styles.kbd}>⌘K</kbd>
       </Button>
       <Button
         variant="primary"
         disabled={!onNewQuery}
-        title={onNewQuery ? undefined : 'Select a connection first'}
+        title={onNewQuery ? undefined : m.selectConnectionFirst}
         onClick={onNewQuery}
       >
         <Icon name="plus" />
-        New query
+        {m.newQuery}
       </Button>
-      <IconButton label="Settings" onClick={onOpenSettings}>
+      <IconButton label={m.settings} onClick={onOpenSettings}>
         <Icon name="settings" />
       </IconButton>
     </header>

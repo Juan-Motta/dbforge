@@ -8,8 +8,10 @@ import {
   formatTtl,
   hitRate,
   keyTree,
+  parseScore,
   visibleKeyRows,
 } from './keyspace'
+import { messages } from './messages'
 import type { KeyInfo } from './api'
 
 const key = (name: string, kind = 'string', ttlMs: number | null = null): KeyInfo => ({ name, kind, ttlMs })
@@ -53,12 +55,17 @@ describe('keyTree', () => {
 
 describe('formats', () => {
   it('writes TTLs in their largest unit', () => {
-    expect(formatTtl(null)).toBe('no ttl')
-    expect(formatTtl(41_000)).toBe('41s')
-    expect(formatTtl(23 * 60_000 + 41_000)).toBe('23m')
-    expect(formatTtl(2 * 3_600_000 + 5)).toBe('2h')
-    expect(formatTtl(3 * 86_400_000)).toBe('3d')
-    expect(formatTtl(23 * 60_000 + 41_000, true)).toBe('23m 41s')
+    expect(formatTtl(null, messages.en)).toBe('no ttl')
+    expect(formatTtl(41_000, messages.en)).toBe('41s')
+    expect(formatTtl(23 * 60_000 + 41_000, messages.en)).toBe('23m')
+    expect(formatTtl(2 * 3_600_000 + 5, messages.en)).toBe('2h')
+    expect(formatTtl(3 * 86_400_000, messages.en)).toBe('3d')
+    expect(formatTtl(23 * 60_000 + 41_000, messages.en, true)).toBe('23m 41s')
+  })
+
+  it('writes the TTL and errors in Spanish', () => {
+    expect(formatTtl(null, messages.es)).toBe('sin ttl')
+    expect(() => parseScore('abc', messages.es)).toThrow('"abc" no es un número.')
   })
 
   it('writes sizes and the hit rate', () => {

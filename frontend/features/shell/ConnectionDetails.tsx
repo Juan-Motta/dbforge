@@ -5,8 +5,11 @@ import { EngineLogo } from '../../components/EngineLogo'
 import { Icon } from '../../components/Icon'
 import type { Connection } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages as sharedMessages } from '../../lib/messages'
 import { connectionsApi } from '../connections/api'
 import { connectionFacts } from './connectionFacts'
+import { messages } from './messages'
 import styles from './Shell.module.css'
 
 interface ConnectionDetailsProps {
@@ -57,6 +60,8 @@ export function ConnectionDetails({ connection, onEdit }: ConnectionDetailsProps
 }
 
 function Popover({ connection, onEdit }: ConnectionDetailsProps) {
+  const m = useMessages(messages)
+  const shared = useMessages(sharedMessages)
   const [server, setServer] = useState<{ version: string } | { error: string } | null>(null)
 
   // Asks the server each time the popover opens: it also tells whether it is reachable.
@@ -73,7 +78,7 @@ function Popover({ connection, onEdit }: ConnectionDetailsProps) {
 
   const reachable = server && 'version' in server
   return (
-    <div role="dialog" aria-label={`${connection.name} connection`} className={styles.popover}>
+    <div role="dialog" aria-label={m.connectionDialog(connection.name)} className={styles.popover}>
       <div className={styles.popoverHead}>
         <EngineLogo engine={connection.engine} size={22} />
         <div className={styles.popoverTitle}>
@@ -83,7 +88,7 @@ function Popover({ connection, onEdit }: ConnectionDetailsProps) {
               className={styles.dot}
               style={{ background: reachable ? 'var(--ok)' : server ? 'var(--err)' : 'var(--text3)' }}
             />
-            {reachable ? 'Reachable' : server ? 'Not reachable' : 'Checking…'}
+            {reachable ? m.reachable : server ? m.notReachable : m.checking}
           </span>
         </div>
         <EnvironmentBadge connection={connection} />
@@ -92,6 +97,8 @@ function Popover({ connection, onEdit }: ConnectionDetailsProps) {
         {connectionFacts(
           connection,
           server && 'version' in server ? server.version : server ? '—' : null,
+          m,
+          shared,
         ).map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
@@ -103,7 +110,7 @@ function Popover({ connection, onEdit }: ConnectionDetailsProps) {
       <div className={styles.popoverActions}>
         <Button onClick={onEdit}>
           <Icon name="edit" />
-          Edit connection
+          {m.editConnection}
         </Button>
       </div>
     </div>

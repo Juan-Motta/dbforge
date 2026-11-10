@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { HistoryEntry } from './api'
 import { firstLine, formatDuration, groupByDay, outcomeLabel, inScope } from './format'
+import { messages } from './messages'
 
 const entry = (overrides: Partial<HistoryEntry> = {}): HistoryEntry => ({
   id: '1',
@@ -29,12 +30,22 @@ describe('groupByDay', () => {
         entry({ id: 'd', executedAt: at(2, 12) }),
       ],
       now,
+      messages.en,
     )
     expect(groups.map((g) => [g.label, g.entries.map((e) => e.id)])).toEqual([
       ['Today', ['a', 'b']],
       ['Yesterday', ['c']],
       ['Mon, Nov 2', ['d']],
     ])
+  })
+
+  it('labels the days in Spanish', () => {
+    const groups = groupByDay(
+      [entry({ executedAt: at(6, 9) }), entry({ executedAt: at(5, 9) })],
+      now,
+      messages.es,
+    )
+    expect(groups.map((g) => g.label)).toEqual(['Hoy', 'Ayer'])
   })
 })
 
@@ -48,10 +59,11 @@ describe('formatDuration', () => {
 
 describe('outcomeLabel', () => {
   it('names errors, scripts and row counts', () => {
-    expect(outcomeLabel(entry({ error: 'boom' }))).toBe('error')
-    expect(outcomeLabel(entry({ statements: 3 }))).toBe('3 statements')
-    expect(outcomeLabel(entry({ rows: 1 }))).toBe('1 row')
-    expect(outcomeLabel(entry({ rows: 18204 }))).toBe('18,204 rows')
+    expect(outcomeLabel(entry({ error: 'boom' }), messages.en)).toBe('error')
+    expect(outcomeLabel(entry({ statements: 3 }), messages.en)).toBe('3 statements')
+    expect(outcomeLabel(entry({ rows: 1 }), messages.en)).toBe('1 row')
+    expect(outcomeLabel(entry({ rows: 18204 }), messages.en)).toBe('18,204 rows')
+    expect(outcomeLabel(entry({ rows: 1 }), messages.es)).toBe('1 fila')
   })
 })
 
