@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { SqlDialect } from '../../domain/connection'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
 import { filterLabels, isFiltered, NO_FILTER, type RowFilter } from './rowFilter'
 import styles from './TableView.module.css'
 
@@ -16,8 +18,9 @@ interface FilterBarProps {
 
 /** A `WHERE` and an `ORDER BY` (or a MongoDB filter and sort), applied with Enter. */
 export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps) {
+  const m = useMessages(messages)
   const [draft, setDraft] = useState(value)
-  const labels = filterLabels(dialect)
+  const labels = filterLabels(dialect, m)
   // A header click changes the order from outside; the field follows it.
   const [seen, setSeen] = useState(value)
   if (seen !== value) {
@@ -43,15 +46,12 @@ export function FilterBar({ dialect, value, onApply, disabled }: FilterBarProps)
   )
 
   return (
-    <div
-      className={styles.filterBar}
-      title={disabled ? 'Apply or discard the pending changes first' : undefined}
-    >
+    <div className={styles.filterBar} title={disabled ? m.filterLocked : undefined}>
       {field('filter', labels.filter, labels.filterHint, '1 1 0')}
       {field('order', labels.order, labels.orderHint, '0 1 280px')}
       {/* Always there, so the fields keep their width; usable only while a filter applies. */}
       <IconButton
-        label="Clear filter and order"
+        label={m.clearFilter}
         disabled={disabled || !isFiltered(value)}
         onClick={() => onApply(NO_FILTER)}
       >

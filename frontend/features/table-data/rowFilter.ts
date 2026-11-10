@@ -1,4 +1,5 @@
 import type { SqlDialect } from '../../domain/connection'
+import type { messages } from './messages'
 
 /**
  * What the filter bar narrows and orders a table's rows by. SQL engines read a
@@ -16,14 +17,14 @@ export function isFiltered(filter: RowFilter): boolean {
   return filter.filter.trim() !== '' || filter.order.trim() !== ''
 }
 
-/** How the bar labels and hints its two fields for an engine. */
-export function filterLabels(dialect: SqlDialect) {
+/** How the bar labels and hints its two fields for an engine, in the language of `m`. */
+export function filterLabels(dialect: SqlDialect, m: typeof messages.en) {
   switch (dialect) {
     case 'mongodb':
       return {
-        filter: 'Filter',
+        filter: m.filter,
         filterHint: "{status: 'paid', total: {$gt: 100}}",
-        order: 'Sort',
+        order: m.sort,
         orderHint: '{created: -1}',
       }
     case 'cosmosdb':

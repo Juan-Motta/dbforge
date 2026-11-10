@@ -1,11 +1,12 @@
 export type ExportFormat = 'csv' | 'tsv' | 'json' | 'sql' | 'markdown'
 
-export const FORMATS: { id: ExportFormat; label: string; extension: string; description: string }[] = [
-  { id: 'csv', label: 'CSV', extension: 'csv', description: 'Spreadsheets and tools' },
-  { id: 'tsv', label: 'TSV', extension: 'tsv', description: 'Tab separated' },
-  { id: 'json', label: 'JSON', extension: 'json', description: 'An array of objects' },
-  { id: 'sql', label: 'SQL INSERT', extension: 'sql', description: 'Re-import anywhere' },
-  { id: 'markdown', label: 'Markdown', extension: 'md', description: 'Docs and pull requests' },
+/** Each format's description is the `<id>Description` message. */
+export const FORMATS: { id: ExportFormat; label: string; extension: string }[] = [
+  { id: 'csv', label: 'CSV', extension: 'csv' },
+  { id: 'tsv', label: 'TSV', extension: 'tsv' },
+  { id: 'json', label: 'JSON', extension: 'json' },
+  { id: 'sql', label: 'SQL INSERT', extension: 'sql' },
+  { id: 'markdown', label: 'Markdown', extension: 'md' },
 ]
 
 export function extensionOf(format: ExportFormat): string {

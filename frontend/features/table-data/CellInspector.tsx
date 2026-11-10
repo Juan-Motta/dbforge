@@ -5,7 +5,9 @@ import { ResizeHandle } from '../../components/ResizeHandle'
 import { usePanelWidth } from '../../components/usePanelWidth'
 import { CodeEditor } from '../../components/code/CodeEditor'
 import { Icon } from '../../components/Icon'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import type { Column } from './api'
+import { messages } from './messages'
 import { compactJson, isJsonDocument, jsonError, prettyJson } from './cellText'
 import styles from './CellInspector.module.css'
 
@@ -30,23 +32,24 @@ interface CellInspectorProps {
 
 /** A side panel with a cell's whole value: as text, as indented JSON, or as rendered Markdown. */
 export function CellInspector({ cell, onSave, onClose }: CellInspectorProps) {
+  const m = useMessages(messages)
   const [wrap, setWrap] = useState(true)
   const [width, setWidth, resetWidth] = usePanelWidth('dbforge.inspectorWidth', 380, 260, 900)
   return (
-    <aside className={styles.panel} style={{ width }} aria-label="Cell value">
-      <ResizeHandle edge="left" label="Resize the panel" onResize={setWidth} onReset={resetWidth} />
+    <aside className={styles.panel} style={{ width }} aria-label={m.cellValue}>
+      <ResizeHandle edge="left" label={m.resizePanel} onResize={setWidth} onReset={resetWidth} />
       {cell ? (
         <Value cell={cell} wrap={wrap} onWrap={() => setWrap(!wrap)} onSave={onSave} onClose={onClose} />
       ) : (
         <>
           <header className={styles.bar}>
-            <span className={styles.title}>Value</span>
+            <span className={styles.title}>{m.value}</span>
             <span className={styles.spacer} />
-            <IconButton label="Close" onClick={onClose}>
+            <IconButton label={m.close} onClick={onClose}>
               <Icon name="close" />
             </IconButton>
           </header>
-          <p className={styles.empty}>Pick a cell to see its whole value.</p>
+          <p className={styles.empty}>{m.pickCell}</p>
         </>
       )}
     </aside>
@@ -63,6 +66,7 @@ interface ValueProps {
 
 /** One cell's value; the panel mounts it again for another cell, so the draft starts over. */
 function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
+  const m = useMessages(messages)
   const original = cell.value ?? ''
   const startsAsJson = isJsonDocument(original)
   const [mode, setMode] = useState<Mode>(startsAsJson ? 'json' : 'text')
@@ -100,7 +104,7 @@ function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
       ? 'DEFAULT'
       : cell.value === null && !changed
         ? 'NULL'
-        : `${draft.length.toLocaleString('en-US')} characters`
+        : m.characters(draft.length.toLocaleString('en-US'))
 
   return (
     <div className={styles.value} onKeyDown={onKeyDown}>
@@ -110,15 +114,15 @@ function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
           <span className={styles.type}>{cell.column.dataType}</span>
         </span>
         <span className={styles.spacer} />
-        <div className={styles.seg} role="group" aria-label="Show value as">
+        <div className={styles.seg} role="group" aria-label={m.showValueAs}>
           <button type="button" aria-pressed={mode === 'text'} onClick={() => show('text')}>
-            Text
+            {m.text}
           </button>
           <button
             type="button"
             aria-pressed={mode === 'json'}
             disabled={mode !== 'json' && !isJsonDocument(draft)}
-            title="Indented, for a JSON object or array"
+            title={m.jsonHint}
             onClick={() => show('json')}
           >
             JSON
@@ -127,10 +131,10 @@ function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
             Markdown
           </button>
         </div>
-        <IconButton label="Wrap long lines" active={wrap} disabled={mode === 'markdown'} onClick={onWrap}>
+        <IconButton label={m.wrapLines} active={wrap} disabled={mode === 'markdown'} onClick={onWrap}>
           <Icon name="wrap" />
         </IconButton>
-        <IconButton label="Close" onClick={onClose}>
+        <IconButton label={m.close} onClick={onClose}>
           <Icon name="close" />
         </IconButton>
       </header>
@@ -147,7 +151,7 @@ function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
                     {children}
                   </span>
                 ),
-                img: ({ alt }) => <span className={styles.image}>[{alt || 'image'}]</span>,
+                img: ({ alt }) => <span className={styles.image}>[{alt || m.image}]</span>,
               }}
             >
               {draft}
@@ -160,7 +164,7 @@ function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
             language={mode}
             readOnly={cell.locked !== null}
             wrap={wrap}
-            label={`Value of ${cell.column.name}`}
+            label={m.valueOf(cell.column.name)}
           />
         )}
       </div>
@@ -171,10 +175,10 @@ function Value({ cell, wrap, onWrap, onSave, onClose }: ValueProps) {
         </span>
         <span className={styles.spacer} />
         <Button disabled={!changed} onClick={() => setDraft(startsAsJson ? prettyJson(original) : original)}>
-          Revert
+          {m.revert}
         </Button>
         <Button variant="primary" disabled={!canSave} title={cell.locked ?? undefined} onClick={save}>
-          Save
+          {m.save}
         </Button>
       </footer>
     </div>

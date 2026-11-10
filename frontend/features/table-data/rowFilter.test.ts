@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { NO_FILTER, sortBy, sortOf } from './rowFilter'
+import { messages } from './messages'
+import { filterLabels, NO_FILTER, sortBy, sortOf } from './rowFilter'
 
 describe('sortBy', () => {
   it('cycles a column through ascending, descending and no order, quoted for the dialect', () => {
@@ -38,5 +39,13 @@ describe('sortOf', () => {
     expect(sortOf('postgres', 'total', '"total"')).toBe('asc')
     expect(sortOf('mongodb', 'total', '{total: -1}')).toBe('desc')
     expect(sortOf('postgres', 'total', 'total DESC')).toBeNull()
+  })
+})
+
+describe('filterLabels', () => {
+  it('names MongoDB’s fields in the interface language and keeps SQL keywords', () => {
+    expect(filterLabels('mongodb', messages.en)).toMatchObject({ filter: 'Filter', order: 'Sort' })
+    expect(filterLabels('mongodb', messages.es)).toMatchObject({ filter: 'Filtro', order: 'Orden' })
+    expect(filterLabels('postgres', messages.es)).toMatchObject({ filter: 'WHERE', order: 'ORDER BY' })
   })
 })

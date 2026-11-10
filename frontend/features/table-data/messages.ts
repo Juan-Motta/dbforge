@@ -1,0 +1,180 @@
+import { defineMessages } from '../../lib/i18n/messages'
+
+/** `1 actualizada`, `3 actualizadas`: Spanish counts of rows (filas), which agree in number. */
+const filas = (n: number, word: string) => `${n} ${n === 1 ? word : `${word}s`}`
+
+export const messages = defineMessages({
+  en: {
+    // Filter bar
+    filter: 'Filter',
+    sort: 'Sort',
+    filterLocked: 'Apply or discard the pending changes first',
+    clearFilter: 'Clear filter and order',
+
+    // Table view
+    previewNote: 'Runs in one transaction. If any row changed since it was loaded, none of it applies.',
+    previewNoteMongodb:
+      'Runs in one transaction on replica sets and sharded clusters; a standalone server writes one change at a time, and a change it refuses leaves the ones before it written.',
+    previewNoteCosmosdb:
+      'Writes one change at a time: Cosmos DB has no transaction across partitions. An item changed since it was read is left as it is, and the changes before it stay written.',
+    noKey: 'This table has no primary key, so its rows cannot be identified safely to edit them',
+    applyingChanges: 'Applying the changes',
+    computed: 'Computed by the database, so it cannot be edited',
+    rowDeleted: 'This row is marked for deletion',
+    switchViewsLocked: 'Apply or discard the changes to switch views',
+    showAsTable: 'Show as a table',
+    showAsDocuments: 'Show as JSON documents',
+    addDocument: 'Add document',
+    addRow: 'Add row',
+    deleteSelected: 'Delete selected rows',
+    reloadRows: 'Reload rows',
+    inspectInTable: 'Cells are inspected in the table',
+    inspectCell: "Inspect the cell's value (⇧↵)",
+    pendingChanges: (n: number) => `${n} pending ${n === 1 ? 'change' : 'changes'}`,
+    changeCounts: (updated: number, inserted: number, deleted: number) =>
+      `${updated} updated · ${inserted} inserted · ${deleted} deleted`,
+    previewSql: 'Preview SQL',
+    applied: (updated: number, inserted: number, deleted: number) =>
+      `Applied: ${updated} updated · ${inserted} inserted · ${deleted} deleted`,
+    loading: 'Loading…',
+    noRowsMatch: 'No rows match',
+    noRows: 'No rows',
+    rowsRange: (from: number, to: number, filtered: boolean) =>
+      `Rows ${from}–${to}${filtered ? ' · filtered' : ''}`,
+    rowsPerPage: 'Rows per page',
+    perPage: (n: number) => `${n} per page`,
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
+    discard: 'Discard',
+    apply: 'Apply',
+    applying: 'Applying…',
+    previewTitle: 'Pending changes as SQL',
+    confirmTitle: 'Apply changes to production?',
+    confirmMarked: 'This connection is marked',
+    production: 'Production',
+    confirmChange: 'You are about to change',
+    confirmCounts: (updated: number, inserted: number, deleted: number) =>
+      `${updated} updated, ${inserted} inserted, ${deleted} deleted`,
+    cancel: 'Cancel',
+    applyToProduction: 'Apply to production',
+
+    // Cell inspector
+    cellValue: 'Cell value',
+    resizePanel: 'Resize the panel',
+    value: 'Value',
+    close: 'Close',
+    pickCell: 'Pick a cell to see its whole value.',
+    characters: (count: string) => `${count} characters`,
+    showValueAs: 'Show value as',
+    text: 'Text',
+    jsonHint: 'Indented, for a JSON object or array',
+    wrapLines: 'Wrap long lines',
+    image: 'image',
+    valueOf: (column: string) => `Value of ${column}`,
+    revert: 'Revert',
+    save: 'Save',
+
+    // Grid
+    copy: 'Copy',
+    paste: 'Paste',
+    edit: 'Edit',
+    setNull: 'Set NULL',
+    setDefault: 'Set DEFAULT',
+    generateUuid: 'Generate UUID',
+    openPointedRow: (value: string | null) => `Open the row ${value} points to`,
+    openReferencedRow: 'Open the referenced row',
+    computedBadge: 'auto',
+
+    // Documents
+    stateEdited: 'edited',
+    stateDeleted: 'deleted',
+    stateNew: 'new',
+    document: 'Document',
+    keep: 'Keep',
+  },
+  es: {
+    filter: 'Filtro',
+    sort: 'Orden',
+    filterLocked: 'Primero aplica o descarta los cambios pendientes',
+    clearFilter: 'Quitar filtro y orden',
+
+    previewNote:
+      'Se ejecuta en una transacción. Si alguna fila cambió desde que se cargó, no se aplica nada.',
+    previewNoteMongodb:
+      'Se ejecuta en una transacción en replica sets y clústeres fragmentados; un servidor independiente escribe un cambio a la vez, y un cambio que rechaza deja escritos los anteriores.',
+    previewNoteCosmosdb:
+      'Escribe un cambio a la vez: Cosmos DB no tiene transacciones entre particiones. Un ítem que cambió desde que se leyó queda como está, y los cambios anteriores quedan escritos.',
+    noKey:
+      'Esta tabla no tiene clave primaria, así que sus filas no se pueden identificar con seguridad para editarlas',
+    applyingChanges: 'Aplicando los cambios',
+    computed: 'Lo calcula la base de datos, así que no se puede editar',
+    rowDeleted: 'Esta fila está marcada para eliminarse',
+    switchViewsLocked: 'Aplica o descarta los cambios para cambiar de vista',
+    showAsTable: 'Mostrar como tabla',
+    showAsDocuments: 'Mostrar como documentos JSON',
+    addDocument: 'Agregar documento',
+    addRow: 'Agregar fila',
+    deleteSelected: 'Eliminar las filas seleccionadas',
+    reloadRows: 'Recargar filas',
+    inspectInTable: 'Las celdas se inspeccionan en la tabla',
+    inspectCell: 'Inspeccionar el valor de la celda (⇧↵)',
+    pendingChanges: (n: number) => `${n} ${n === 1 ? 'cambio pendiente' : 'cambios pendientes'}`,
+    changeCounts: (updated: number, inserted: number, deleted: number) =>
+      `${filas(updated, 'actualizada')} · ${filas(inserted, 'insertada')} · ${filas(deleted, 'eliminada')}`,
+    previewSql: 'Vista previa del SQL',
+    applied: (updated: number, inserted: number, deleted: number) =>
+      `Aplicado: ${filas(updated, 'actualizada')} · ${filas(inserted, 'insertada')} · ${filas(deleted, 'eliminada')}`,
+    loading: 'Cargando…',
+    noRowsMatch: 'Ninguna fila coincide',
+    noRows: 'Sin filas',
+    rowsRange: (from: number, to: number, filtered: boolean) =>
+      `Filas ${from}–${to}${filtered ? ' · filtradas' : ''}`,
+    rowsPerPage: 'Filas por página',
+    perPage: (n: number) => `${n} por página`,
+    previousPage: 'Página anterior',
+    nextPage: 'Página siguiente',
+    discard: 'Descartar',
+    apply: 'Aplicar',
+    applying: 'Aplicando…',
+    previewTitle: 'Cambios pendientes como SQL',
+    confirmTitle: '¿Aplicar los cambios en producción?',
+    confirmMarked: 'Esta conexión está marcada como',
+    production: 'Producción',
+    confirmChange: 'Vas a cambiar',
+    confirmCounts: (updated: number, inserted: number, deleted: number) =>
+      `${filas(updated, 'actualizada')}, ${filas(inserted, 'insertada')}, ${filas(deleted, 'eliminada')}`,
+    cancel: 'Cancelar',
+    applyToProduction: 'Aplicar en producción',
+
+    cellValue: 'Valor de la celda',
+    resizePanel: 'Cambiar el tamaño del panel',
+    value: 'Valor',
+    close: 'Cerrar',
+    pickCell: 'Elige una celda para ver su valor completo.',
+    characters: (count: string) => `${count} caracteres`,
+    showValueAs: 'Mostrar el valor como',
+    text: 'Texto',
+    jsonHint: 'Indentado, para un objeto o arreglo JSON',
+    wrapLines: 'Ajustar las líneas largas',
+    image: 'imagen',
+    valueOf: (column: string) => `Valor de ${column}`,
+    revert: 'Revertir',
+    save: 'Guardar',
+
+    copy: 'Copiar',
+    paste: 'Pegar',
+    edit: 'Editar',
+    setNull: 'Poner NULL',
+    setDefault: 'Poner DEFAULT',
+    generateUuid: 'Generar UUID',
+    openPointedRow: (value: string | null) => `Abrir la fila a la que apunta ${value}`,
+    openReferencedRow: 'Abrir la fila referenciada',
+    computedBadge: 'auto',
+
+    stateEdited: 'editado',
+    stateDeleted: 'eliminado',
+    stateNew: 'nuevo',
+    document: 'Documento',
+    keep: 'Mantener',
+  },
+})

@@ -10,6 +10,8 @@ import type { TableRef } from '../../domain/table'
 import type { ColumnInfo, ForeignKey } from '../table-structure/api'
 import { linkFilter, referencedTable } from './foreignLinks'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
 import { tableDataApi, type ApplySummary } from './api'
 import { EditableGrid } from './EditableGrid'
 import {
@@ -64,13 +66,11 @@ interface TableViewProps {
   onOpenTable: (table: TableRef, filter: RowFilter) => void
 }
 
-/** How the changes run, where it isn't one transaction that applies all or nothing. */
-const PREVIEW_NOTE = 'Runs in one transaction. If any row changed since it was loaded, none of it applies.'
-const PREVIEW_NOTES: Partial<Record<SqlDialect, string>> = {
-  mongodb:
-    'Runs in one transaction on replica sets and sharded clusters; a standalone server writes one change at a time, and a change it refuses leaves the ones before it written.',
-  cosmosdb:
-    'Writes one change at a time: Cosmos DB has no transaction across partitions. An item changed since it was read is left as it is, and the changes before it stay written.',
+/** How the changes run: one transaction that applies all or nothing, except where noted. */
+function previewNote(dialect: SqlDialect, m: typeof messages.en): string {
+  if (dialect === 'mongodb') return m.previewNoteMongodb
+  if (dialect === 'cosmosdb') return m.previewNoteCosmosdb
+  return m.previewNote
 }
 
 type Status =
@@ -94,6 +94,7 @@ export function TableView({
   columnInfo,
   onOpenTable,
 }: TableViewProps) {
+  const m = useMessages(messages)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const { page, error, loading, offset, hasPrevious, hasNext, previous, next, reload } = useRowsPage(
     connectionId,
@@ -201,7 +202,7 @@ export function TableView({
     }
   }
 
-  const noKey = 'This table has no primary key, so its rows cannot be identified safely to edit them'
+  const noKey = m.noKey
   const inspected = ((): InspectedCell | null => {
     const cell = picked && cellAt(edits, rows, columns, picked)
     if (!picked || !cell) return null
@@ -213,11 +214,11 @@ export function TableView({
       locked: !editable
         ? noKey
         : applying
-          ? 'Applying the changes'
+          ? m.applyingChanges
           : column.generated
-            ? 'Computed by the database, so it cannot be edited'
+            ? m.computed
             : cell.deleted
-              ? 'This row is marked for deletion'
+              ? m.rowDeleted
               : null,
     }
   })()
@@ -271,13 +272,7 @@ export function TableView({
             <>
               {documents !== undefined && (
                 <IconButton
-                  label={
-                    pending
-                      ? 'Apply or discard the changes to switch views'
-                      : showingDocuments
-                        ? 'Show as a table'
-                        : 'Show as JSON documents'
-                  }
+                  label={pending ? m.switchViewsLocked : showingDocuments ? m.showAsTable : m.showAsDocuments}
                   active={showingDocuments}
                   disabled={pending}
                   onClick={() => setAsDocuments(!asDocuments)}
@@ -286,26 +281,24 @@ export function TableView({
                 </IconButton>
               )}
               <IconButton
-                label={editable ? (showingDocuments ? 'Add document' : 'Add row') : noKey}
+                label={editable ? (showingDocuments ? m.addDocument : m.addRow) : noKey}
                 disabled={!editable || applying}
                 onClick={showingDocuments ? newDocument : () => change(addRow)}
               >
                 <Icon name="plus" />
               </IconButton>
               <IconButton
-                label={editable ? 'Delete selected rows' : noKey}
+                label={editable ? m.deleteSelected : noKey}
                 disabled={!editable || selected.size === 0 || applying}
                 onClick={deleteSelected}
               >
                 <Icon name="trash" />
               </IconButton>
-              <IconButton label="Reload rows" disabled={lockPaging} onClick={reload}>
+              <IconButton label={m.reloadRows} disabled={lockPaging} onClick={reload}>
                 <Icon name="refresh" />
               </IconButton>
               <IconButton
-                label={
-                  showingDocuments ? 'Cells are inspected in the table' : "Inspect the cell's value (⇧↵)"
-                }
+                label={showingDocuments ? m.inspectInTable : m.inspectCell}
                 active={inspecting && !showingDocuments}
                 disabled={showingDocuments}
                 onClick={() => setInspecting(!inspecting)}
@@ -325,7 +318,7 @@ export function TableView({
               edits={edits}
               language={dialect === 'mongodb' ? 'javascript' : 'json'}
               firstNumber={offset + 1}
-              locked={!editable ? noKey : applying ? 'Applying the changes' : null}
+              locked={!editable ? noKey : applying ? m.applyingChanges : null}
               selected={selected}
               onSelect={select}
               editing={editingDocument}
@@ -388,21 +381,17 @@ export function TableView({
       <div className={styles.footer} data-state={pending ? 'pending' : status.state}>
         {pending && (
           <>
-            <Badge tone="warn">
-              {total} pending {total === 1 ? 'change' : 'changes'}
-            </Badge>
-            <span className={styles.detail}>
-              {updated} updated · {inserted} inserted · {deleted} deleted
-            </span>
+            <Badge tone="warn">{m.pendingChanges(total)}</Badge>
+            <span className={styles.detail}>{m.changeCounts(updated, inserted, deleted)}</span>
             <Button variant="ghost" disabled={applying} onClick={showPreview}>
-              Preview SQL
+              {m.previewSql}
             </Button>
           </>
         )}
         {!pending && status.state === 'applied' && (
           <span className={styles.applied}>
-            <Icon name="check" /> Applied: {status.summary.updated} updated · {status.summary.inserted}{' '}
-            inserted · {status.summary.deleted} deleted
+            <Icon name="check" />{' '}
+            {m.applied(status.summary.updated, status.summary.inserted, status.summary.deleted)}
           </span>
         )}
         {status.state === 'failed' && (
@@ -414,41 +403,41 @@ export function TableView({
         <span className={styles.spacer} />
         <span className={styles.range} aria-live="polite">
           {loading
-            ? 'Loading…'
+            ? m.loading
             : rowCount === 0
               ? isFiltered(filter)
-                ? 'No rows match'
-                : 'No rows'
-              : `Rows ${offset + 1}–${offset + rowCount}${isFiltered(filter) ? ' · filtered' : ''}`}
+                ? m.noRowsMatch
+                : m.noRows
+              : m.rowsRange(offset + 1, offset + rowCount, isFiltered(filter))}
         </span>
         <label className={styles.pageSize}>
           <select
-            aria-label="Rows per page"
+            aria-label={m.rowsPerPage}
             value={pageSize}
             disabled={lockPaging}
             onChange={(event) => setPageSize(Number(event.target.value))}
           >
             {PAGE_SIZES.map((size) => (
               <option key={size} value={size}>
-                {size} per page
+                {m.perPage(size)}
               </option>
             ))}
           </select>
         </label>
-        <IconButton label="Previous page" disabled={!hasPrevious || lockPaging} onClick={previous}>
+        <IconButton label={m.previousPage} disabled={!hasPrevious || lockPaging} onClick={previous}>
           <Icon name="chevronLeft" />
         </IconButton>
-        <IconButton label="Next page" disabled={!hasNext || lockPaging} onClick={next}>
+        <IconButton label={m.nextPage} disabled={!hasNext || lockPaging} onClick={next}>
           <Icon name="chevronRight" />
         </IconButton>
         {pending && (
           <>
             <span className={styles.divider} />
             <Button disabled={applying} onClick={discard}>
-              Discard
+              {m.discard}
             </Button>
             <Button variant="primary" disabled={applying} onClick={requestApply}>
-              {applying ? 'Applying…' : 'Apply'}
+              {applying ? m.applying : m.apply}
               <span className={styles.shortcut}>⌘S</span>
             </Button>
           </>
@@ -456,12 +445,8 @@ export function TableView({
       </div>
 
       {preview && (
-        <Modal
-          title="Pending changes as SQL"
-          onClose={() => setPreview(null)}
-          className={styles.previewDialog}
-        >
-          <p className={styles.previewNote}>{PREVIEW_NOTES[dialect] ?? PREVIEW_NOTE}</p>
+        <Modal title={m.previewTitle} onClose={() => setPreview(null)} className={styles.previewDialog}>
+          <p className={styles.previewNote}>{previewNote(dialect, m)}</p>
           <div className={styles.previewCode}>
             <SqlCode
               value={preview.map((line) => (line.endsWith(';') ? line : `${line};`)).join('\n')}
@@ -472,21 +457,21 @@ export function TableView({
       )}
 
       {confirming && (
-        <Modal title="Apply changes to production?" onClose={() => setConfirming(false)}>
+        <Modal title={m.confirmTitle} onClose={() => setConfirming(false)}>
           <div className={styles.confirm}>
             <p>
-              This connection is marked <strong>Production</strong>. You are about to change{' '}
+              {m.confirmMarked} <strong>{m.production}</strong>. {m.confirmChange}{' '}
               <code>
                 {table.schema}.{table.name}
               </code>
-              : {updated} updated, {inserted} inserted, {deleted} deleted.
+              : {m.confirmCounts(updated, inserted, deleted)}.
             </p>
             <div className={styles.confirmActions}>
               <Button data-autofocus onClick={() => setConfirming(false)}>
-                Cancel
+                {m.cancel}
               </Button>
               <Button variant="primary" onClick={() => void apply()}>
-                Apply to production
+                {m.applyToProduction}
               </Button>
             </div>
           </div>

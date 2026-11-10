@@ -11,8 +11,10 @@ import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { isNumericType, isUuidType, shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
 import { keepCursor } from '../../lib/cursor'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
+import { messages } from './messages'
 import styles from './EditableGrid.module.css'
 
 type Value = string | null
@@ -51,7 +53,6 @@ interface EditableGridProps {
 
 type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
 
-const COMPUTED = 'Computed by the database, so it cannot be edited'
 const MIN_WIDTH = 48
 const MOVES: Record<string, [number, number]> = {
   ArrowUp: [-1, 0],
@@ -63,6 +64,7 @@ const MOVES: Record<string, [number, number]> = {
 /** The table's rows with pending edits shown in place: new rows on top, deleted rows struck out. */
 export function EditableGrid(props: EditableGridProps) {
   const { columns, rows, firstRowNumber, edits, editable, selected, onSelect, active, onActivate } = props
+  const m = useMessages(messages)
   const [editing, setEditing] = useState<{ at: Editing; column: number } | null>(null)
   const table = useRef<HTMLTableElement>(null)
   // A grid closed while it had focus gives the pointer back to the usual rules.
@@ -170,7 +172,7 @@ export function EditableGrid(props: EditableGridProps) {
   const menuItems = (at: Editing, column: number, state: CellState): MenuItem[] => {
     const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
     const copy: MenuItem = {
-      label: 'Copy',
+      label: m.copy,
       onSelect: () => {
         const text = cellText({ row: id, column })
         if (text !== null) void navigator.clipboard.writeText(text)
@@ -182,21 +184,19 @@ export function EditableGrid(props: EditableGridProps) {
     const info = props.columnInfo?.[name]
     return [
       copy,
-      { label: 'Paste', onSelect: () => paste(at, column) },
-      { label: 'Edit', onSelect: () => setEditing({ at, column }) },
-      ...((info?.nullable ?? true)
-        ? [{ label: 'Set NULL', onSelect: () => setValue(at, column, null) }]
-        : []),
+      { label: m.paste, onSelect: () => paste(at, column) },
+      { label: m.edit, onSelect: () => setEditing({ at, column }) },
+      ...((info?.nullable ?? true) ? [{ label: m.setNull, onSelect: () => setValue(at, column, null) }] : []),
       ...(info?.default
-        ? [{ label: 'Set DEFAULT', disabled: state.unset, onSelect: () => setValue(at, column, DEFAULT) }]
+        ? [{ label: m.setDefault, disabled: state.unset, onSelect: () => setValue(at, column, DEFAULT) }]
         : []),
       ...(isUuidType(dataType)
-        ? [{ label: 'Generate UUID', onSelect: () => setValue(at, column, crypto.randomUUID()) }]
+        ? [{ label: m.generateUuid, onSelect: () => setValue(at, column, crypto.randomUUID()) }]
         : []),
       ...('row' in at
         ? [
             {
-              label: 'Revert',
+              label: m.revert,
               disabled: !state.edited,
               // Setting the loaded value back drops the change.
               onSelect: () => props.onEditCell(at.row, column, rows[at.row][column]),
@@ -228,8 +228,8 @@ export function EditableGrid(props: EditableGridProps) {
         <button
           type="button"
           className={styles.link}
-          aria-label={`Open the row ${value} points to`}
-          title="Open the referenced row"
+          aria-label={m.openPointedRow(value)}
+          title={m.openReferencedRow}
           onClick={(event) => {
             event.stopPropagation()
             link()
@@ -321,7 +321,7 @@ export function EditableGrid(props: EditableGridProps) {
                 <th
                   key={column.name}
                   style={sized[c]}
-                  title={column.generated ? `${column.dataType} · ${COMPUTED}` : column.dataType}
+                  title={column.generated ? `${column.dataType} · ${m.computed}` : column.dataType}
                   aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
                 >
                   <button
@@ -332,7 +332,7 @@ export function EditableGrid(props: EditableGridProps) {
                   >
                     {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
                     <span className={styles.name}>{column.name}</span>
-                    {column.generated && <span className={styles.computed}>auto</span>}
+                    {column.generated && <span className={styles.computed}>{m.computedBadge}</span>}
                     <span className={styles.type}>{shortTypeName(column.dataType)}</span>
                     {/* A click sorts ascending, then descending, then not at all. The mark stays
                         while sorting is off, so the column keeps its width. */}

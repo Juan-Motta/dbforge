@@ -1,8 +1,10 @@
 import { useState, type KeyboardEvent } from 'react'
 import { Button } from '../../components/Button'
 import { CodeEditor } from '../../components/code/CodeEditor'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { documentTokens } from './documentTokens'
 import type { Edits, RowChange } from './edits'
+import { messages } from './messages'
 import styles from './DocumentList.module.css'
 
 type Values = Record<string, string | null>
@@ -51,6 +53,8 @@ export function DocumentList({
   onEditNew,
   onRemoveNew,
 }: DocumentListProps) {
+  const m = useMessages(messages)
+  const stateLabels = { edited: m.stateEdited, deleted: m.stateDeleted, new: m.stateNew }
   const card = (props: {
     id: string
     label: string
@@ -71,7 +75,7 @@ export function DocumentList({
       >
         <header className={styles.header}>
           {props.label && <span className={styles.number}>{props.label}</span>}
-          {props.state && <span className={styles.state}>{props.state}</span>}
+          {props.state && <span className={styles.state}>{stateLabels[props.state]}</span>}
         </header>
         {isEditing ? (
           <DocumentEditor
@@ -161,6 +165,7 @@ function DocumentEditor({
   onSave: (text: string) => Promise<string | null>
   onCancel: () => void
 }) {
+  const m = useMessages(messages)
   const [draft, setDraft] = useState(initial)
   const [problem, setProblem] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -193,7 +198,7 @@ function DocumentEditor({
           value={draft}
           onChange={setDraft}
           language={language}
-          label="Document"
+          label={m.document}
           autoFocus
           // A new document opens on its empty line, inside the braces.
           cursor={initial === NEW_DOCUMENT ? NEW_DOCUMENT.indexOf('\n  ') + 3 : 0}
@@ -203,9 +208,9 @@ function DocumentEditor({
         <span className={styles.problem} title={problem ?? undefined}>
           {problem}
         </span>
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>{m.cancel}</Button>
         <Button variant="primary" disabled={saving} onClick={() => void save()}>
-          Keep
+          {m.keep}
           <span className={styles.shortcut}>⌘↵</span>
         </Button>
       </footer>

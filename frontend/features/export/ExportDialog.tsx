@@ -4,9 +4,11 @@ import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import type { TableRef } from '../../domain/table'
 import { errorMessage } from '../../lib/errors'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { isFiltered, type RowFilter } from '../table-data/rowFilter'
 import { chooseFile, exportApi, type RowsSource } from './api'
 import { FORMATS, type ExportFormat } from './formats'
+import { messages } from './messages'
 import styles from './ExportDialog.module.css'
 
 /** A whole table, streamed from the server, or rows the UI already holds. */
@@ -27,6 +29,7 @@ interface ExportDialogProps {
 }
 
 export function ExportDialog({ source, onClose }: ExportDialogProps) {
+  const m = useMessages(messages)
   const [format, setFormat] = useState<ExportFormat>('csv')
   const [status, setStatus] = useState<Status>({ state: 'idle' })
   const name = source.kind === 'table' ? source.table.name : source.name
@@ -63,23 +66,21 @@ export function ExportDialog({ source, onClose }: ExportDialogProps) {
     })
 
   return (
-    <Modal title="Export data" onClose={onClose} className={styles.dialog}>
+    <Modal title={m.title} onClose={onClose} className={styles.dialog}>
       <div className={styles.body}>
         <div>
-          <span className={styles.label}>Source</span>
+          <span className={styles.label}>{m.source}</span>
           <p className={styles.source}>
             <Icon name={source.kind === 'table' ? 'table' : 'code'} />
             {source.kind === 'table' ? (
               <>
                 {source.table.schema}.{source.table.name}
-                <span className="muted">
-                  · {isFiltered(source.filter) ? 'rows the filter keeps, in its order' : 'every row'}
-                </span>
+                <span className="muted">· {isFiltered(source.filter) ? m.filteredRows : m.everyRow}</span>
               </>
             ) : (
               <>
-                Query result
-                <span className="muted">· {source.rows.length.toLocaleString('en-US')} rows shown</span>
+                {m.queryResult}
+                <span className="muted">· {m.rowsShown(source.rows.length.toLocaleString('en-US'))}</span>
               </>
             )}
           </p>
@@ -87,7 +88,7 @@ export function ExportDialog({ source, onClose }: ExportDialogProps) {
 
         <div>
           <span className={styles.label} id="export-format">
-            Format
+            {m.format}
           </span>
           <div role="radiogroup" aria-labelledby="export-format" className={styles.formats}>
             {FORMATS.map((option) => (
@@ -105,34 +106,34 @@ export function ExportDialog({ source, onClose }: ExportDialogProps) {
               >
                 <span className={styles.extension}>.{option.extension}</span>
                 <strong>{option.label}</strong>
-                <span className={styles.description}>{option.description}</span>
+                <span className={styles.description}>{m[`${option.id}Description`]}</span>
               </button>
             ))}
           </div>
         </div>
 
         <p className={styles.status} role="status">
-          {status.state === 'working' && (source.kind === 'table' ? 'Exporting…' : 'Working…')}
+          {status.state === 'working' && (source.kind === 'table' ? m.exporting : m.working)}
           {status.state === 'saved' && (
             <>
-              Exported {status.rows.toLocaleString('en-US')} rows to <code>{status.path}</code>
+              {m.exportedTo(status.rows.toLocaleString('en-US'))} <code>{status.path}</code>
             </>
           )}
-          {status.state === 'copied' && 'Copied to the clipboard.'}
+          {status.state === 'copied' && m.copied}
           {status.state === 'failed' && <span className={styles.error}>{status.error}</span>}
         </p>
       </div>
 
       <footer className={styles.footer}>
-        <Button onClick={onClose}>{status.state === 'saved' ? 'Done' : 'Cancel'}</Button>
+        <Button onClick={onClose}>{status.state === 'saved' ? m.done : m.cancel}</Button>
         {source.kind === 'rows' && (
           <Button disabled={working} onClick={copy}>
-            Copy to clipboard
+            {m.copyToClipboard}
           </Button>
         )}
         <Button variant="primary" disabled={working} onClick={exportToFile}>
           <Icon name="download" />
-          Export…
+          {m.export}
         </Button>
       </footer>
     </Modal>
