@@ -191,9 +191,15 @@ pub async fn cancel_query(
 /// Closes the console's session, cancelling its query first if one is running.
 /// Uncommitted work is rolled back by the server.
 #[tauri::command]
-pub async fn close_session(sessions: State<'_, QuerySessions>, session_id: String) -> Result<()> {
+pub async fn close_session(
+    sessions: State<'_, QuerySessions>,
+    log: State<'_, StatementLog>,
+    session_id: String,
+) -> Result<()> {
     match sessions.take(&session_id) {
-        Some(session) if session.is_running() => session.cancel().await,
+        Some(session) if session.is_running() => {
+            statement_log::scoped(&log, &session.connection.id, Origin::Console, session.cancel()).await
+        }
         // Dropping the last reference closes the connection.
         _ => Ok(()),
     }

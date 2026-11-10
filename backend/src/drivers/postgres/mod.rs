@@ -23,6 +23,7 @@ use super::{
 };
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
+use crate::statement_log;
 
 /// A PostgreSQL connection whose statements are recorded in the statement log.
 pub(super) type Conn = Logged<PgConnection>;
@@ -360,7 +361,9 @@ pub async fn explain(
 /// over a separate connection because the session's own one is busy.
 pub async fn cancel(connection: &Connection, password: Option<&str>, database: Option<&str>, pid: i32) -> Result<()> {
     let mut conn = connect(connection, password, database).await?;
-    sqlx::query("SELECT pg_cancel_backend($1)").bind(pid).execute(&mut conn).await?;
+    let cancel = sqlx::query("SELECT pg_cancel_backend($1)").bind(pid).execute(&mut conn);
+    // Recorded with the process written in, so it can be run again as is.
+    statement_log::shown_as(format!("SELECT pg_cancel_backend({pid})"), cancel).await?;
     conn.close().await?;
     Ok(())
 }
