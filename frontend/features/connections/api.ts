@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { Connection } from '../../domain/connection'
 
 /** Sent to the backend to create (no id), update or test a connection. */
@@ -17,6 +18,14 @@ export interface CredentialStorageInfo {
   filePath: string
 }
 
+/** Where a storage switch is: the password it is handling now, of `total`. */
+export interface SwitchProgress {
+  /** Copying into the new place, or removing the copies left in the old one. */
+  phase: 'moving' | 'removing'
+  current: number
+  total: number
+}
+
 export const connectionsApi = {
   list: () => invoke<Connection[]>('list_connections'),
   save: (input: ConnectionInput) => invoke<Connection>('save_connection', { input }),
@@ -27,4 +36,7 @@ export const connectionsApi = {
   /** Moves every saved password to `storage`; nothing changes if one can't be moved. */
   setCredentialStorage: (storage: CredentialStorage) =>
     invoke<CredentialStorageInfo>('set_credential_storage', { storage }),
+  /** Each step of a storage switch; resolves to the function that stops listening. */
+  onSwitchProgress: (handler: (progress: SwitchProgress) => void) =>
+    listen<SwitchProgress>('credential-progress', (event) => handler(event.payload)),
 }

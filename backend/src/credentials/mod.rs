@@ -22,20 +22,18 @@ trait SecretStore: Send + Sync {
     fn delete(&self, connection_id: &str) -> Result<()>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Storage {
-    #[default]
     Keychain,
     File,
 }
 
 /// The settings DBForge keeps for itself (the interface's own preferences
 /// live in the web view).
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
-    #[serde(default)]
     credential_storage: Storage,
 }
 
@@ -48,6 +46,26 @@ pub struct StorageInfo {
     file_path: String,
 }
 
+/// Where a switch is, reported before each password it touches: the
+/// keychain may stop to ask the user for each one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchProgress {
+    pub phase: Phase,
+    /// 1-based: the password being handled now.
+    pub current: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Phase {
+    /// Copying into the new place.
+    Moving,
+    /// Removing the copies left in the old place.
+    Removing,
+}
+
 pub struct Credentials {
     settings_path: PathBuf,
     storage: Mutex<Storage>,
@@ -56,25 +74,33 @@ pub struct Credentials {
 }
 
 impl Credentials {
-    /// Reads the chosen storage from `settings.json` in `dir`; the keychain
-    /// when nothing was chosen.
+    /// Reads the chosen storage from `settings.json` in `dir`. With nothing
+    /// chosen yet a new install uses the encrypted file, while an install that
+    /// already has connections keeps the keychain, where their passwords are;
+    /// that choice is saved so it never changes by itself.
     pub fn load(dir: PathBuf) -> Result<Self> {
         Self::with(dir, Box::new(Keychain), file::machine_id)
     }
 
     fn with(dir: PathBuf, keychain: Box<dyn SecretStore>, machine_id: MachineId) -> Result<Self> {
         let settings_path = dir.join("settings.json");
-        let settings: Settings = match fs::read_to_string(&settings_path) {
-            Ok(json) => serde_json::from_str(&json)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => Settings::default(),
+        let saved = match fs::read_to_string(&settings_path) {
+            Ok(json) => Some(serde_json::from_str::<Settings>(&json)?.credential_storage),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
-        Ok(Self {
-            settings_path,
-            storage: Mutex::new(settings.credential_storage),
-            keychain,
-            file: EncryptedFile::new(dir, machine_id),
-        })
+        let older_install = saved.is_none() && dir.join("connections.json").exists();
+        let storage = match saved {
+            Some(storage) => storage,
+            None if older_install => Storage::Keychain,
+            None => Storage::File,
+        };
+        let credentials =
+            Self { settings_path, storage: Mutex::new(storage), keychain, file: EncryptedFile::new(dir, machine_id) };
+        if older_install {
+            credentials.save(storage)?;
+        }
+        Ok(credentials)
     }
 
     pub fn info(&self) -> StorageInfo {
@@ -103,13 +129,13 @@ impl Credentials {
     /// Moves the passwords of `connection_ids` to `to`, then saves the choice.
     /// If one can't be moved, or the choice can't be saved, nothing switches
     /// and the copies already made are removed again.
-    pub fn switch(&self, to: Storage, connection_ids: &[String]) -> Result<()> {
+    pub fn switch(&self, to: Storage, connection_ids: &[String], report: &dyn Fn(SwitchProgress)) -> Result<()> {
         let mut storage = self.lock();
         if *storage == to {
             return Ok(());
         }
         let (from, into) = (self.store(*storage), self.store(to));
-        let moved = copy_all(from, into, connection_ids)?;
+        let moved = copy_all(from, into, connection_ids, report)?;
         if let Err(error) = self.save(to) {
             undo(into, &moved);
             return Err(error);
@@ -117,7 +143,16 @@ impl Credentials {
         *storage = to;
         // The passwords now live in `to`; copies left in the old place would
         // keep them where the user chose not to.
-        let left: Vec<&str> = moved.iter().filter(|id| from.delete(id).is_err()).map(String::as_str).collect();
+        let total = moved.len();
+        let left: Vec<&str> = moved
+            .iter()
+            .enumerate()
+            .filter(|(index, id)| {
+                report(SwitchProgress { phase: Phase::Removing, current: index + 1, total });
+                from.delete(id).is_err()
+            })
+            .map(|(_, id)| id.as_str())
+            .collect();
         if !left.is_empty() {
             return Err(AppError::Invalid(format!(
                 "Passwords are now saved in the new place, but {} couldn't be removed from the old one.",
@@ -157,9 +192,16 @@ impl Credentials {
 /// connection without a password in `from` has none in `into` either, so an
 /// old copy left there by an earlier switch never comes back. On the first
 /// failure the copies are removed again.
-fn copy_all(from: &dyn SecretStore, into: &dyn SecretStore, connection_ids: &[String]) -> Result<Vec<String>> {
+fn copy_all(
+    from: &dyn SecretStore,
+    into: &dyn SecretStore,
+    connection_ids: &[String],
+    report: &dyn Fn(SwitchProgress),
+) -> Result<Vec<String>> {
     let mut moved = Vec::new();
-    for id in connection_ids {
+    let total = connection_ids.len();
+    for (index, id) in connection_ids.iter().enumerate() {
+        report(SwitchProgress { phase: Phase::Moving, current: index + 1, total });
         let copied = from.get(id).and_then(|password| match password {
             Some(password) => into.set(id, &password).map(|()| true),
             None => into.delete(id).map(|()| false),
@@ -225,15 +267,36 @@ mod tests {
     }
 
     #[test]
+    fn a_new_install_uses_the_file_and_an_older_one_keeps_the_keychain() {
+        let fresh = scratch();
+        let credentials =
+            Credentials::with(fresh.path().to_path_buf(), Box::new(keychain(&[], None)), this_machine).unwrap();
+        assert_eq!(credentials.info().storage, Storage::File);
+
+        // Saved connections from before this setting have their passwords in the keychain.
+        let older = scratch();
+        fs::write(older.path().join("connections.json"), "[]").unwrap();
+        let credentials =
+            Credentials::with(older.path().to_path_buf(), Box::new(keychain(&[], None)), this_machine).unwrap();
+        assert_eq!(credentials.info().storage, Storage::Keychain);
+        // The choice is recorded, so it stays even once connections.json changes.
+        fs::remove_file(older.path().join("connections.json")).unwrap();
+        let reopened =
+            Credentials::with(older.path().to_path_buf(), Box::new(keychain(&[], None)), this_machine).unwrap();
+        assert_eq!(reopened.info().storage, Storage::Keychain);
+    }
+
+    #[test]
     fn starts_in_the_keychain_and_switches_with_every_password() {
         let scratch = scratch();
         let dir = scratch.path().to_path_buf();
+        fs::write(dir.join("connections.json"), "[]").unwrap();
         let fake = keychain(&[("a", "one"), ("b", "two")], None);
         let credentials = Credentials::with(dir.clone(), Box::new(fake.clone()), this_machine).unwrap();
         assert_eq!(credentials.info().storage, Storage::Keychain);
         assert_eq!(credentials.get("a").unwrap().as_deref(), Some("one"));
 
-        credentials.switch(Storage::File, &ids(&["a", "b", "c"])).unwrap();
+        credentials.switch(Storage::File, &ids(&["a", "b", "c"]), &|_| {}).unwrap();
         assert_eq!(credentials.info().storage, Storage::File);
         assert_eq!(credentials.get("a").unwrap().as_deref(), Some("one"));
         assert_eq!(credentials.get("b").unwrap().as_deref(), Some("two"));
@@ -247,20 +310,44 @@ mod tests {
         reopened.set("c", "").unwrap();
         assert_eq!(reopened.get("c").unwrap(), None);
 
-        reopened.switch(Storage::Keychain, &ids(&["a", "b"])).unwrap();
+        reopened.switch(Storage::Keychain, &ids(&["a", "b"]), &|_| {}).unwrap();
         assert_eq!(fake.passwords.lock().unwrap().get("b").map(String::as_str), Some("two"));
         assert_eq!(reopened.file.get("a").unwrap(), None, "passwords left in the file");
+    }
+
+    #[test]
+    fn reports_each_password_it_moves_and_removes() {
+        let scratch = scratch();
+        fs::write(scratch.path().join("connections.json"), "[]").unwrap();
+        let fake = keychain(&[("a", "one"), ("c", "three")], None);
+        let credentials = Credentials::with(scratch.path().to_path_buf(), Box::new(fake), this_machine).unwrap();
+        let seen = Mutex::new(Vec::new());
+        credentials
+            .switch(Storage::File, &ids(&["a", "b", "c"]), &|progress| seen.lock().unwrap().push(progress))
+            .unwrap();
+        let step = |phase, current, total| SwitchProgress { phase, current, total };
+        assert_eq!(
+            seen.into_inner().unwrap(),
+            [
+                step(Phase::Moving, 1, 3),
+                step(Phase::Moving, 2, 3),
+                step(Phase::Moving, 3, 3),
+                step(Phase::Removing, 1, 2),
+                step(Phase::Removing, 2, 2),
+            ]
+        );
     }
 
     #[test]
     fn a_stale_copy_in_the_new_place_never_comes_back() {
         let scratch = scratch();
         let dir = scratch.path().to_path_buf();
+        fs::write(dir.join("connections.json"), "[]").unwrap();
         // "a" has no password in the keychain, but an old copy sits in the file.
         let fake = keychain(&[], None);
         let credentials = Credentials::with(dir.clone(), Box::new(fake.clone()), this_machine).unwrap();
         credentials.file.set("a", "stale").unwrap();
-        credentials.switch(Storage::File, &ids(&["a"])).unwrap();
+        credentials.switch(Storage::File, &ids(&["a"]), &|_| {}).unwrap();
         assert_eq!(credentials.get("a").unwrap(), None);
     }
 
@@ -268,12 +355,14 @@ mod tests {
     fn a_password_that_cant_be_moved_switches_nothing() {
         let scratch = scratch();
         let dir = scratch.path().to_path_buf();
+        fs::write(scratch.path().join("connections.json"), "[]").unwrap();
         let fake = keychain(&[("a", "one"), ("b", "two")], Some("b"));
         let credentials = Credentials::with(dir.clone(), Box::new(fake.clone()), this_machine).unwrap();
-        let error = credentials.switch(Storage::File, &ids(&["a", "b"])).unwrap_err();
+        let error = credentials.switch(Storage::File, &ids(&["a", "b"]), &|_| {}).unwrap_err();
         assert_eq!(error.to_string(), "keychain refused");
         assert_eq!(credentials.info().storage, Storage::Keychain);
-        assert!(!dir.join("settings.json").exists());
+        let reopened = Credentials::with(dir.clone(), Box::new(fake.clone()), this_machine).unwrap();
+        assert_eq!(reopened.info().storage, Storage::Keychain, "the failed switch was saved");
         assert_eq!(credentials.file.get("a").unwrap(), None, "a copy was left in the file");
         assert_eq!(fake.passwords.lock().unwrap().get("a").map(String::as_str), Some("one"));
     }

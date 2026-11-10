@@ -343,9 +343,14 @@ export function installMockBackend() {
         }
         case 'credential_storage':
           return delay(credentials)
-        case 'set_credential_storage':
+        case 'set_credential_storage': {
+          for (let current = 1; current <= connections.length; current++) {
+            await emit('credential-progress', { phase: 'moving', current, total: connections.length })
+            await new Promise((resolve) => setTimeout(resolve, 400))
+          }
           credentials = { ...credentials, storage: payload.storage as 'keychain' | 'file' }
           return delay(credentials)
+        }
         case 'plugin:app|version':
           return '0.1.0'
         case 'cancel_dump':

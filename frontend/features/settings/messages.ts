@@ -25,6 +25,9 @@ export const messages = defineMessages({
       'A file only this computer can read, so a copy elsewhere is useless. Nothing is ever asked. Anyone using your account on this computer could still read it.',
     fileLocation: 'Encrypted file',
     moving: 'Moving your passwords…',
+    movingOne: (current: number, total: number) => `Moving password ${current} of ${total}…`,
+    removingOne: (current: number, total: number) => `Removing the old copy ${current} of ${total}…`,
+    systemMayAsk: 'Your system may ask for permission for each one.',
     about: 'About',
     tagline: 'A fast desktop viewer and editor for your databases.',
     version: 'Version',
@@ -56,6 +59,9 @@ export const messages = defineMessages({
       'Un archivo que solo este equipo puede leer, así que una copia en otro lado no sirve. Nunca se pide nada. Alguien que use tu cuenta en este equipo sí podría leerlo.',
     fileLocation: 'Archivo cifrado',
     moving: 'Moviendo tus contraseñas…',
+    movingOne: (current: number, total: number) => `Moviendo la contraseña ${current} de ${total}…`,
+    removingOne: (current: number, total: number) => `Quitando la copia anterior ${current} de ${total}…`,
+    systemMayAsk: 'Tu sistema puede pedir permiso para cada una.',
     about: 'Acerca de',
     tagline: 'Un visor y editor de escritorio rápido para tus bases de datos.',
     version: 'Versión',
@@ -63,3 +69,5 @@ export const messages = defineMessages({
     engines: 'Se conecta a',
   },
 })
+
+export type SettingsMessages = typeof messages.en

@@ -1,10 +1,10 @@
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::model::{Connection, ConnectionInput};
 use super::store::ConnectionStore;
-use crate::credentials::{Storage, StorageInfo};
+use crate::credentials::{Storage, StorageInfo, SwitchProgress};
 use crate::drivers;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 
 #[tauri::command]
 pub fn list_connections(store: State<'_, ConnectionStore>) -> Vec<Connection> {
@@ -47,10 +47,21 @@ pub fn credential_storage(store: State<'_, ConnectionStore>) -> StorageInfo {
     store.credentials().info()
 }
 
-/// Moves every saved password to `storage` and keeps it as the choice.
+/// Moves every saved password to `storage` and keeps it as the choice,
+/// emitting `credential-progress` before each one. It runs off the main
+/// thread: the keychain may stop to ask the user, and the window must keep
+/// drawing meanwhile.
 #[tauri::command]
-pub fn set_credential_storage(store: State<'_, ConnectionStore>, storage: Storage) -> Result<StorageInfo> {
-    let ids: Vec<String> = store.list().into_iter().map(|connection| connection.id).collect();
-    store.credentials().switch(storage, &ids)?;
-    Ok(store.credentials().info())
+pub async fn set_credential_storage(app: AppHandle, storage: Storage) -> Result<StorageInfo> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<ConnectionStore>();
+        let ids: Vec<String> = store.list().into_iter().map(|connection| connection.id).collect();
+        let report = |progress: SwitchProgress| {
+            let _ = app.emit("credential-progress", progress);
+        };
+        store.credentials().switch(storage, &ids, &report)?;
+        Ok(store.credentials().info())
+    })
+    .await
+    .map_err(|error| AppError::Invalid(format!("Moving the passwords stopped: {error}")))?
 }

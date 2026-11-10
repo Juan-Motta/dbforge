@@ -6,8 +6,13 @@ import { ENGINE_LABELS } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
 import { LANGUAGES } from '../../lib/i18n/language'
 import { useLanguage, useMessages } from '../../lib/i18n/useLanguage'
-import { connectionsApi, type CredentialStorage, type CredentialStorageInfo } from '../connections/api'
-import { messages } from './messages'
+import {
+  connectionsApi,
+  type CredentialStorage,
+  type CredentialStorageInfo,
+  type SwitchProgress,
+} from '../connections/api'
+import { messages, type SettingsMessages } from './messages'
 import type { ThemePreference } from './theme'
 import styles from './SettingsDialog.module.css'
 
@@ -129,6 +134,7 @@ function Passwords() {
   const m = useMessages(messages)
   const [info, setInfo] = useState<CredentialStorageInfo | null>(null)
   const [moving, setMoving] = useState(false)
+  const [progress, setProgress] = useState<SwitchProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -145,7 +151,9 @@ function Passwords() {
   const choose = async (storage: CredentialStorage) => {
     if (moving || info?.storage === storage) return
     setMoving(true)
+    setProgress(null)
     setError(null)
+    const stopListening = await connectionsApi.onSwitchProgress(setProgress)
     try {
       setInfo(await connectionsApi.setCredentialStorage(storage))
     } catch (failure) {
@@ -153,6 +161,7 @@ function Passwords() {
       // A partly finished switch may still have changed the choice.
       setInfo(await connectionsApi.credentialStorage().catch(() => info))
     } finally {
+      stopListening()
       setMoving(false)
     }
   }
@@ -191,10 +200,24 @@ function Passwords() {
         </span>
       </div>
       <p className={styles.status} role="status">
-        {moving ? m.moving : error && <span className={styles.error}>{error}</span>}
+        {moving ? (
+          <>
+            {progressText(progress, m)}
+            {/* The keychain can stop to ask for each password; say so, or the switch looks stuck. */}
+            {info?.storage === 'keychain' && <span className={styles.help}> {m.systemMayAsk}</span>}
+          </>
+        ) : (
+          error && <span className={styles.error}>{error}</span>
+        )}
       </p>
     </>
   )
+}
+
+function progressText(progress: SwitchProgress | null, m: SettingsMessages): string {
+  if (progress === null) return m.moving
+  const write = progress.phase === 'moving' ? m.movingOne : m.removingOne
+  return write(progress.current, progress.total)
 }
 
 function About() {
