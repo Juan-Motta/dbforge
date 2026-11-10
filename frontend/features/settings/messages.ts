@@ -23,10 +23,12 @@ export const messages = defineMessages({
     keychain: 'System keychain',
     file: 'Encrypted file',
     keychainHelp:
-      'Your system protects them: Keychain on macOS, Credential Manager on Windows, Secret Service on Linux.',
+      'Keychain on macOS, Credential Manager on Windows, Secret Service on Linux. The system may ask before handing them over.',
     fileHelp:
-      'A file only this computer can read, so a copy elsewhere is useless. Nothing is ever asked. Anyone using your account on this computer could still read it.',
-    fileLocation: 'Encrypted file',
+      'Encrypted with a key tied to this computer, so a copy elsewhere can’t be read. Never asks; anyone using your account here could read it.',
+    fileLocation: 'File location',
+    movedTo: (storage: string) => `Your passwords are now in the ${storage.toLowerCase()}`,
+    moveFailed: 'Couldn’t move your passwords',
     moving: 'Moving your passwords…',
     movingOne: (current: number, total: number) => `Moving password ${current} of ${total}…`,
     removingOne: (current: number, total: number) => `Removing the old copy ${current} of ${total}…`,
@@ -61,10 +63,12 @@ export const messages = defineMessages({
     keychain: 'Llavero del sistema',
     file: 'Archivo cifrado',
     keychainHelp:
-      'Las protege tu sistema: Llavero en macOS, Administrador de credenciales en Windows, Secret Service en Linux.',
+      'Llavero en macOS, Administrador de credenciales en Windows, Secret Service en Linux. El sistema puede pedir permiso antes de entregarlas.',
     fileHelp:
-      'Un archivo que solo este equipo puede leer, así que una copia en otro lado no sirve. Nunca se pide nada. Alguien que use tu cuenta en este equipo sí podría leerlo.',
-    fileLocation: 'Archivo cifrado',
+      'Cifrado con una clave ligada a este equipo, así que una copia en otro lado no se puede leer. Nunca pide nada; alguien que use tu cuenta aquí podría leerlo.',
+    fileLocation: 'Ubicación del archivo',
+    movedTo: (storage: string) => `Tus contraseñas ahora están en el ${storage.toLowerCase()}`,
+    moveFailed: 'No se pudieron mover tus contraseñas',
     moving: 'Moviendo tus contraseñas…',
     movingOne: (current: number, total: number) => `Moviendo la contraseña ${current} de ${total}…`,
     removingOne: (current: number, total: number) => `Quitando la copia anterior ${current} de ${total}…`,

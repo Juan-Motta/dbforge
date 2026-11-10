@@ -37,6 +37,12 @@ const PATHS = {
       <path d="M4.5 6h7" />
     </>
   ),
+  lock: (
+    <>
+      <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
+      <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+    </>
+  ),
   key: (
     <>
       <circle cx="5.5" cy="10.5" r="2.7" />

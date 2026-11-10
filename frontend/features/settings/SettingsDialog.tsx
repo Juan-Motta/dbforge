@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { getVersion } from '@tauri-apps/api/app'
-import { Icon } from '../../components/Icon'
+import { Callout, CalloutSpace } from '../../components/Callout'
+import { Icon, type IconName } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
+import { Option, OptionList } from '../../components/OptionList'
 import { ENGINE_LABELS } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
 import { LANGUAGES } from '../../lib/i18n/language'
@@ -139,20 +141,21 @@ function LanguageSection() {
 }
 
 const STORAGES: CredentialStorage[] = ['keychain', 'file']
+const STORAGE_ICONS: Record<CredentialStorage, IconName> = { keychain: 'key', file: 'lock' }
 
 function Passwords() {
   const m = useMessages(messages)
   const [info, setInfo] = useState<CredentialStorageInfo | null>(null)
   const [moving, setMoving] = useState(false)
   const [progress, setProgress] = useState<SwitchProgress | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [outcome, setOutcome] = useState<{ moved: CredentialStorage } | { error: string } | null>(null)
 
   useEffect(() => {
     let current = true
     connectionsApi
       .credentialStorage()
       .then((value) => current && setInfo(value))
-      .catch((failure) => current && setError(errorMessage(failure)))
+      .catch((failure) => current && setOutcome({ error: errorMessage(failure) }))
     return () => {
       current = false
     }
@@ -162,12 +165,13 @@ function Passwords() {
     if (moving || info?.storage === storage) return
     setMoving(true)
     setProgress(null)
-    setError(null)
+    setOutcome(null)
     const stopListening = await connectionsApi.onSwitchProgress(setProgress)
     try {
       setInfo(await connectionsApi.setCredentialStorage(storage))
+      setOutcome({ moved: storage })
     } catch (failure) {
-      setError(errorMessage(failure))
+      setOutcome({ error: errorMessage(failure) })
       // A partly finished switch may still have changed the choice.
       setInfo(await connectionsApi.credentialStorage().catch(() => info))
     } finally {
@@ -180,46 +184,52 @@ function Passwords() {
     <>
       <h3 className={styles.heading}>{m.passwords}</h3>
       <p className={styles.intro}>{m.passwordsIntro}</p>
-      <div className={`${styles.row} ${styles.stacked}`}>
-        <span className={styles.label} id="settings-storage">
-          {m.storage}
-        </span>
-        {/* Each choice shows what it protects against, side by side. */}
-        <div role="radiogroup" aria-labelledby="settings-storage" className={styles.choices}>
-          {STORAGES.map((storage) => (
-            <button
-              key={storage}
-              type="button"
-              role="radio"
-              aria-checked={info?.storage === storage}
-              disabled={info === null || moving}
-              className={styles.choice}
-              onClick={() => void choose(storage)}
-            >
-              <strong>{m[storage]}</strong>
-              <span className={styles.help}>{storage === 'file' ? m.fileHelp : m.keychainHelp}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className={styles.row}>
-        <span className={styles.label}>{m.fileLocation}</span>
-        <span className={`${styles.value} ${styles.path}`} title={info?.filePath}>
-          {/* Right to left, so a long path shows its end; the path itself stays left to right. */}
-          <bdi>{info?.filePath ?? '\u00a0'}</bdi>
-        </span>
-      </div>
-      <p className={styles.status} role="status">
+      <div className={styles.sections}>
+        <section className={styles.section}>
+          <h4 className={styles.sectionTitle} id="settings-storage">
+            {m.storage}
+          </h4>
+          <OptionList role="radiogroup" aria-labelledby="settings-storage">
+            {STORAGES.map((storage) => (
+              <Option
+                key={storage}
+                type="radio"
+                name="settings-storage"
+                icon={STORAGE_ICONS[storage]}
+                title={m[storage]}
+                description={storage === 'file' ? m.fileHelp : m.keychainHelp}
+                checked={info?.storage === storage}
+                disabled={info === null || moving}
+                onChange={() => void choose(storage)}
+              />
+            ))}
+          </OptionList>
+        </section>
+        <section className={styles.section}>
+          <h4 className={styles.sectionTitle}>{m.fileLocation}</h4>
+          <div className={styles.fileRow}>
+            <Icon name="lock" size={14} />
+            <span className={styles.path} title={info?.filePath}>
+              {/* Right to left, so a long path shows its end; the path itself stays left to right. */}
+              <bdi>{info?.filePath ?? '\u00a0'}</bdi>
+            </span>
+          </div>
+        </section>
         {moving ? (
-          <>
-            {progressText(progress, m)}
-            {/* The keychain can stop to ask for each password; say so, or the switch looks stuck. */}
-            {info?.storage === 'keychain' && <span className={styles.help}> {m.systemMayAsk}</span>}
-          </>
+          <Callout
+            tone="progress"
+            title={progressText(progress, m)}
+            // The keychain can stop to ask for each password; say so, or the switch looks stuck.
+            detail={info?.storage === 'keychain' ? m.systemMayAsk : undefined}
+          />
+        ) : outcome && 'error' in outcome ? (
+          <Callout tone="failed" title={m.moveFailed} detail={outcome.error} />
+        ) : outcome ? (
+          <Callout tone="done" title={m.movedTo(m[outcome.moved])} />
         ) : (
-          error && <span className={styles.error}>{error}</span>
+          <CalloutSpace />
         )}
-      </p>
+      </div>
     </>
   )
 }
