@@ -36,6 +36,9 @@ import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
 import { explorerMenu, type MenuActions } from './explorerMenu'
 import { Workspace } from './Workspace'
+import { confirmingTag } from '../features/tags/tags'
+import { useTagList } from '../features/tags/useTagList'
+import { TagsContext } from '../features/tags/useTags'
 import { Notice, type NoticeState } from '../components/Notice'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
 import { NO_FILTER } from '../features/table-data/rowFilter'
@@ -53,7 +56,9 @@ interface Selection {
 }
 
 export function App() {
-  const { connections, loadError, save, remove, duplicate } = useConnections()
+  const { connections, loadError, save, remove, duplicate, reload } = useConnections()
+  // Deleting a tag also clears it from connections, so they are read again.
+  const tagsState = useTagList(() => void reload())
   // Hidden with ⌘B for more room; it stays mounted so its expanded nodes survive.
   const [explorerOpen, setExplorerOpen] = useState(true)
   const [explorerWidth, setExplorerWidth, resetExplorerWidth] = usePanelWidth(
@@ -215,141 +220,145 @@ export function App() {
   }
 
   return (
-    <div className={styles.app}>
-      <TitleBar
-        connection={activeConnection}
-        path={activePath}
-        onNewQuery={newQuery}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onSearch={() => setPaletteOpen(true)}
-        explorerOpen={explorerOpen}
-        onToggleExplorer={() => setExplorerOpen((open) => !open)}
-        onEditConnection={(connection) => setDialog({ connection })}
-      />
+    <TagsContext value={tagsState}>
+      <div className={styles.app}>
+        <TitleBar
+          connection={activeConnection}
+          path={activePath}
+          onNewQuery={newQuery}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onSearch={() => setPaletteOpen(true)}
+          explorerOpen={explorerOpen}
+          onToggleExplorer={() => setExplorerOpen((open) => !open)}
+          onEditConnection={(connection) => setDialog({ connection })}
+        />
 
-      <div className={styles.body}>
-        <div className={styles.explorerSlot} hidden={!explorerOpen} style={{ width: explorerWidth }}>
-          <ResizeHandle
-            edge="right"
-            label={m.resizeExplorer}
-            onResize={setExplorerWidth}
-            onReset={resetExplorerWidth}
-          />
-          <Explorer
-            connections={connections}
-            onSelect={({ connectionId, path }) => setSelection({ connectionId, path })}
-            onOpen={(node) => {
-              if (node.kind === 'table' || node.kind === 'view') {
-                setTabs((state) => openTableTab(state, node.connectionId, tableRefFromPath(node.path)))
-              }
-              const connection = connections.find((c) => c.id === node.connectionId)
-              if (node.kind === 'database' && connection?.engine === 'redis') {
-                setTabs((state) => openKeyspaceTab(state, connection.id, connection.name, node.name))
-              }
-            }}
-            onNewConnection={() => setDialog({})}
-            menuOf={menuOf}
-          />
-        </div>
-        <main className={`island ${styles.main}`}>
-          {loadError ? (
-            <p className={styles.error}>{m.loadConnectionsFailed(loadError)}</p>
-          ) : (
-            <Workspace
-              tabs={tabs.tabs}
-              activeId={tabs.activeId}
-              onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
-              onClose={(id) => setTabs((state) => closeTab(state, id))}
-              onNewQuery={newQuery}
-              connectionOf={(id) => connections.find((c) => c.id === id)}
-              onOpenTable={(connectionId, table, filter) =>
-                setTabs((state) => openTableTab(state, connectionId, table, filter))
-              }
-              onOpenDiagram={(connectionId, database, schema) =>
-                setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
-              }
-              onTableView={(id, view) => setTabs((state) => setTableView(state, id, view))}
-              onOpenQuery={(entry) =>
-                setTabs((state) =>
-                  newQueryTab(
-                    state,
-                    m,
-                    entry.connectionId,
-                    entry.database ?? undefined,
-                    entry.sql,
-                    entry.container ?? undefined,
-                  ),
-                )
-              }
+        <div className={styles.body}>
+          <div className={styles.explorerSlot} hidden={!explorerOpen} style={{ width: explorerWidth }}>
+            <ResizeHandle
+              edge="right"
+              label={m.resizeExplorer}
+              onResize={setExplorerWidth}
+              onReset={resetExplorerWidth}
             />
-          )}
-        </main>
-      </div>
+            <Explorer
+              connections={connections}
+              onSelect={({ connectionId, path }) => setSelection({ connectionId, path })}
+              onOpen={(node) => {
+                if (node.kind === 'table' || node.kind === 'view') {
+                  setTabs((state) => openTableTab(state, node.connectionId, tableRefFromPath(node.path)))
+                }
+                const connection = connections.find((c) => c.id === node.connectionId)
+                if (node.kind === 'database' && connection?.engine === 'redis') {
+                  setTabs((state) => openKeyspaceTab(state, connection.id, connection.name, node.name))
+                }
+              }}
+              onNewConnection={() => setDialog({})}
+              menuOf={menuOf}
+            />
+          </div>
+          <main className={`island ${styles.main}`}>
+            {loadError ? (
+              <p className={styles.error}>{m.loadConnectionsFailed(loadError)}</p>
+            ) : (
+              <Workspace
+                tabs={tabs.tabs}
+                activeId={tabs.activeId}
+                onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
+                onClose={(id) => setTabs((state) => closeTab(state, id))}
+                onNewQuery={newQuery}
+                connectionOf={(id) => connections.find((c) => c.id === id)}
+                onOpenTable={(connectionId, table, filter) =>
+                  setTabs((state) => openTableTab(state, connectionId, table, filter))
+                }
+                onOpenDiagram={(connectionId, database, schema) =>
+                  setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
+                }
+                onTableView={(id, view) => setTabs((state) => setTableView(state, id, view))}
+                onOpenQuery={(entry) =>
+                  setTabs((state) =>
+                    newQueryTab(
+                      state,
+                      m,
+                      entry.connectionId,
+                      entry.database ?? undefined,
+                      entry.sql,
+                      entry.container ?? undefined,
+                    ),
+                  )
+                }
+              />
+            )}
+          </main>
+        </div>
 
-      {dialog && (
-        <ConnectionDialog connection={dialog.connection} onSave={save} onClose={() => setDialog(null)} />
-      )}
+        {dialog && (
+          <ConnectionDialog connection={dialog.connection} onSave={save} onClose={() => setDialog(null)} />
+        )}
 
-      {creating && (
-        <NewObjectDialog
-          connection={creating.connection}
-          kind={creating.kind}
-          onClose={() => setCreating(null)}
-          onCreated={creating.refresh}
-        />
-      )}
-      {deleting && (
-        <DeleteConnectionDialog
-          connection={deleting}
-          onDelete={removeConnection}
-          onClose={() => setDeleting(null)}
-        />
-      )}
+        {creating && (
+          <NewObjectDialog
+            connection={creating.connection}
+            kind={creating.kind}
+            onClose={() => setCreating(null)}
+            onCreated={creating.refresh}
+          />
+        )}
+        {deleting && (
+          <DeleteConnectionDialog
+            connection={deleting}
+            onDelete={removeConnection}
+            onClose={() => setDeleting(null)}
+          />
+        )}
 
-      {exporting && <ExportDialog source={exporting} onClose={() => setExporting(null)} />}
-      {notice && <Notice notice={notice} />}
+        {exporting && <ExportDialog source={exporting} onClose={() => setExporting(null)} />}
+        {notice && <Notice notice={notice} />}
 
-      {dump?.mode === 'export' && (
-        <ExportDatabaseDialog
-          connectionId={dump.connection.id}
-          connectionName={dump.connection.name}
-          database={dump.database}
-          onClose={() => setDump(null)}
-        />
-      )}
-      {dump?.mode === 'import' && (
-        <ImportDatabaseDialog
-          connectionId={dump.connection.id}
-          connectionName={dump.connection.name}
-          database={dump.database}
-          production={dump.connection.environment === 'production'}
-          onClose={() => setDump(null)}
-          onImported={dump.refresh}
-        />
-      )}
+        {dump?.mode === 'export' && (
+          <ExportDatabaseDialog
+            connectionId={dump.connection.id}
+            connectionName={dump.connection.name}
+            database={dump.database}
+            onClose={() => setDump(null)}
+          />
+        )}
+        {dump?.mode === 'import' && (
+          <ImportDatabaseDialog
+            connectionId={dump.connection.id}
+            connectionName={dump.connection.name}
+            database={dump.database}
+            confirmTag={confirmingTag(tagsState.tags, dump.connection.environment)}
+            onClose={() => setDump(null)}
+            onImported={dump.refresh}
+          />
+        )}
 
-      {paletteOpen && (
-        <CommandPalette
-          source={
-            activeConnection && {
-              connectionId: activeConnection.id,
-              connectionName: activeConnection.name,
-              database: activePath[0],
+        {paletteOpen && (
+          <CommandPalette
+            source={
+              activeConnection && {
+                connectionId: activeConnection.id,
+                connectionName: activeConnection.name,
+                database: activePath[0],
+              }
             }
-          }
-          commands={commands}
-          onOpenTable={(connectionId, table) => setTabs((state) => openTableTab(state, connectionId, table))}
-          onClose={() => setPaletteOpen(false)}
-        />
-      )}
+            commands={commands}
+            onOpenTable={(connectionId, table) =>
+              setTabs((state) => openTableTab(state, connectionId, table))
+            }
+            onClose={() => setPaletteOpen(false)}
+          />
+        )}
 
-      {settingsOpen && (
-        <SettingsDialog
-          theme={theme.preference}
-          onThemeChange={theme.choose}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
-    </div>
+        {settingsOpen && (
+          <SettingsDialog
+            theme={theme.preference}
+            onThemeChange={theme.choose}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+      </div>
+    </TagsContext>
   )
 }

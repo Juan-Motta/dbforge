@@ -21,6 +21,16 @@
   --warn: #e8b44c;
   --err: #f06a6a;
   --info: #6aa9f0;
+  /* Tag colors: each reads on this theme's panels, as text and as a 16% tint. */
+  --tag-red: #f06a6a;
+  --tag-orange: #f0905a;
+  --tag-amber: #e8b44c;
+  --tag-green: #4cc38a;
+  --tag-teal: #3cc0b4;
+  --tag-blue: #6aa9f0;
+  --tag-violet: #a98bf0;
+  --tag-pink: #ec7fb4;
+  --tag-gray: #9a9ca3;
   --num: #f2c46d;
   --kw: #8fb4ff;
   --str: #a5d6a0;
@@ -55,6 +65,15 @@
   --warn: #8f6400;
   --err: #c23030;
   --info: #2468b8;
+  --tag-red: #c23030;
+  --tag-orange: #b4531c;
+  --tag-amber: #8f6400;
+  --tag-green: #1e8553;
+  --tag-teal: #0f7f78;
+  --tag-blue: #2468b8;
+  --tag-violet: #6b46c1;
+  --tag-pink: #b02a6c;
+  --tag-gray: #5f6168;
   --num: #9a5c06;
   --kw: #2a5bc9;
   --str: #2d7a33;

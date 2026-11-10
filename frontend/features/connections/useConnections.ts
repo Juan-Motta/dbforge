@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Connection } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
 import { connectionsApi, type ConnectionInput } from './api'
@@ -8,12 +8,18 @@ export function useConnections() {
   const [connections, setConnections] = useState<Connection[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const reload = useCallback(
+    () =>
+      connectionsApi
+        .list()
+        .then(setConnections)
+        .catch((error) => setLoadError(errorMessage(error))),
+    [],
+  )
+
   useEffect(() => {
-    connectionsApi
-      .list()
-      .then(setConnections)
-      .catch((error) => setLoadError(errorMessage(error)))
-  }, [])
+    void reload()
+  }, [reload])
 
   const save = async (input: ConnectionInput) => {
     const saved = await connectionsApi.save(input)
@@ -36,5 +42,5 @@ export function useConnections() {
     return copy
   }
 
-  return { connections, loadError, save, remove, duplicate }
+  return { connections, loadError, save, remove, duplicate, reload }
 }

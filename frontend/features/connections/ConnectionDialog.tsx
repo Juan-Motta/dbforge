@@ -8,7 +8,6 @@ import { Modal } from '../../components/Modal'
 import { TextField } from '../../components/TextField'
 import {
   ENGINE_LABELS,
-  ENVIRONMENTS,
   isFileEngine,
   ACCOUNT_ENGINES,
   NOSQL_ENGINES,
@@ -16,11 +15,11 @@ import {
   TLS_ENGINES,
   type Connection,
   type Engine,
-  type Environment,
 } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
-import { messages as sharedMessages } from '../../lib/messages'
+import { tagColor } from '../tags/tags'
+import { useTags } from '../tags/useTags'
 import { connectionsApi, type ConnectionInput, type CredentialStorage } from './api'
 import {
   canSubmit,
@@ -38,12 +37,6 @@ import styles from './ConnectionDialog.module.css'
 
 type TestState = { status: 'idle' } | { status: 'testing' } | { status: 'ok' | 'error'; message: string }
 
-const ENVIRONMENT_TONES: Record<Environment, string> = {
-  development: 'var(--info)',
-  staging: 'var(--warn)',
-  production: 'var(--err)',
-}
-
 interface ConnectionDialogProps {
   /** The connection to edit; omit to create a new one. */
   connection?: Connection
@@ -60,6 +53,7 @@ function hostHintOf(engine: Engine, m: ConnectionMessages): string | undefined {
 
 export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDialogProps) {
   const m = useMessages(messages)
+  const { tags } = useTags()
   const [storage, setStorage] = useState<CredentialStorage | null>(null)
 
   useEffect(() => {
@@ -72,7 +66,6 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
       current = false
     }
   }, [])
-  const shared = useMessages(sharedMessages)
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
   )
@@ -171,32 +164,31 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
             if (canSubmit(form)) void save()
           }}
         >
-          <div className={styles.row}>
-            <TextField
-              label={m.name}
-              data-autofocus
-              required
-              value={form.name}
-              onChange={(e) => update({ name: e.target.value })}
-            />
-            <div role="group" aria-labelledby="environment-label">
-              <span id="environment-label" className={styles.label}>
-                {m.environment}
-              </span>
-              <div className={styles.chips}>
-                {ENVIRONMENTS.map((env) => (
-                  <button
-                    key={env}
-                    type="button"
-                    className={styles.chip}
-                    aria-pressed={form.environment === env}
-                    onClick={() => update({ environment: form.environment === env ? null : env })}
-                  >
-                    <span className={styles.dot} style={{ background: ENVIRONMENT_TONES[env] }} />
-                    {shared[env]}
-                  </button>
-                ))}
-              </div>
+          <TextField
+            label={m.name}
+            data-autofocus
+            required
+            value={form.name}
+            onChange={(e) => update({ name: e.target.value })}
+          />
+          {/* Tags get a row of their own: the user may have many. */}
+          <div role="group" aria-labelledby="environment-label">
+            <span id="environment-label" className={styles.label}>
+              {m.environment}
+            </span>
+            <div className={styles.chips}>
+              {tags.map((tag) => (
+                <button
+                  key={tag.id}
+                  type="button"
+                  className={styles.chip}
+                  aria-pressed={form.environment === tag.id}
+                  onClick={() => update({ environment: form.environment === tag.id ? null : tag.id })}
+                >
+                  <span className={styles.dot} style={{ background: tagColor(tag.color) }} />
+                  {tag.name}
+                </button>
+              ))}
             </div>
           </div>
 

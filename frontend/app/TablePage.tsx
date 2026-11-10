@@ -19,8 +19,8 @@ import styles from './TablePage.module.css'
 interface TablePageProps {
   connectionId: string
   table: TableRef
-  /** Editing a production connection's data asks for confirmation. */
-  production: boolean
+  /** The tag (e.g. PROD) that makes editing data ask first; `null` when it doesn't. */
+  confirmTag: string | null
   dialect: SqlDialect
   /** Relational engines draw the table with its relations. */
   diagram: boolean
@@ -40,7 +40,7 @@ interface TablePageProps {
 export function TablePage({
   connectionId,
   table,
-  production,
+  confirmTag,
   dialect,
   diagram,
   onOpenSchemaDiagram,
@@ -94,7 +94,7 @@ export function TablePage({
         <TableView
           connectionId={connectionId}
           table={table}
-          production={production}
+          confirmTag={confirmTag}
           dialect={dialect}
           filter={filter}
           onFilterChange={setFilter}

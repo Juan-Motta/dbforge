@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
 import { Icon } from '../../components/Icon'
@@ -8,6 +7,9 @@ import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { messages as sharedMessages } from '../../lib/messages'
 import { connectionsApi } from '../connections/api'
+import { TagBadge } from '../tags/TagBadge'
+import { tagOf } from '../tags/tags'
+import { useTags } from '../tags/useTags'
 import { connectionFacts } from './connectionFacts'
 import { messages } from './messages'
 import styles from './Shell.module.css'
@@ -118,8 +120,6 @@ function Popover({ connection, onEdit }: ConnectionDetailsProps) {
 }
 
 function EnvironmentBadge({ connection }: { connection: Connection }) {
-  if (connection.environment === 'production') return <Badge tone="err">PROD</Badge>
-  if (connection.environment === 'staging') return <Badge tone="warn">STAGE</Badge>
-  if (connection.environment === 'development') return <Badge tone="info">DEV</Badge>
-  return null
+  const tag = tagOf(useTags().tags, connection.environment)
+  return tag && <TagBadge tag={tag} />
 }

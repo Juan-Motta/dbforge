@@ -184,8 +184,8 @@ interface ImportDatabaseDialogProps {
   connectionName: string
   /** The database the menu was opened on: where the file goes unless another name is typed. */
   database: string
-  /** Restoring on a production connection asks to be pressed twice. */
-  production: boolean
+  /** The tag (e.g. PROD) that makes restoring ask to be pressed twice; `null` when it doesn't. */
+  confirmTag: string | null
   onClose: () => void
   /** A restore finished: the explorer shows the database, created or changed. */
   onImported: () => void
@@ -196,7 +196,7 @@ export function ImportDatabaseDialog({
   connectionId,
   connectionName,
   database,
-  production,
+  confirmTag,
   onClose,
   onImported,
 }: ImportDatabaseDialogProps) {
@@ -233,7 +233,7 @@ export function ImportDatabaseDialog({
 
   const start = async () => {
     if (!path) return
-    if (production && !confirming) {
+    if (confirmTag && !confirming) {
       setConfirming(true)
       return
     }
@@ -305,7 +305,7 @@ export function ImportDatabaseDialog({
             confirming
               ? {
                   state: 'failed',
-                  error: m.productionConfirm(connectionName),
+                  error: m.confirmImport(connectionName, confirmTag ?? ''),
                 }
               : status
           }
@@ -326,7 +326,7 @@ export function ImportDatabaseDialog({
           disabled={job.running || !path || target.trim() === ''}
           onClick={() => void start()}
         >
-          {job.running ? m.importing : confirming ? m.importIntoProduction : m.import}
+          {job.running ? m.importing : confirming ? m.importInto(confirmTag ?? '') : m.import}
         </Button>
       </footer>
     </Modal>

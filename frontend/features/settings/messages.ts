@@ -14,6 +14,7 @@ export const messages = defineMessages({
     languageIntro: 'The language of menus, dialogs and messages.',
     interfaceLanguage: 'Interface language',
     interfaceLanguageHelp: 'Messages from database servers stay in the language the server uses.',
+    tags: 'Tags',
     passwords: 'Passwords',
     passwordsIntro: 'Where DBForge saves the passwords and keys of your connections.',
     storage: 'Where passwords are saved',
@@ -48,6 +49,7 @@ export const messages = defineMessages({
     interfaceLanguage: 'Idioma de la interfaz',
     interfaceLanguageHelp:
       'Los mensajes de los servidores de bases de datos llegan en el idioma del servidor.',
+    tags: 'Etiquetas',
     passwords: 'Contraseñas',
     passwordsIntro: 'Dónde guarda DBForge las contraseñas y claves de tus conexiones.',
     storage: 'Dónde se guardan las contraseñas',

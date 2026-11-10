@@ -5,7 +5,6 @@ import {
   TLS_ENGINES,
   type Connection,
   type Engine,
-  type Environment,
 } from '../../domain/connection'
 import type { ConnectionInput } from './api'
 import { messages, type ConnectionMessages } from './messages'
@@ -14,7 +13,8 @@ import { messages, type ConnectionMessages } from './messages'
 export interface ConnectionForm {
   name: string
   engine: Engine
-  environment: Environment | null
+  /** A tag id, or none. */
+  environment: string | null
   /** The server's name, or for an account engine its whole URI (`https://….documents.azure.com:443/`). */
   host: string
   port: string

@@ -12,13 +12,14 @@ import {
   type CredentialStorageInfo,
   type SwitchProgress,
 } from '../connections/api'
+import { TagsSection } from '../tags/TagsSection'
 import { messages, type SettingsMessages } from './messages'
 import type { ThemePreference } from './theme'
 import styles from './SettingsDialog.module.css'
 
-type Section = 'appearance' | 'language' | 'passwords' | 'about'
+type Section = 'appearance' | 'language' | 'tags' | 'passwords' | 'about'
 
-const SECTIONS: Section[] = ['appearance', 'language', 'passwords', 'about']
+const SECTIONS: Section[] = ['appearance', 'language', 'tags', 'passwords', 'about']
 
 const THEMES: ThemePreference[] = ['dark', 'light', 'system']
 
@@ -53,6 +54,7 @@ export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialog
         <main className={styles.content}>
           {section === 'appearance' && <Appearance theme={theme} onThemeChange={onThemeChange} />}
           {section === 'language' && <LanguageSection />}
+          {section === 'tags' && <TagsSection />}
           {section === 'passwords' && <Passwords />}
           {section === 'about' && <About />}
         </main>

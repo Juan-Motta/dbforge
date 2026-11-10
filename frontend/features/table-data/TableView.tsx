@@ -46,8 +46,8 @@ import styles from './TableView.module.css'
 interface TableViewProps {
   connectionId: string
   table: TableRef
-  /** Applying changes on a production connection asks for confirmation first. */
-  production: boolean
+  /** The tag (e.g. PROD) that makes applying changes ask first; `null` when it doesn't. */
+  confirmTag: string | null
   dialect: SqlDialect
   /** What the rows are narrowed and ordered by; the page owns it so exports use it too. */
   filter: RowFilter
@@ -83,7 +83,7 @@ type Status =
 export function TableView({
   connectionId,
   table,
-  production,
+  confirmTag,
   dialect,
   filter,
   onFilterChange,
@@ -176,7 +176,7 @@ export function TableView({
 
   const requestApply = () => {
     if (!pending || applying) return
-    if (production) setConfirming(true)
+    if (confirmTag) setConfirming(true)
     else void apply()
   }
 
@@ -457,10 +457,10 @@ export function TableView({
       )}
 
       {confirming && (
-        <Modal title={m.confirmTitle} onClose={() => setConfirming(false)}>
+        <Modal title={m.confirmTitle(confirmTag ?? '')} onClose={() => setConfirming(false)}>
           <div className={styles.confirm}>
             <p>
-              {m.confirmMarked} <strong>{m.production}</strong>. {m.confirmChange}{' '}
+              {m.confirmMarked} <strong>{confirmTag}</strong>. {m.confirmChange}{' '}
               <code>
                 {table.schema}.{table.name}
               </code>
@@ -471,7 +471,7 @@ export function TableView({
                 {m.cancel}
               </Button>
               <Button variant="primary" onClick={() => void apply()}>
-                {m.applyToProduction}
+                {m.applyOn(confirmTag ?? '')}
               </Button>
             </div>
           </div>

@@ -3,14 +3,13 @@ import { messages, type SharedMessages } from '../lib/messages'
 export type Engine =
   'postgres' | 'mysql' | 'mariadb' | 'sqlite' | 'sqlserver' | 'mongodb' | 'redis' | 'cosmosdb'
 
-export type Environment = 'production' | 'staging' | 'development'
-
 /** A saved connection, as returned by the backend. The password is never included. */
 export interface Connection {
   id: string
   name: string
   engine: Engine
-  environment: Environment | null
+  /** The id of the connection's tag (see `features/tags`), or none. */
+  environment: string | null
   host: string
   port: number
   database: string
@@ -74,9 +73,6 @@ export const NEW_OBJECTS: Record<Engine, NewObjectKind[]> = {
 
 export const RELATIONAL_ENGINES: Engine[] = ['postgres', 'mysql', 'mariadb', 'sqlite', 'sqlserver']
 export const NOSQL_ENGINES: Engine[] = ['mongodb', 'cosmosdb', 'redis']
-
-/** Environments in the order the form offers them; their names are in `lib/messages.ts`. */
-export const ENVIRONMENTS: Environment[] = ['development', 'staging', 'production']
 
 /** Engines whose databases hold tables (or collections, or containers) directly, with no schemas in between. */
 const SCHEMALESS: Engine[] = ['mysql', 'mariadb', 'mongodb', 'cosmosdb']

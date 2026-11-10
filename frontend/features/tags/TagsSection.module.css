@@ -1,0 +1,111 @@
+.heading {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.intro {
+  margin: 0 0 12px;
+  color: var(--text2);
+  font-size: 13px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Swatch, name, confirmation and delete; the same height whatever is typed. */
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.colorCell {
+  position: relative;
+  display: inline-flex;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border2);
+  cursor: pointer;
+}
+
+.palette {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -6px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(5, 22px);
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--elev);
+  box-shadow: var(--shadow);
+}
+
+.paletteSwatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.paletteSwatch[aria-checked='true'] {
+  box-shadow:
+    0 0 0 2px var(--elev),
+    0 0 0 4px var(--text);
+}
+
+.name {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 12.5px var(--font-sans);
+}
+
+.name:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.add {
+  margin-top: 12px;
+}
+
+.error {
+  min-height: 34px;
+  margin: 10px 0 0;
+  color: var(--err);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}

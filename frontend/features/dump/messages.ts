@@ -31,13 +31,13 @@ export const messages = defineMessages({
     importNoteBefore:
       'psql runs the file in one transaction and stops at the first error, so a failed import changes nothing; a database created for it is removed again. Import only files you trust: psql also runs its own commands, such as ',
     importNoteAfter: ' for the shell.',
-    productionConfirm: (connection: string) =>
-      `${connection} is a production connection. Press Import into production to run the file there.`,
+    confirmImport: (connection: string, tag: string) =>
+      `${connection} is tagged ${tag}. Press Import into ${tag} to run the file there.`,
     createdAndRestored: (database: string, time: string) =>
       `Created ${database} and restored the file into it in ${time}.`,
     restored: (database: string, time: string) => `Restored the file into ${database} in ${time}.`,
     importing: 'Importing…',
-    importIntoProduction: 'Import into production',
+    importInto: (tag: string) => `Import into ${tag}`,
     import: 'Import',
     noteNameTarget: 'Name the database to restore into.',
     noteRestoreOrCreate: 'Restores into this database, creating it if it doesn’t exist.',
@@ -74,13 +74,13 @@ export const messages = defineMessages({
     importNoteBefore:
       'psql ejecuta el archivo en una sola transacción y se detiene en el primer error, así que una importación fallida no cambia nada; una base de datos creada para ella se elimina de nuevo. Importa solo archivos de confianza: psql también ejecuta sus propios comandos, como ',
     importNoteAfter: ' para la shell.',
-    productionConfirm: (connection: string) =>
-      `${connection} es una conexión de producción. Pulsa Importar en producción para ejecutar el archivo ahí.`,
+    confirmImport: (connection: string, tag: string) =>
+      `${connection} tiene la etiqueta ${tag}. Pulsa Importar en ${tag} para ejecutar el archivo ahí.`,
     createdAndRestored: (database: string, time: string) =>
       `Se creó ${database} y se restauró el archivo en ella en ${time}.`,
     restored: (database: string, time: string) => `Se restauró el archivo en ${database} en ${time}.`,
     importing: 'Importando…',
-    importIntoProduction: 'Importar en producción',
+    importInto: (tag: string) => `Importar en ${tag}`,
     import: 'Importar',
     noteNameTarget: 'Escribe el nombre de la base de datos donde restaurar.',
     noteRestoreOrCreate: 'Restaura en esta base de datos y la crea si no existe.',

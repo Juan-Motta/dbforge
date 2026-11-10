@@ -49,14 +49,13 @@ export const messages = defineMessages({
     apply: 'Apply',
     applying: 'Applying…',
     previewTitle: 'Pending changes as SQL',
-    confirmTitle: 'Apply changes to production?',
-    confirmMarked: 'This connection is marked',
-    production: 'Production',
+    confirmTitle: (tag: string) => `Apply changes on ${tag}?`,
+    confirmMarked: 'This connection is tagged',
     confirmChange: 'You are about to change',
     confirmCounts: (updated: number, inserted: number, deleted: number) =>
       `${updated} updated, ${inserted} inserted, ${deleted} deleted`,
     cancel: 'Cancel',
-    applyToProduction: 'Apply to production',
+    applyOn: (tag: string) => `Apply on ${tag}`,
 
     // Cell inspector
     cellValue: 'Cell value',
@@ -137,14 +136,13 @@ export const messages = defineMessages({
     apply: 'Aplicar',
     applying: 'Aplicando…',
     previewTitle: 'Cambios pendientes como SQL',
-    confirmTitle: '¿Aplicar los cambios en producción?',
-    confirmMarked: 'Esta conexión está marcada como',
-    production: 'Producción',
+    confirmTitle: (tag: string) => `¿Aplicar los cambios en ${tag}?`,
+    confirmMarked: 'Esta conexión tiene la etiqueta',
     confirmChange: 'Vas a cambiar',
     confirmCounts: (updated: number, inserted: number, deleted: number) =>
       `${filas(updated, 'actualizada')}, ${filas(inserted, 'insertada')}, ${filas(deleted, 'eliminada')}`,
     cancel: 'Cancelar',
-    applyToProduction: 'Aplicar en producción',
+    applyOn: (tag: string) => `Aplicar en ${tag}`,
 
     cellValue: 'Valor de la celda',
     resizePanel: 'Cambiar el tamaño del panel',

@@ -348,6 +348,19 @@ export function installMockBackend() {
           else accounts.add(object.name)
           return delay(null)
         }
+        case 'list_tags':
+          return delay(tags)
+        case 'save_tags': {
+          const list = payload.list as typeof tags
+          const names = list.map((tag) => tag.name.trim().toLowerCase())
+          if (names.some((name) => !name)) throw 'Every tag needs a name.'
+          if (new Set(names).size < names.length) throw 'There is already a tag with that name.'
+          const kept = new Set(list.map((tag) => tag.id))
+          for (const connection of connections)
+            if (connection.environment && !kept.has(connection.environment)) connection.environment = null
+          tags = list.map((tag) => ({ ...tag, name: tag.name.trim() }))
+          return delay(tags)
+        }
         case 'credential_storage':
           return delay(credentials)
         case 'set_credential_storage': {
@@ -373,6 +386,13 @@ export function installMockBackend() {
 
 /** Jobs the dialogs asked to stop. */
 const cancelled = new Set<string>()
+// The connection tags, as the settings edit them.
+let tags = [
+  { id: 'production', name: 'PROD', color: 'red', confirm: true },
+  { id: 'staging', name: 'STAGE', color: 'amber', confirm: false },
+  { id: 'test', name: 'TEST', color: 'violet', confirm: false },
+  { id: 'development', name: 'DEV', color: 'blue', confirm: false },
+]
 // Where passwords are kept, as the settings choose.
 let credentials = {
   storage: 'keychain' as 'keychain' | 'file',

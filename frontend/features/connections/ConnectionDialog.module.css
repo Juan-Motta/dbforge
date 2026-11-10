@@ -68,13 +68,6 @@
   overflow: auto;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: end;
-}
-
 .label {
   display: block;
   margin-bottom: 6px;
@@ -85,6 +78,7 @@
 
 .chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

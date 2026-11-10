@@ -1,7 +1,8 @@
-import { Badge } from '../../components/Badge'
 import { EngineLogo } from '../../components/EngineLogo'
 import { Icon, type IconName } from '../../components/Icon'
-import type { Environment } from '../../domain/connection'
+import { TagBadge } from '../tags/TagBadge'
+import { tagOf } from '../tags/tags'
+import { useTags } from '../tags/useTags'
 import type { ObjectKind, TreeNode } from './tree'
 import styles from './Explorer.module.css'
 
@@ -11,12 +12,6 @@ const KIND_ICONS: Record<ObjectKind, IconName> = {
   folder: 'folder',
   table: 'table',
   view: 'view',
-}
-
-const ENV_BADGES: Record<Environment, { label: string; tone: 'err' | 'warn' | 'info' }> = {
-  production: { label: 'PROD', tone: 'err' },
-  staging: { label: 'STAGE', tone: 'warn' },
-  development: { label: 'DEV', tone: 'info' },
 }
 
 export const INDENT_PX = 12
@@ -44,7 +39,8 @@ export function TreeItem({
   onMenu,
 }: TreeItemProps) {
   const isConnection = node.kind === 'connection'
-  const environment = isConnection ? node.connection.environment : null
+  const { tags } = useTags()
+  const tag = isConnection ? tagOf(tags, node.connection.environment) : null
 
   return (
     <div
@@ -83,7 +79,7 @@ export function TreeItem({
       )}
 
       <span className={styles.name}>{node.name}</span>
-      {environment && <Badge tone={ENV_BADGES[environment].tone}>{ENV_BADGES[environment].label}</Badge>}
+      {tag && <TagBadge tag={tag} />}
       {node.meta && <span className={styles.meta}>{node.meta}</span>}
     </div>
   )

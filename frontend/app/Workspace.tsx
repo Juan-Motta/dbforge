@@ -14,6 +14,8 @@ import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
 import { TablePage } from './TablePage'
 import type { Tab, TableTabView } from './tabs'
+import { confirmingTag } from '../features/tags/tags'
+import { useTags } from '../features/tags/useTags'
 import styles from './App.module.css'
 
 interface WorkspaceProps {
@@ -48,6 +50,7 @@ export function Workspace({
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
   const m = useMessages(messages)
+  const { tags } = useTags()
 
   if (tabs.length === 0) {
     return (
@@ -107,7 +110,7 @@ export function Workspace({
             <TablePage
               connectionId={tab.connectionId}
               table={tab.table}
-              production={connectionOf(tab.connectionId)?.environment === 'production'}
+              confirmTag={confirmingTag(tags, connectionOf(tab.connectionId)?.environment ?? null)}
               dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
               diagram={hasDiagram(connectionOf(tab.connectionId)?.engine ?? 'redis')}
               onOpenSchemaDiagram={() =>
