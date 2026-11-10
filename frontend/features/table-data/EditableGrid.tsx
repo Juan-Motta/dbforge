@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -15,7 +16,7 @@ import { useMessages } from '../../lib/i18n/useLanguage'
 import type { SqlDialect } from '../../domain/connection'
 import type { TableRef } from '../../domain/table'
 import type { Column } from './api'
-import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
+import { cellAt, DEFAULT, isDefault, rowKeys, type Cell, type CellValue, type Edits } from './edits'
 import { messages } from './messages'
 import { filtersByValue, rowAsInsert, rowAsJson, valueCondition } from './cellActions'
 import {
@@ -193,23 +194,37 @@ export function EditableGrid(props: EditableGridProps) {
     else props.onEditNewCell(at.newRow, column, value)
   }
 
+  // What is the same for every cell of a row or of a column is worked out once, not per cell.
+  const rowIds = useMemo(() => rowKeys(rows, columns), [rows, columns])
+  const columnInfo = props.columnInfo
+  const editors = useMemo(
+    () =>
+      columns.map((column) => ({
+        temporalKind: temporalKindOf(column.dataType),
+        choices: choicesOf(column.dataType, columnInfo?.[column.name]?.options),
+      })),
+    [columns, columnInfo],
+  )
   /** The selection's key of a cell's row: its primary key, or `new:<id>`. */
-  const rowIdOf = (at: Editing) => ('row' in at ? rowKey(keyOf(rows[at.row], columns)) : `new:${at.newRow}`)
+  const rowIdOf = (at: Editing) => ('row' in at ? rowIds[at.row] : `new:${at.newRow}`)
   /** The same key, from the row a `Cell` names: `row:<index>` or `new:<id>`. */
-  const selectionRow = (row: string) =>
-    row.startsWith('new:') ? row : rowKey(keyOf(rows[Number(row.slice(4))], columns))
+  const selectionRow = (row: string) => (row.startsWith('new:') ? row : rowIds[Number(row.slice(4))])
 
   // The rows as shown, by selection key and by the key cellAt reads them with.
   const shownRows = [
     ...edits.inserts.map((row) => ({ select: `new:${row.id}`, cell: `new:${row.id}` })),
-    ...rows.map((row, r) => ({ select: rowKey(keyOf(row, columns)), cell: `row:${r}` })),
+    ...rowIds.map((id, r) => ({ select: id, cell: `row:${r}` })),
   ]
   const order = shownRows.map((row) => row.select)
   const cellRow = new Map(shownRows.map((row) => [row.select, row.cell]))
   const selectedRowSet = new Set(rowsOfSelection(selection, order))
-  /** A row whose every cell is selected, as its number picks it: drawn selected as a whole. */
-  const wholeRowSelected = (id: string) =>
-    columns.every((_, column) => selection.cells.has(cellKey({ row: id, column })))
+  // The rows whose every cell is selected, as their number picks them: drawn selected as a whole.
+  const wholeRows = new Set(
+    selection.cells.size < columns.length
+      ? []
+      : order.filter((id) => columns.every((_, column) => selection.cells.has(cellKey({ row: id, column })))),
+  )
+  const wholeRowSelected = (id: string) => wholeRows.has(id)
   const valueAt = (cell: CellRef) =>
     cellAt(edits, rows, columns, { row: cellRow.get(cell.row) ?? '', column: cell.column })?.value ?? null
 
@@ -477,8 +492,7 @@ export function EditableGrid(props: EditableGridProps) {
     ) : (
       (value ?? 'NULL')
     )
-    const temporalKind = temporalKindOf(columns[column].dataType)
-    const choices = choicesOf(columns[column].dataType, props.columnInfo?.[columns[column].name]?.options)
+    const { temporalKind, choices } = editors[column]
     if (isEditing) {
       // The editor lies over the cell, which keeps its content (unseen) and so its size.
       return (
@@ -651,7 +665,7 @@ export function EditableGrid(props: EditableGridProps) {
             )
           })}
           {rows.map((row, r) => {
-            const id = rowKey(keyOf(row, columns))
+            const id = rowIds[r]
             const deleted = edits.deletes.has(id)
             const changed = edits.updates.get(id)?.values ?? {}
             return (

@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
@@ -32,6 +32,7 @@ import {
   removeNewRow,
   replaceDocument,
   rowKey,
+  rowKeys,
   toChanges,
   toggleDelete,
   unsetNewCell,
@@ -155,10 +156,21 @@ export function TableView({
   }
 
   /** The rows as the grid shows them, new ones first: the order a Shift-click or a drag selects in. */
-  const rowOrder = [
-    ...edits.inserts.map((row) => `new:${row.id}`),
-    ...(page?.rows ?? []).map((row) => rowKey(keyOf(row, page?.columns ?? []))),
-  ]
+  const loaded = page?.rows
+  const loadedColumns = page?.columns
+  // Each loaded row's key and the row it names, worked out once for a page.
+  const rowIds = useMemo(() => rowKeys(loaded ?? [], loadedColumns ?? []), [loaded, loadedColumns])
+  const rowById = useMemo(() => new Map(rowIds.map((id, r) => [id, (loaded ?? [])[r]])), [rowIds, loaded])
+  const rowOrder = [...edits.inserts.map((row) => `new:${row.id}`), ...rowIds]
+  // The foreign key each column belongs to, and what the structure says of each, by column.
+  const keyOfColumn = useMemo(
+    () => (loadedColumns ?? []).map((column) => foreignKeys.find((key) => key.columns.includes(column.name))),
+    [loadedColumns, foreignKeys],
+  )
+  const infoByColumn = useMemo(
+    () => columnInfo && Object.fromEntries(columnInfo.map((info) => [info.name, info])),
+    [columnInfo],
+  )
   const selected = new Set(selectedRows(selection, rowOrder))
   const select = (cell: CellRef, mode: SelectMode, wholeRow = false) =>
     setSelection((current) => selectCells(current, cell, mode, rowOrder, columns.length, wholeRow))
@@ -179,7 +191,7 @@ export function TableView({
         return isDefault(value) ? unsetNewCell(acc, newId, name) : editNewCell(acc, newId, name, value)
       }
       if (acc.deletes.has(id)) return acc
-      const row = rows.find((r) => rowKey(keyOf(r, columns)) === id)
+      const row = rowById.get(id)
       return row ? editCell(acc, keyOf(row, columns), name, value, row[c]) : acc
     }, current)
 
@@ -189,7 +201,7 @@ export function TableView({
       [...selected].reduce((acc, id) => {
         if (id.startsWith('new:')) return removeNewRow(acc, Number(id.slice(4)))
         if (id.startsWith('doc:')) return removeNewDocument(acc, Number(id.slice(4)))
-        const row = rows.find((r) => rowKey(keyOf(r, columns)) === id)
+        const row = rowById.get(id)
         return row ? toggleDelete(acc, keyOf(row, columns)) : acc
       }, current),
     )
@@ -392,13 +404,13 @@ export function TableView({
                   change((current) => editCells(current, targetsOf({ row: `new:${id}`, column: c }), value))
                 }
                 linkOf={(r, c) => {
-                  const key = foreignKeys.find((k) => k.columns.includes(columns[c].name))
+                  const key = keyOfColumn[c]
                   if (!key) return null
                   const values = Object.fromEntries(columns.map((column, i) => [column.name, rows[r][i]]))
                   const target = linkFilter(dialect, key, values)
                   return target && (() => onOpenTable(referencedTable(table, key.referencedTable), target))
                 }}
-                columnInfo={columnInfo && Object.fromEntries(columnInfo.map((c) => [c.name, c]))}
+                columnInfo={infoByColumn}
                 active={picked}
                 // Letting go of the picked cell (Escape) lets go of the selection with it.
                 onActivate={(cell) => {

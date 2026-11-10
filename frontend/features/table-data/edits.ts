@@ -54,6 +54,11 @@ export function rowKey(key: Values): string {
   return JSON.stringify(Object.entries(key).sort(([a], [b]) => a.localeCompare(b)))
 }
 
+/** Each loaded row's `rowKey`, by its position: worked out once for a page, not for each cell drawn. */
+export function rowKeys(rows: Value[][], columns: { name: string; primaryKey: boolean }[]): string[] {
+  return rows.map((row) => rowKey(keyOf(row, columns)))
+}
+
 /** Sets a cell of a loaded row; setting it back to what was loaded drops the change. */
 export function editCell(
   edits: Edits,
