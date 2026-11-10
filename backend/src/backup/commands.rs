@@ -31,7 +31,7 @@ pub struct Exported {
 
 /// Writes the configuration to `path`; `secrets` puts passwords and the MCP
 /// token in, as plain text. The file is readable by its owner only.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_backup(
     app: AppHandle,
     path: PathBuf,
@@ -49,7 +49,7 @@ pub fn export_backup(
 }
 
 /// What the backup at `path` holds, and what importing it would do here.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_backup(app: AppHandle, path: PathBuf) -> Result<Preview> {
     let backup = super::read(&fs::read_to_string(path)?)?;
     with_stores(&app, |stores| Ok(super::preview(stores, &backup)))

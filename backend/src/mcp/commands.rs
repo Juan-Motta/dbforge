@@ -43,7 +43,7 @@ pub async fn set_mcp_settings(app: AppHandle, settings: McpSettings) -> Result<M
 }
 
 /// The token agents send, for the user to copy into an agent's settings.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mcp_token(app: AppHandle) -> Result<String> {
     server::token_of(&app)
 }

@@ -13,7 +13,9 @@ pub fn list_connections(store: State<'_, ConnectionStore>) -> Vec<Connection> {
     store.list()
 }
 
-#[tauri::command]
+// Commands that reach the keychain or the disk run off the main thread: the
+// keychain may stop to ask the user, and the window must keep drawing meanwhile.
+#[tauri::command(async)]
 pub fn save_connection(store: State<'_, ConnectionStore>, input: ConnectionInput) -> Result<Connection> {
     let (connection, password) = input.into_parts()?;
     if let Some(password) = password {
@@ -24,12 +26,12 @@ pub fn save_connection(store: State<'_, ConnectionStore>, input: ConnectionInput
 }
 
 /// Saves a copy of a connection, password included, under `name`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn duplicate_connection(store: State<'_, ConnectionStore>, id: String, name: String) -> Result<Connection> {
     store.duplicate(&id, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_connection(store: State<'_, ConnectionStore>, id: String) -> Result<()> {
     store.remove(&id)?;
     store.credentials().delete(&id)
@@ -92,7 +94,7 @@ pub fn list_tags(tags: State<'_, TagStore>) -> Vec<Tag> {
 }
 
 /// Saves the whole list of tags; connections lose the tags it no longer has.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_tags(store: State<'_, ConnectionStore>, tags: State<'_, TagStore>, list: Vec<Tag>) -> Result<Vec<Tag>> {
     tags.replace(list)?;
     let kept: Vec<String> = tags.list().into_iter().map(|tag| tag.id).collect();

@@ -398,13 +398,13 @@ pub fn dump_file_exists(path: String) -> bool {
 }
 
 /// How many exports are in `folder` and how much they take.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_folder_usage(folder: String) -> Result<exports::ExportFiles> {
     exports::usage(Path::new(&folder))
 }
 
 /// Deletes the exports in `folder` (other files stay), and says what was deleted.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_export_folder(folder: String) -> Result<exports::ExportFiles> {
     exports::clear(Path::new(&folder))
 }
