@@ -166,6 +166,7 @@ async fn columns(client: &mut Client, table: &TableRef) -> Result<Vec<CatalogCol
             };
             CatalogColumn {
                 info: ColumnInfo {
+                    options: Vec::new(),
                     name: text(row, 0),
                     data_type,
                     nullable,

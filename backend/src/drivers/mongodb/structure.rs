@@ -126,6 +126,7 @@ fn fields(sample: &[Document]) -> Vec<ColumnInfo> {
                 format!("In {share}% of {} sampled documents", sample.len())
             });
             ColumnInfo {
+                options: Vec::new(),
                 nullable: present < sample.len() || values.iter().any(|v| matches!(v, Bson::Null | Bson::Undefined)),
                 data_type: if types.is_empty() {
                     "null".into()

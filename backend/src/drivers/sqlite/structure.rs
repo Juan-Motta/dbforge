@@ -82,6 +82,7 @@ async fn columns(conn: &mut SqliteConnection, table: &str) -> Result<Vec<PragmaC
         .into_iter()
         .map(|(name, data_type, not_null, default, pk, hidden)| PragmaColumn {
             info: ColumnInfo {
+                options: Vec::new(),
                 name,
                 data_type: if data_type.is_empty() { "any".into() } else { data_type.to_lowercase() },
                 nullable: not_null == 0 && pk == 0,

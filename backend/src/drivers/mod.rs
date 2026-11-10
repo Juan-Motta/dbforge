@@ -229,6 +229,9 @@ pub struct ColumnInfo {
     /// The default expression, or how the value is generated (identity, computed).
     pub default: Option<String>,
     pub comment: Option<String>,
+    /// The values an enum column takes, in their order; empty for other columns.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

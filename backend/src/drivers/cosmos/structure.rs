@@ -114,6 +114,7 @@ fn properties(sample: &[Value], keys: &[String]) -> Vec<ColumnInfo> {
                 notes.push(format!("In {share}% of {} sampled items", sample.len()));
             }
             ColumnInfo {
+                options: Vec::new(),
                 nullable: present < sample.len() || values.iter().any(|v| v.is_null()),
                 data_type: if types.is_empty() {
                     "null".into()

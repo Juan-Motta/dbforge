@@ -66,6 +66,7 @@ async fn columns(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) ->
     Ok(rows
         .into_iter()
         .map(|(name, data_type, nullable, default, extra, generated, comment)| ColumnInfo {
+            options: enum_options(&data_type),
             name,
             data_type,
             nullable: nullable == "YES",
@@ -74,6 +75,33 @@ async fn columns(conn: &mut MySqlConnection, table: &TableRef, mariadb: bool) ->
             comment: Some(comment).filter(|c| !c.is_empty()),
         })
         .collect())
+}
+
+/// The values of an `enum('a','b')` column, unquoted (`''` is a quote); empty for other types.
+fn enum_options(column_type: &str) -> Vec<String> {
+    let Some(list) = column_type.strip_prefix("enum(").and_then(|rest| rest.strip_suffix(')')) else {
+        return Vec::new();
+    };
+    let mut options = Vec::new();
+    let mut chars = list.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\'' {
+            continue;
+        }
+        let mut option = String::new();
+        while let Some(c) = chars.next() {
+            match c {
+                '\'' if chars.peek() == Some(&'\'') => {
+                    chars.next();
+                    option.push('\'');
+                }
+                '\'' => break,
+                c => option.push(c),
+            }
+        }
+        options.push(option);
+    }
+    options
 }
 
 /// The default as the structure view shows it: the value, `auto_increment`, or
@@ -225,6 +253,28 @@ fn with_triggers(ddl: String, triggers: &[TriggerInfo]) -> String {
 mod tests {
     use super::super::tests::{PASSWORD, local, mariadb, run, table};
     use super::*;
+
+    #[test]
+    fn enum_types_give_their_values() {
+        assert_eq!(enum_options("enum('new','it''s done','a,b')"), ["new", "it's done", "a,b"]);
+        assert!(enum_options("varchar(20)").is_empty());
+        assert!(enum_options("set('a','b')").is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn enum_columns_list_their_values() {
+        run(
+            &local(),
+            "DROP TABLE IF EXISTS shop.dbforge_enum_tasks;
+             CREATE TABLE shop.dbforge_enum_tasks (id int PRIMARY KEY, state enum('new','it''s done'), done boolean)",
+        )
+        .await;
+        let structure = table_structure(&local(), PASSWORD, &table("shop", "dbforge_enum_tasks")).await.unwrap();
+        let options: Vec<_> = structure.columns.iter().map(|c| (c.name.as_str(), c.options.clone())).collect();
+        assert_eq!(options, [("id", vec![]), ("state", vec!["new".to_string(), "it's done".into()]), ("done", vec![])]);
+        run(&local(), "DROP TABLE shop.dbforge_enum_tasks").await;
+    }
 
     #[test]
     fn defaults_show_auto_increment_and_generated_columns() {
