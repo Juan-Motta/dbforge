@@ -120,7 +120,8 @@ export function installMockBackend() {
       const payload = args as Record<string, unknown>
       switch (cmd) {
         case 'list_connections':
-          return delay(connections)
+          // A copy, as the real backend's JSON is: React must never share the mock's array.
+          return delay([...connections])
         case 'save_connection': {
           const { password: _password, ...input } = payload.input as ConnectionInput
           const saved = { ...input, id: input.id ?? crypto.randomUUID() }
@@ -128,6 +129,12 @@ export function installMockBackend() {
           if (index >= 0) connections[index] = saved
           else connections.push(saved)
           return delay(saved)
+        }
+        case 'duplicate_connection': {
+          const original = connections.find((c) => c.id === payload.id)!
+          const copy = { ...original, id: crypto.randomUUID(), name: String(payload.name) }
+          connections.push(copy)
+          return delay(copy)
         }
         case 'delete_connection':
           connections.splice(

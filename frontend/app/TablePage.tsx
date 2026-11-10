@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { TableTabView } from './tabs'
 import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
 import type { SqlDialect } from '../domain/connection'
@@ -8,14 +9,12 @@ import { NO_FILTER, type RowFilter } from '../features/table-data/rowFilter'
 import { TableView } from '../features/table-data/TableView'
 import { StructureSection } from '../features/table-structure/StructureSection'
 import { messages as tableStructureMessages } from '../features/table-structure/messages'
-import { SECTIONS, sectionCount, sectionLabel, type Section } from '../features/table-structure/sections'
+import { SECTIONS, sectionCount, sectionLabel } from '../features/table-structure/sections'
 import { summary } from '../features/table-structure/format'
 import { useTableStructure } from '../features/table-structure/useTableStructure'
 import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
 import styles from './TablePage.module.css'
-
-type View = 'data' | 'diagram' | Section
 
 interface TablePageProps {
   connectionId: string
@@ -32,6 +31,9 @@ interface TablePageProps {
   initialFilter?: RowFilter
   /** Opens another table of the connection, filtered. */
   onOpenTable: (table: TableRef, filter: RowFilter) => void
+  /** What the tab shows; kept by the tab so the explorer can open a section. */
+  view: TableTabView
+  onViewChange: (view: TableTabView) => void
 }
 
 /** A table's tab: its rows, and its structure split into sections. */
@@ -45,10 +47,11 @@ export function TablePage({
   onExport,
   initialFilter,
   onOpenTable,
+  view,
+  onViewChange: setView,
 }: TablePageProps) {
   const m = useMessages(messages)
   const structureM = useMessages(tableStructureMessages)
-  const [view, setView] = useState<View>('data')
   const [filter, setFilter] = useState<RowFilter>(initialFilter ?? NO_FILTER)
   // The data view puts its row actions here, next to Export.
   const [actionsSlot, setActionsSlot] = useState<HTMLSpanElement | null>(null)

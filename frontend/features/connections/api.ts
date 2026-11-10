@@ -30,6 +30,8 @@ export const connectionsApi = {
   list: () => invoke<Connection[]>('list_connections'),
   save: (input: ConnectionInput) => invoke<Connection>('save_connection', { input }),
   remove: (id: string) => invoke<void>('delete_connection', { id }),
+  /** A copy named `name`, password included. */
+  duplicate: (id: string, name: string) => invoke<Connection>('duplicate_connection', { id, name }),
   /** Resolves with the server version, e.g. "PostgreSQL 16.2". */
   test: (input: ConnectionInput) => invoke<string>('test_connection', { input }),
   credentialStorage: () => invoke<CredentialStorageInfo>('credential_storage'),

@@ -13,7 +13,7 @@ import { QueryConsole } from '../features/query/QueryConsole'
 import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
 import { TablePage } from './TablePage'
-import type { Tab } from './tabs'
+import type { Tab, TableTabView } from './tabs'
 import styles from './App.module.css'
 
 interface WorkspaceProps {
@@ -28,6 +28,7 @@ interface WorkspaceProps {
   onOpenQuery: (entry: HistoryEntry) => void
   onOpenDiagram: (connectionId: string, database: string, schema: string) => void
   onOpenTable: (connectionId: string, table: TableRef, filter: RowFilter) => void
+  onTableView: (tabId: string, view: TableTabView) => void
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram', keyspace: 'database' } as const
@@ -43,6 +44,7 @@ export function Workspace({
   onOpenQuery,
   onOpenDiagram,
   onOpenTable,
+  onTableView,
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
   const m = useMessages(messages)
@@ -112,6 +114,8 @@ export function Workspace({
                 onOpenDiagram(tab.connectionId, tab.table.database, tab.table.schema)
               }
               initialFilter={tab.filter}
+              view={tab.view ?? 'data'}
+              onViewChange={(view) => onTableView(tab.id, view)}
               onOpenTable={(table, filter) => onOpenTable(tab.connectionId, table, filter)}
               onExport={(filter) =>
                 setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table, filter })

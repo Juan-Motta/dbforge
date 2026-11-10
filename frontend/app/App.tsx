@@ -2,16 +2,13 @@ import { useEffect, useState } from 'react'
 import {
   defaultDatabase,
   defaultSchema,
-  DUMP_ENGINES,
   hasDiagram,
-  NEW_OBJECTS,
   type Connection,
   type NewObjectKind,
 } from '../domain/connection'
 import { tableRefFromPath } from '../domain/table'
 import { NewObjectDialog } from '../features/admin/NewObjectDialog'
 import { messages as adminMessages } from '../features/admin/messages'
-import { MENU_ICONS, menuLabelOf } from '../features/admin/newObject'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
 import { DeleteConnectionDialog } from '../features/connections/DeleteConnectionDialog'
 import { ExportDatabaseDialog, ImportDatabaseDialog } from '../features/dump/DumpDialogs'
@@ -33,10 +30,18 @@ import {
   openDiagramTab,
   openKeyspaceTab,
   openTableTab,
+  setTableView,
 } from './tabs'
 import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
+import { diagramTarget, explorerMenu, type MenuActions } from './explorerMenu'
 import { Workspace } from './Workspace'
+import { Notice, type NoticeState } from '../components/Notice'
+import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
+import { NO_FILTER } from '../features/table-data/rowFilter'
+import { structureApi } from '../features/table-structure/api'
+import { copyText } from '../lib/clipboard'
+import { errorMessage } from '../lib/errors'
 import styles from './App.module.css'
 
 /** `null` while closed; `{}` for a new connection. */
@@ -48,7 +53,7 @@ interface Selection {
 }
 
 export function App() {
-  const { connections, loadError, save, remove } = useConnections()
+  const { connections, loadError, save, remove, duplicate } = useConnections()
   // Hidden with ⌘B for more room; it stays mounted so its expanded nodes survive.
   const [explorerOpen, setExplorerOpen] = useState(true)
   const [explorerWidth, setExplorerWidth, resetExplorerWidth] = usePanelWidth(
@@ -79,6 +84,19 @@ export function App() {
   const theme = useTheme()
   const m = useMessages(messages)
   const adminM = useMessages(adminMessages)
+  // A table being exported from the explorer's menu.
+  const [exporting, setExporting] = useState<ExportSource | null>(null)
+  const [notice, setNotice] = useState<NoticeState | null>(null)
+
+  // A notice goes away by itself; a newer one restarts the wait.
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice((current) => (current?.id === notice.id ? null : current)), 2500)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  const notify = (text: string, tone: NoticeState['tone'] = 'info') =>
+    setNotice((current) => ({ id: (current?.id ?? 0) + 1, text, tone }))
 
   const activeConnection = connections.find((c) => c.id === selection?.connectionId)
   const activePath = activeConnection ? (selection?.path ?? []) : []
@@ -164,27 +182,31 @@ export function App() {
 
   /** A tree node's right-click menu: a connection's actions, or a database's export and import. */
   const menuOf = (node: TreeNode, refresh: () => void): MenuItem[] => {
-    if (node.kind === 'connection') {
-      const connection = node.connection
-      const create = NEW_OBJECTS[connection.engine].map((kind) => ({
-        label: menuLabelOf(kind, adminM),
-        icon: MENU_ICONS[kind],
-        onSelect: () => setCreating({ connection, kind, refresh }),
-      }))
-      return [
-        { label: m.editConnection, icon: 'edit', onSelect: () => setDialog({ connection }) },
-        ...(create.length > 0 ? [{ label: m.newMenu, icon: 'plus' as const, items: create }] : []),
-        { label: m.deleteConnection, icon: 'trash', onSelect: () => setDeleting(connection) },
-      ]
-    }
     const connection = connections.find((c) => c.id === node.connectionId)
-    if (node.kind !== 'database' || !connection || !DUMP_ENGINES.includes(connection.engine)) return []
-    const open = (mode: 'export' | 'import') => () =>
-      setDump({ mode, connection, database: node.name, refresh })
-    return [
-      { label: m.exportDatabase, onSelect: open('export') },
-      { label: m.importSqlFile, onSelect: open('import') },
-    ]
+    if (!connection) return []
+    const actions: MenuActions = {
+      editConnection: (c) => setDialog({ connection: c }),
+      duplicateConnection: (c) =>
+        void duplicate(c.id, m.duplicateName(c.name)).catch((error) => notify(errorMessage(error), 'error')),
+      deleteConnection: setDeleting,
+      newObject: (c, kind) => setCreating({ connection: c, kind, refresh }),
+      newQuery: (c, database, sql, container) =>
+        setTabs((state) => newQueryTab(state, m, c.id, database, sql, container)),
+      openTable: (c, table, view) => setTabs((state) => openTableTab(state, c.id, table, undefined, view)),
+      openDiagram: (c, database, schema) =>
+        setTabs((state) => openDiagramTab(state, m, c.id, database, schema)),
+      exportTable: (c, table) =>
+        setExporting({ kind: 'table', connectionId: c.id, table, filter: NO_FILTER }),
+      dump: (mode, c, database) => setDump({ mode, connection: c, database, refresh }),
+      copy: (text) =>
+        void copyText(text).then(
+          () => notify(m.copied),
+          (error) => notify(errorMessage(error), 'error'),
+        ),
+      structure: (c, table) => structureApi.get(c.id, table),
+      refresh,
+    }
+    return explorerMenu(node, connection, actions, m, adminM)
   }
 
   const removeConnection = async (id: string) => {
@@ -227,17 +249,10 @@ export function App() {
             }}
             diagramOf={(node) => {
               const connection = connections.find((c) => c.id === node.connectionId)
-              if (!connection || !hasDiagram(connection.engine)) return null
-              const [database, schemaName] = node.path
-              // Schemaless engines (MySQL) draw a database; the others draw a schema.
-              const schema =
-                node.kind === 'schema'
-                  ? schemaName
-                  : node.kind === 'database' && defaultSchema(connection.engine, database) === database
-                    ? database
-                    : null
-              if (!schema) return null
-              return () => setTabs((state) => openDiagramTab(state, m, connection.id, database, schema))
+              const target = connection && diagramTarget(node, connection)
+              if (!connection || !target) return null
+              return () =>
+                setTabs((state) => openDiagramTab(state, m, connection.id, target.database, target.schema))
             }}
             onNewConnection={() => setDialog({})}
             menuOf={menuOf}
@@ -260,6 +275,7 @@ export function App() {
               onOpenDiagram={(connectionId, database, schema) =>
                 setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
               }
+              onTableView={(id, view) => setTabs((state) => setTableView(state, id, view))}
               onOpenQuery={(entry) =>
                 setTabs((state) =>
                   newQueryTab(
@@ -296,6 +312,9 @@ export function App() {
           onClose={() => setDeleting(null)}
         />
       )}
+
+      {exporting && <ExportDialog source={exporting} onClose={() => setExporting(null)} />}
+      {notice && <Notice notice={notice} />}
 
       {dump?.mode === 'export' && (
         <ExportDatabaseDialog

@@ -1,10 +1,14 @@
 import type { TableRef } from '../domain/table'
 import type { RowFilter } from '../features/table-data/rowFilter'
+import type { Section } from '../features/table-structure/sections'
 import type { AppMessages } from './messages'
+
+/** What a table's tab shows: its rows, its diagram, or a section of its structure. */
+export type TableTabView = 'data' | 'diagram' | Section
 
 export type Tab = { id: string; title: string; connectionId: string } & (
   | { kind: 'query'; database?: string; initialSql?: string; container?: string }
-  | { kind: 'table'; table: TableRef; filter?: RowFilter }
+  | { kind: 'table'; table: TableRef; filter?: RowFilter; view?: TableTabView }
   | { kind: 'diagram'; database: string; schema: string }
   | { kind: 'keyspace'; database: string }
 )
@@ -47,11 +51,30 @@ export function openTableTab(
   table: TableRef,
   /** Opens the table already filtered, in a tab of its own (e.g. following a foreign key). */
   filter?: RowFilter,
+  /** Shows this view, also when the tab was already open. */
+  view?: TableTabView,
 ): TabsState {
   const base = `table:${connectionId}:${table.database}.${table.schema}.${table.name}`
-  if (!filter) return openTab(state, { id: base, kind: 'table', title: table.name, connectionId, table })
-  const title = `${table.name} · ${filter.filter}`
-  return openTab(state, { id: `${base}?${filter.filter}`, kind: 'table', title, connectionId, table, filter })
+  const tab: Tab = filter
+    ? {
+        id: `${base}?${filter.filter}`,
+        kind: 'table',
+        title: `${table.name} · ${filter.filter}`,
+        connectionId,
+        table,
+        filter,
+      }
+    : { id: base, kind: 'table', title: table.name, connectionId, table }
+  const opened = openTab(state, tab)
+  return view ? setTableView(opened, tab.id, view) : opened
+}
+
+/** Switches a table's tab to `view`. */
+export function setTableView(state: TabsState, id: string, view: TableTabView): TabsState {
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) => (tab.id === id && tab.kind === 'table' ? { ...tab, view } : tab)),
+  }
 }
 
 /** Opens a schema's ER diagram, or switches to it when it is already open. */

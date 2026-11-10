@@ -30,5 +30,11 @@ export function useConnections() {
     setConnections((current) => current.filter((c) => c.id !== id))
   }
 
-  return { connections, loadError, save, remove }
+  const duplicate = async (id: string, name: string) => {
+    const copy = await connectionsApi.duplicate(id, name)
+    setConnections((current) => [...current, copy])
+    return copy
+  }
+
+  return { connections, loadError, save, remove, duplicate }
 }
