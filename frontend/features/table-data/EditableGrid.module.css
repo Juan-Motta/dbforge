@@ -269,3 +269,73 @@ td[data-menu-open] {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+
+.editor input[aria-invalid='true'] {
+  box-shadow: inset 0 0 0 2px var(--err);
+}
+
+/* A date or time cell's controls, under the cell and above the grid's scrolling. */
+.temporal {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 340px;
+  padding: 12px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--elev);
+  box-shadow: var(--shadow);
+  font: 13px var(--font-sans);
+  text-align: left;
+}
+
+.temporalRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text2);
+}
+
+.temporal select,
+.temporal input[type='number'] {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: 13px var(--font-sans);
+}
+
+.temporal select:focus,
+.temporal input[type='number']:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.year {
+  width: 84px;
+}
+
+.spinner {
+  width: 58px;
+  font-family: var(--font-mono) !important;
+}
+
+.temporalNote {
+  color: var(--text3);
+  font: 12px var(--font-mono);
+}
+
+.temporalActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.temporalSpacer {
+  flex: 1;
+}

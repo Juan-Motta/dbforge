@@ -184,6 +184,10 @@ export function installMockBackend() {
               '2026-11-05 10:00:00+00',
               id % 5 === 0 ? null : String(1000 + (id % 9)),
               `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
+              id % 6 === 0
+                ? null
+                : `2026-${String((id % 12) + 1).padStart(2, '0')}-${String((id % 28) + 1).padStart(2, '0')}`,
+              `2026-09-16 ${String(id % 24).padStart(2, '0')}:00:27`,
             ]
           })
           return delay({
@@ -199,6 +203,8 @@ export function installMockBackend() {
               },
               { name: 'customer_id', dataType: 'bigint', primaryKey: false },
               { name: 'external_id', dataType: 'uuid', primaryKey: false },
+              { name: 'birthday', dataType: 'date', primaryKey: false },
+              { name: 'last_login', dataType: 'timestamp without time zone', primaryKey: false },
             ],
             rows,
             hasMore: offset + count < total,

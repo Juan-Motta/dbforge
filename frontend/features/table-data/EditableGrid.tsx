@@ -15,6 +15,8 @@ import { useMessages } from '../../lib/i18n/useLanguage'
 import type { Column } from './api'
 import { cellAt, DEFAULT, isDefault, keyOf, rowKey, type Cell, type CellValue, type Edits } from './edits'
 import { messages } from './messages'
+import { temporalKindOf } from './temporal'
+import { TemporalEditor } from './TemporalEditor'
 import styles from './EditableGrid.module.css'
 
 type Value = string | null
@@ -244,6 +246,7 @@ export function EditableGrid(props: EditableGridProps) {
     ) : (
       (value ?? 'NULL')
     )
+    const temporalKind = temporalKindOf(columns[column].dataType)
     if (isEditing) {
       // The editor lies over the cell, which keeps its content (unseen) and so its size.
       return (
@@ -255,7 +258,18 @@ export function EditableGrid(props: EditableGridProps) {
           <span className={styles.hidden} aria-hidden="true">
             {content}
           </span>
-          <CellEditor initial={value} onCommit={commit} onCancel={stopEditing} />
+          {temporalKind ? (
+            <TemporalEditor
+              initial={value}
+              kind={temporalKind}
+              offsetSpace={/datetimeoffset/i.test(columns[column].dataType)}
+              nullable={props.columnInfo?.[columns[column].name]?.nullable ?? true}
+              onCommit={commit}
+              onCancel={stopEditing}
+            />
+          ) : (
+            <CellEditor initial={value} onCommit={commit} onCancel={stopEditing} />
+          )}
         </td>
       )
     }
