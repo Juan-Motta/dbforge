@@ -4,11 +4,13 @@
 //! lists databases and then their tables, and a table's `TableRef` carries the
 //! database name in both `database` and `schema`.
 
+mod admin;
 mod diagram;
 mod edit;
 mod explain;
 mod structure;
 
+pub use admin::create_object;
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;

@@ -7,6 +7,7 @@
 //! Items are shown as rows: each top-level property is a column, `id` and the
 //! partition key first, and nested values are written as JSON.
 
+mod admin;
 mod client;
 mod edit;
 mod explain;
@@ -14,6 +15,7 @@ mod query;
 mod session;
 mod structure;
 
+pub use admin::create_database;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
 pub use session::{Session, open_session};

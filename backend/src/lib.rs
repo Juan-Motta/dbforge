@@ -1,3 +1,4 @@
+mod admin;
 mod connections;
 mod cursor;
 mod drivers;
@@ -34,6 +35,7 @@ pub fn run() {
             commands::save_connection,
             commands::delete_connection,
             commands::test_connection,
+            admin::create_object,
             explorer::list_objects,
             explorer::list_relations,
             explorer::fetch_rows,

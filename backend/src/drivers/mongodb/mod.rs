@@ -6,12 +6,14 @@
 //! Documents are shown as rows: each top-level field is a column and nested
 //! values are written as JSON, in the syntax mongosh reads (see [`literal`]).
 
+mod admin;
 mod edit;
 mod explain;
 mod session;
 mod shell;
 mod structure;
 
+pub use admin::create_object;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
 pub use session::{Session, cancel, open_session};

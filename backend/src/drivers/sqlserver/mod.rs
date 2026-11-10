@@ -5,10 +5,12 @@
 //! Every value is turned into text here, the way SQL Server Management Studio
 //! shows it, so results look the same in the grid, the console and exports.
 
+mod admin;
 mod edit;
 mod explain;
 mod structure;
 
+pub use admin::create_object;
 pub use edit::{apply_changes, preview_changes};
 pub use explain::explain;
 pub use structure::{schema_diagram, table_structure};

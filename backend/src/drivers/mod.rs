@@ -622,6 +622,75 @@ pub async fn cancel(
     .await
 }
 
+/// Something a connection's menu creates on its server. New roles and users
+/// start without privileges.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NewObject {
+    /// MongoDB only keeps a database that holds a collection: `collection` names its first one.
+    Database { name: String, collection: Option<String> },
+    /// `database` is where MongoDB keeps the role (`admin` when empty).
+    Role { name: String, database: Option<String> },
+    /// `host` is the MySQL account's host (`%` when empty); `database` is where
+    /// MongoDB keeps the user (`admin` when empty).
+    User { name: String, password: String, host: Option<String>, database: Option<String> },
+}
+
+impl NewObject {
+    pub fn name(&self) -> &str {
+        match self {
+            NewObject::Database { name, .. } | NewObject::Role { name, .. } | NewObject::User { name, .. } => name,
+        }
+    }
+
+    fn noun(&self) -> &'static str {
+        match self {
+            NewObject::Database { .. } => "database",
+            NewObject::Role { .. } => "role",
+            NewObject::User { .. } => "user",
+        }
+    }
+
+    /// Refuses what no server would accept, before connecting.
+    fn check(&self) -> Result<()> {
+        if self.name().trim().is_empty() {
+            return Err(AppError::Invalid(format!("Name the {}.", self.noun())));
+        }
+        if let NewObject::User { password, .. } = self
+            && password.is_empty()
+        {
+            return Err(AppError::Invalid("Give the user a password.".into()));
+        }
+        Ok(())
+    }
+}
+
+/// `database` or `fallback` when it is empty.
+fn or_default<'a>(database: &'a Option<String>, fallback: &'a str) -> &'a str {
+    database.as_deref().map(str::trim).filter(|d| !d.is_empty()).unwrap_or(fallback)
+}
+
+/// Creates a database, role or user on the connection's server.
+pub async fn create_object(connection: &Connection, password: Option<&str>, object: &NewObject) -> Result<()> {
+    object.check()?;
+    with_timeout(async {
+        match (connection.engine, object) {
+            (Engine::Postgres, _) => postgres::create_object(connection, password, object).await,
+            (Engine::Mysql | Engine::Mariadb, _) => mysql::create_object(connection, password, object).await,
+            (Engine::Sqlserver, _) => sqlserver::create_object(connection, password, object).await,
+            (Engine::Mongodb, _) => mongodb::create_object(connection, password, object).await,
+            (Engine::Redis, NewObject::User { name, password: secret, .. }) => {
+                redis::create_user(connection, password, name, secret).await
+            }
+            (Engine::Cosmosdb, NewObject::Database { name, .. }) => {
+                cosmos::create_database(connection, password, name).await
+            }
+            _ => Err(AppError::Invalid(format!("This connection can't create a {}.", object.noun()))),
+        }
+    })
+    .await
+}
+
 /// rustls needs one process-wide crypto provider when several are compiled in,
 /// as here (the drivers bring their own). Installing it twice is harmless.
 pub(crate) fn install_crypto() {
