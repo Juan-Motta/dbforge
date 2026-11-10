@@ -13,6 +13,7 @@ import {
   type CredentialStorageInfo,
   type SwitchProgress,
 } from '../connections/api'
+import { BackupSettings } from '../backup/BackupSettings'
 import { ExportSettings } from '../dump/ExportSettings'
 import { McpSettings } from '../mcp/McpSettings'
 import { TagsSection } from '../tags/TagsSection'
@@ -20,20 +21,31 @@ import { messages, type SettingsMessages } from './messages'
 import type { ThemePreference } from './theme'
 import styles from './SettingsDialog.module.css'
 
-type Section = 'appearance' | 'language' | 'tags' | 'exports' | 'agents' | 'passwords' | 'about'
+type Section = 'appearance' | 'language' | 'tags' | 'exports' | 'agents' | 'passwords' | 'backup' | 'about'
 
-const SECTIONS: Section[] = ['appearance', 'language', 'tags', 'exports', 'agents', 'passwords', 'about']
+const SECTIONS: Section[] = [
+  'appearance',
+  'language',
+  'tags',
+  'exports',
+  'agents',
+  'passwords',
+  'backup',
+  'about',
+]
 
 const THEMES: ThemePreference[] = ['dark', 'light', 'system']
 
 interface SettingsDialogProps {
   theme: ThemePreference
   onThemeChange: (theme: ThemePreference) => void
+  /** An imported backup changed the connections. */
+  onConnectionsChanged: () => void
   onClose: () => void
 }
 
 /** App preferences. Changes apply as soon as they are picked. */
-export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialogProps) {
+export function SettingsDialog({ theme, onThemeChange, onConnectionsChanged, onClose }: SettingsDialogProps) {
   const m = useMessages(messages)
   const [section, setSection] = useState<Section>('appearance')
 
@@ -73,6 +85,13 @@ export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialog
             </>
           )}
           {section === 'passwords' && <Passwords />}
+          {section === 'backup' && (
+            <>
+              <h3 className={styles.heading}>{m.backup}</h3>
+              <p className={styles.intro}>{m.backupIntro}</p>
+              <BackupSettings onThemeChange={onThemeChange} onConnectionsChanged={onConnectionsChanged} />
+            </>
+          )}
           {section === 'about' && <About />}
         </main>
       </div>
@@ -80,7 +99,7 @@ export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialog
   )
 }
 
-function Appearance({ theme, onThemeChange }: Omit<SettingsDialogProps, 'onClose'>) {
+function Appearance({ theme, onThemeChange }: Pick<SettingsDialogProps, 'theme' | 'onThemeChange'>) {
   const m = useMessages(messages)
   return (
     <>

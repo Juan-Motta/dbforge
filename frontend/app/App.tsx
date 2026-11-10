@@ -396,6 +396,7 @@ export function App() {
           <SettingsDialog
             theme={theme.preference}
             onThemeChange={theme.choose}
+            onConnectionsChanged={() => void reload()}
             onClose={() => setSettingsOpen(false)}
           />
         )}

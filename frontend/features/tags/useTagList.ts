@@ -10,11 +10,14 @@ import type { TagsState } from './useTags'
 export function useTagList(onRemoved: () => void): TagsState {
   const [tags, setTags] = useState<Tag[] | null>(null)
 
-  useEffect(() => {
+  const reload = () =>
     tagsApi
       .list()
       .then(setTags)
       .catch(() => {})
+
+  useEffect(() => {
+    void reload()
   }, [])
 
   const save = async (next: Tag[]) => {
@@ -23,5 +26,5 @@ export function useTagList(onRemoved: () => void): TagsState {
     if (removed) onRemoved()
   }
 
-  return { tags: tags ?? [], loaded: tags !== null, save }
+  return { tags: tags ?? [], loaded: tags !== null, save, reload }
 }

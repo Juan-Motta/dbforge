@@ -1,0 +1,46 @@
+.backup {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 16px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.note {
+  margin: 0;
+  color: var(--text3);
+  font-size: 12px;
+}
+
+.file {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: var(--text2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.file > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

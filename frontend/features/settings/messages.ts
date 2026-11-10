@@ -21,6 +21,8 @@ export const messages = defineMessages({
     agentsIntro:
       'Let AI agents such as Claude Code or Codex query and change your databases through DBForge.',
     passwords: 'Passwords',
+    backup: 'Backup',
+    backupIntro: 'Move DBForge’s configuration to another installation, or keep a copy of it.',
     passwordsIntro: 'Where DBForge saves the passwords and keys of your connections.',
     storage: 'Where passwords are saved',
     keychain: 'System keychain',
@@ -63,6 +65,8 @@ export const messages = defineMessages({
     agentsIntro:
       'Permite que agentes de IA como Claude Code o Codex consulten y cambien tus bases de datos a través de DBForge.',
     passwords: 'Contraseñas',
+    backup: 'Copia de seguridad',
+    backupIntro: 'Lleva la configuración de DBForge a otra instalación, o guarda una copia.',
     passwordsIntro: 'Dónde guarda DBForge las contraseñas y claves de tus conexiones.',
     storage: 'Dónde se guardan las contraseñas',
     keychain: 'Llavero del sistema',

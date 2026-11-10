@@ -7,10 +7,17 @@ export interface TagsState {
   loaded: boolean
   /** Saves the whole list; rejects with the backend's reason when it refuses it. */
   save: (tags: Tag[]) => Promise<void>
+  /** Reads them again, after something else changed them (an imported backup). */
+  reload: () => Promise<void>
 }
 
 /** Provided by `App` from `useTagList`; no tags outside it. */
-export const TagsContext = createContext<TagsState>({ tags: [], loaded: false, save: async () => {} })
+export const TagsContext = createContext<TagsState>({
+  tags: [],
+  loaded: false,
+  save: async () => {},
+  reload: async () => {},
+})
 
 export function useTags(): TagsState {
   return useContext(TagsContext)
