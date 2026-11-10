@@ -32,7 +32,7 @@ use self::logged::{LoggedClient, Statement};
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
-    with_timeout,
+    hex, with_timeout,
 };
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
@@ -500,9 +500,7 @@ fn text(data: &ColumnData<'static>) -> Option<String> {
         ColumnData::Bit(v) => v.map(|v| if v { "1" } else { "0" }.to_string()),
         ColumnData::String(v) => v.as_ref().map(|v| v.to_string()),
         ColumnData::Guid(v) => v.map(|v| v.to_string().to_uppercase()),
-        ColumnData::Binary(v) => {
-            v.as_ref().map(|bytes| format!("0x{}", bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()))
-        }
+        ColumnData::Binary(v) => v.as_ref().map(|bytes| hex(bytes)),
         ColumnData::Numeric(v) => v.map(|v| decimal(v.value(), v.scale())),
         ColumnData::Xml(v) => v.as_ref().map(|v| v.to_string()),
         // datetime keeps 1/300 s; three decimals is how it's written and read back.

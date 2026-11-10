@@ -742,6 +742,18 @@ pub(crate) fn install_crypto() {
     });
 }
 
+/// Bytes as `0x` and upper-case hex digits, the form binary values are shown in.
+fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+    let mut text = String::with_capacity(2 + bytes.len() * 2);
+    text.push_str("0x");
+    for byte in bytes {
+        text.push(DIGITS[usize::from(byte >> 4)] as char);
+        text.push(DIGITS[usize::from(byte & 0x0F)] as char);
+    }
+    text
+}
+
 async fn with_timeout<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
     tokio::time::timeout(TIMEOUT, request).await.map_err(|_| AppError::Timeout(TIMEOUT.as_secs()))?
 }

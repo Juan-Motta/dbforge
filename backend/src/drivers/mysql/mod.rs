@@ -30,7 +30,7 @@ use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
 use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, StatementResult, TableRef,
-    with_timeout,
+    hex, with_timeout,
 };
 use crate::connections::model::{Connection, Engine};
 use crate::error::{AppError, Result};
@@ -210,9 +210,50 @@ fn is_generated(extra: &str) -> bool {
     extra.contains("VIRTUAL GENERATED") || extra.contains("STORED GENERATED")
 }
 
-/// Every value cast to text so any column type can be shown or exported as-is.
+/// How a column's values travel as text, to the grid and back from it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum TextForm {
+    /// Their own text.
+    Plain,
+    /// Bytes, as `0x` and hex digits: any other text would lose those that aren't characters.
+    Hex,
+    /// Bits, as the whole number they spell.
+    Bits,
+}
+
+impl TextForm {
+    /// The form of a column, from its type as the catalog writes it: `varbinary(8)`.
+    pub(super) fn of(data_type: &str) -> Self {
+        let base = data_type.split('(').next().unwrap_or(data_type).trim().to_ascii_lowercase();
+        match base.as_str() {
+            "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => Self::Hex,
+            "bit" => Self::Bits,
+            _ => Self::Plain,
+        }
+    }
+
+    /// The expression that reads `column` in this form.
+    fn read(self, column: &str) -> String {
+        match self {
+            Self::Plain => format!("CAST({column} AS CHAR)"),
+            Self::Hex => format!("CONCAT('0x', HEX({column}))"),
+            Self::Bits => format!("CAST({column} + 0 AS CHAR)"),
+        }
+    }
+
+    /// The expression that turns the text bound to `marker` back into the column's value.
+    pub(super) fn write(self, marker: &str) -> String {
+        match self {
+            Self::Plain => marker.to_string(),
+            Self::Hex => format!("UNHEX(SUBSTR({marker}, 3))"),
+            Self::Bits => format!("CAST({marker} AS UNSIGNED)"),
+        }
+    }
+}
+
+/// Every value read as text, so any column type can be shown, exported and written back.
 fn select_as_text(columns: &[Column], table: &TableRef, filter: &RowFilter) -> String {
-    let values: Vec<String> = columns.iter().map(|c| format!("CAST({} AS CHAR)", quote_ident(&c.name))).collect();
+    let values: Vec<String> = columns.iter().map(|c| TextForm::of(&c.data_type).read(&quote_ident(&c.name))).collect();
     let order_by: Vec<String> = columns.iter().filter(|c| c.primary_key).map(|c| quote_ident(&c.name)).collect();
     format!(
         "SELECT {} FROM {}.{}{}",
@@ -314,15 +355,20 @@ fn columns_of(row: &MySqlRow) -> Vec<Column> {
         .collect()
 }
 
-/// Values in their text form. The text protocol sends every value as text, so the
-/// bytes are read as such (unchecked); binary data that isn't UTF-8 is shown lossily.
+/// Values in their text form. The text protocol sends every value as text, so
+/// the bytes are read as such: bits as the number they spell, and bytes that
+/// aren't UTF-8 (binary data) as `0x` and hex digits, never with characters lost.
 fn text_values(row: &MySqlRow) -> Vec<Option<String>> {
-    (0..row.len())
-        .map(|i| {
-            row.try_get_unchecked::<Option<Vec<u8>>, _>(i)
-                .ok()
-                .flatten()
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    row.columns()
+        .iter()
+        .enumerate()
+        .map(|(i, column)| {
+            let bytes = row.try_get_unchecked::<Option<Vec<u8>>, _>(i).ok().flatten()?;
+            Some(if column.type_info().name() == "BIT" {
+                bytes.iter().fold(0u64, |number, byte| (number << 8) | u64::from(*byte)).to_string()
+            } else {
+                String::from_utf8(bytes).unwrap_or_else(|binary| hex(binary.as_bytes()))
+            })
         })
         .collect()
 }

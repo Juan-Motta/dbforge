@@ -1,23 +1,23 @@
 //! Row edits from the table grid for MySQL, built by the shared `edit_sql` builder.
 //!
 //! MySQL converts a text parameter to the column's type on assignment, so values
-//! need no cast. Two things keep the PostgreSQL guarantees: the session is put in
+//! need no cast, but for binary and bit columns: those go back from the form the
+//! grid shows them in (`TextForm`). Two things keep the PostgreSQL guarantees: the session is put in
 //! strict mode, so a value that doesn't fit fails instead of being truncated with
 //! a warning, and only transactional tables can be edited, since a ROLLBACK can't
 //! undo changes to MyISAM or MEMORY tables.
 
 use super::super::sqlx_edits;
-use super::Conn;
-use super::{connect, is_generated, with_timeout};
+use super::{Conn, TextForm, connect, is_generated, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
-use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
+use crate::drivers::{ApplySummary, CellValue, Column, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
 const MYSQL: Dialect = Dialect {
     quote: ['`', '`'],
     numbered: None,
-    value: |marker, _| marker.to_string(),
+    value: |marker, data_type| TextForm::of(data_type).write(marker),
     default_row: "() VALUES ()",
     backslash_escapes: true,
     string_prefix: "",
@@ -32,6 +32,7 @@ pub async fn apply_changes(
 ) -> Result<ApplySummary> {
     let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
     let columns = with_timeout(editable_columns(&mut conn, table)).await?;
+    check_binary_values(&columns, changes)?;
     let statements = edit_sql::build(&MYSQL, &columns, table, changes)?;
     sqlx::query("SET SESSION sql_mode = CONCAT_WS(',', @@SESSION.sql_mode, 'STRICT_ALL_TABLES')")
         .execute(&mut conn)
@@ -54,8 +55,35 @@ pub async fn preview_changes(
     let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
     let columns = with_timeout(editable_columns(&mut conn, table)).await?;
     conn.close().await?;
+    check_binary_values(&columns, changes)?;
     let statements = edit_sql::build(&MYSQL, &columns, table, changes)?;
     Ok(statements.iter().map(|statement| edit_sql::inline(&MYSQL, statement)).collect())
+}
+
+/// Refuses a value for a binary column that isn't `0x` and pairs of hex digits:
+/// `UNHEX` would turn it into NULL without a word.
+fn check_binary_values(columns: &[Column], changes: &[RowChange]) -> Result<()> {
+    let is_hex = |text: &str| {
+        text.strip_prefix("0x")
+            .is_some_and(|digits| digits.len() % 2 == 0 && digits.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    let values = changes.iter().flat_map(|change| match change {
+        RowChange::Update { values, .. } | RowChange::Insert { values } => Some(values),
+        // Deletes carry no values, and whole documents aren't a SQL table's.
+        _ => None,
+    });
+    for (name, value) in values.flatten() {
+        let binary = columns.iter().any(|c| &c.name == name && TextForm::of(&c.data_type) == TextForm::Hex);
+        if let CellValue::Text(text) = value
+            && binary
+            && !is_hex(text)
+        {
+            return Err(AppError::Invalid(format!(
+                "{name} takes binary values as 0x followed by hex digits, like 0x0A1B."
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// The table's columns, marking only the real primary key (not a unique index
@@ -169,6 +197,65 @@ mod tests {
                 rows(&mut conn, "dbforge_medit1").await,
                 [(1, "one".into(), 1, None), (2, "two".into(), 2, Some("done".into())), (4, "it's".into(), 5, None)]
             );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn binary_and_bit_values_are_read_and_written_back_as_shown() {
+        for server in servers() {
+            let database = "dbforge_medit_bin";
+            run(
+                &server,
+                &format!(
+                    "DROP DATABASE IF EXISTS {database};
+                     CREATE DATABASE {database};
+                     CREATE TABLE {database}.bins (id binary(4) PRIMARY KEY, flags bit(3) NOT NULL, data varbinary(8));
+                     INSERT INTO {database}.bins VALUES (x'ACED0005', b'101', x'FF00'), (x'00000001', b'000', NULL);"
+                ),
+            )
+            .await;
+            let bins = table(database, "bins");
+            let shown = || async {
+                super::super::fetch_rows(&server, PASSWORD, &bins, &crate::drivers::RowFilter::default(), 0, 50)
+                    .await
+                    .unwrap()
+                    .rows
+            };
+            let some = |v: &str| Some(v.to_string());
+            assert_eq!(
+                shown().await,
+                [[some("0x00000001"), some("0"), None], [some("0xACED0005"), some("5"), some("0xFF00")]]
+            );
+
+            // The key as the grid shows it finds its row; values go back in the same form.
+            let changes = vec![
+                RowChange::Update {
+                    key: map(&[("id", Some("0xACED0005"))]),
+                    values: map(&[("data", Some("0x00FE")), ("flags", Some("6"))]),
+                },
+                RowChange::Delete { key: map(&[("id", Some("0x00000001"))]) },
+                RowChange::Insert { values: map(&[("id", Some("0xFFFFFFFF")), ("flags", Some("1"))]) },
+            ];
+            let preview = preview_changes(&server, PASSWORD, &bins, &changes).await.unwrap();
+            assert_eq!(
+                preview[0],
+                "UPDATE `dbforge_medit_bin`.`bins` SET `data` = UNHEX(SUBSTR('0x00FE', 3)), \
+                 `flags` = CAST('6' AS UNSIGNED) WHERE `id` = UNHEX(SUBSTR('0xACED0005', 3))"
+            );
+            apply_changes(&server, PASSWORD, &bins, &changes).await.unwrap();
+            assert_eq!(
+                shown().await,
+                [[some("0xACED0005"), some("6"), some("0x00FE")], [some("0xFFFFFFFF"), some("1"), None]]
+            );
+
+            // Text that isn't hex is refused, never stored as NULL.
+            let bad = [RowChange::Update {
+                key: map(&[("id", Some("0xACED0005"))]),
+                values: map(&[("data", Some("hello"))]),
+            }];
+            let error = apply_changes(&server, PASSWORD, &bins, &bad).await.unwrap_err();
+            assert!(error.to_string().contains("data takes binary values as 0x"), "{error}");
         }
     }
 
