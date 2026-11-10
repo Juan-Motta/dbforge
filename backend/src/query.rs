@@ -166,11 +166,13 @@ pub async fn explain_query(
     sql: String,
     analyze: bool,
 ) -> Result<serde_json::Value> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
     let (database, container) = (scope.database.as_deref(), scope.container.as_deref());
-    let explain = drivers::explain(&connection, password.as_deref(), database, container, &sql, analyze);
-    statement_log::scoped(&log, &connection.id, Origin::Console, explain).await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Console, async |connection, password| {
+            drivers::explain(connection, password, database, container, &sql, analyze).await
+        })
+        .await
 }
 
 /// Stops the query running in the console, if any.

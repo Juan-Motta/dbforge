@@ -3,7 +3,7 @@ use tauri::State;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, DbObject, RelationList, RowFilter, RowsPage, SchemaDiagram, TableRef, TableStructure};
 use crate::error::Result;
-use crate::statement_log::{self, Origin, StatementLog};
+use crate::statement_log::{Origin, StatementLog};
 
 /// Lists the objects under `path` in a saved connection (see `drivers::list_objects`).
 #[tauri::command]
@@ -13,15 +13,12 @@ pub async fn list_objects(
     connection_id: String,
     path: Vec<String>,
 ) -> Result<Vec<DbObject>> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Metadata,
-        drivers::list_objects(&connection, password.as_deref(), &path),
-    )
-    .await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Metadata, async |connection, password| {
+            drivers::list_objects(connection, password, &path).await
+        })
+        .await
 }
 
 /// Lists every table and view in a database, for the command palette's search.
@@ -33,15 +30,12 @@ pub async fn list_relations(
     connection_id: String,
     database: Option<String>,
 ) -> Result<RelationList> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Metadata,
-        drivers::list_relations(&connection, password.as_deref(), database.as_deref()),
-    )
-    .await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Metadata, async |connection, password| {
+            drivers::list_relations(connection, password, database.as_deref()).await
+        })
+        .await
 }
 
 const MAX_PAGE_SIZE: u32 = 1000;
@@ -58,16 +52,14 @@ pub async fn fetch_rows(
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Browse,
-        drivers::fetch_rows(&connection, password.as_deref(), &table, &filter.unwrap_or_default(), offset, limit),
-    )
-    .await
+    let filter = filter.unwrap_or_default();
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Browse, async |connection, password| {
+            drivers::fetch_rows(connection, password, &table, &filter, offset, limit).await
+        })
+        .await
 }
 
 /// Reads the columns, indexes, keys, triggers and DDL of a table or view.
@@ -78,15 +70,12 @@ pub async fn table_structure(
     connection_id: String,
     table: TableRef,
 ) -> Result<TableStructure> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Metadata,
-        drivers::table_structure(&connection, password.as_deref(), &table),
-    )
-    .await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Metadata, async |connection, password| {
+            drivers::table_structure(connection, password, &table).await
+        })
+        .await
 }
 
 /// Every table of a schema with its columns, and the foreign keys between them.
@@ -98,13 +87,10 @@ pub async fn schema_diagram(
     database: String,
     schema: String,
 ) -> Result<SchemaDiagram> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Metadata,
-        drivers::schema_diagram(&connection, password.as_deref(), &database, &schema),
-    )
-    .await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Metadata, async |connection, password| {
+            drivers::schema_diagram(connection, password, &database, &schema).await
+        })
+        .await
 }

@@ -5,7 +5,7 @@ use tauri::State;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, ApplySummary, RowChange, TableRef};
 use crate::error::Result;
-use crate::statement_log::{self, Origin, StatementLog};
+use crate::statement_log::{Origin, StatementLog};
 
 /// Applies the grid's pending edits in one transaction; all of them or none.
 #[tauri::command]
@@ -16,15 +16,12 @@ pub async fn apply_changes(
     table: TableRef,
     changes: Vec<RowChange>,
 ) -> Result<ApplySummary> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Edit,
-        drivers::apply_changes(&connection, password.as_deref(), &table, &changes),
-    )
-    .await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Edit, async |connection, password| {
+            drivers::apply_changes(connection, password, &table, &changes).await
+        })
+        .await
 }
 
 /// The SQL the pending edits would run, for the user to review first.
@@ -36,13 +33,10 @@ pub async fn preview_changes(
     table: TableRef,
     changes: Vec<RowChange>,
 ) -> Result<Vec<String>> {
-    let connection = store.get(&connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Metadata,
-        drivers::preview_changes(&connection, password.as_deref(), &table, &changes),
-    )
-    .await
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Metadata, async |connection, password| {
+            drivers::preview_changes(connection, password, &table, &changes).await
+        })
+        .await
 }

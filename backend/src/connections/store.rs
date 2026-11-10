@@ -4,6 +4,7 @@ use super::model::Connection;
 use crate::credentials::Credentials;
 use crate::error::{AppError, Result};
 use crate::files::JsonFile;
+use crate::statement_log::{self, Origin, StatementLog};
 
 /// Saved connections, kept in memory and persisted to a JSON file, and their
 /// passwords, kept where the user chose.
@@ -12,7 +13,33 @@ pub struct ConnectionStore {
     credentials: Credentials,
 }
 
+/// A saved connection with its password: what a command needs to reach the database.
+pub struct Opened {
+    pub connection: Connection,
+    pub password: Option<String>,
+}
+
+impl Opened {
+    /// Runs `work` on the connection with its statements recorded in `log`, as `origin`.
+    pub async fn run<T>(
+        &self,
+        log: &StatementLog,
+        origin: Origin,
+        work: impl AsyncFnOnce(&Connection, Option<&str>) -> T,
+    ) -> T {
+        let work = work(&self.connection, self.password.as_deref());
+        statement_log::scoped(log, &self.connection.id, origin, work).await
+    }
+}
+
 impl ConnectionStore {
+    /// Connection `id` with its saved password.
+    pub fn open(&self, id: &str) -> Result<Opened> {
+        let connection = self.get(id)?;
+        let password = self.password(&connection.id)?;
+        Ok(Opened { connection, password })
+    }
+
     /// Loads the store from `path`. A missing file means no connections yet.
     pub fn load(path: PathBuf, credentials: Credentials) -> Result<Self> {
         Ok(Self { connections: JsonFile::load(path, Vec::new)?, credentials })

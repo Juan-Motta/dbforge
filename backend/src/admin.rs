@@ -4,7 +4,7 @@ use tauri::State;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, NewObject};
 use crate::error::Result;
-use crate::statement_log::{self, Origin, StatementLog};
+use crate::statement_log::{Origin, StatementLog};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,13 +20,10 @@ pub async fn create_object(
     log: State<'_, StatementLog>,
     request: CreateRequest,
 ) -> Result<()> {
-    let connection = store.get(&request.connection_id)?;
-    let password = store.password(&connection.id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Admin,
-        drivers::create_object(&connection, password.as_deref(), &request.object),
-    )
-    .await
+    store
+        .open(&request.connection_id)?
+        .run(&log, Origin::Admin, async |connection, password| {
+            drivers::create_object(connection, password, &request.object).await
+        })
+        .await
 }

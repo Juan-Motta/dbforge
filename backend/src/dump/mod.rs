@@ -28,7 +28,7 @@ use crate::connections::model::{Connection, Engine};
 use crate::connections::store::ConnectionStore;
 use crate::drivers::postgres;
 use crate::error::{AppError, Result};
-use crate::statement_log::{self, Origin, StatementLog};
+use crate::statement_log::{Origin, StatementLog};
 
 /// What a dump holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -302,8 +302,7 @@ pub async fn export_database(
     log: State<'_, StatementLog>,
     request: ExportRequest,
 ) -> Result<Exported> {
-    let connection = store.get(&request.connection_id)?;
-    let password = store.password(&connection.id)?;
+    let opened = store.open(&request.connection_id)?;
     let tool = tools::resolve("pg_dump", chosen.get("pg_dump").as_deref()).await?;
     let cancel = jobs.start(&request.job_id);
     let mut every = Every::new(PROGRESS_EVERY);
@@ -314,8 +313,11 @@ pub async fn export_database(
     };
     let path = Path::new(&request.path);
     let run = Run { tool: &tool, cancel: &cancel };
-    let export = export(&connection, password.as_deref(), &request.database, path, &request.options, run, report);
-    let result = statement_log::scoped(&log, &connection.id, Origin::Dump, export).await;
+    let result = opened
+        .run(&log, Origin::Dump, async |connection, password| {
+            export(connection, password, &request.database, path, &request.options, run, report).await
+        })
+        .await;
     jobs.finish(&request.job_id);
     result
 }
@@ -329,8 +331,7 @@ pub async fn import_database(
     log: State<'_, StatementLog>,
     request: ImportRequest,
 ) -> Result<Imported> {
-    let connection = store.get(&request.connection_id)?;
-    let password = store.password(&connection.id)?;
+    let opened = store.open(&request.connection_id)?;
     let tool = tools::resolve("psql", chosen.get("psql").as_deref()).await?;
     let cancel = jobs.start(&request.job_id);
     let mut every = Every::new(PROGRESS_EVERY);
@@ -341,8 +342,11 @@ pub async fn import_database(
     };
     let path = Path::new(&request.path);
     let run = Run { tool: &tool, cancel: &cancel };
-    let import = import(&connection, password.as_deref(), &request.database, path, run, report);
-    let result = statement_log::scoped(&log, &connection.id, Origin::Dump, import).await;
+    let result = opened
+        .run(&log, Origin::Dump, async |connection, password| {
+            import(connection, password, &request.database, path, run, report).await
+        })
+        .await;
     jobs.finish(&request.job_id);
     result
 }

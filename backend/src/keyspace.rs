@@ -3,24 +3,21 @@
 use tauri::State;
 
 use crate::connections::model::Engine;
-use crate::connections::store::ConnectionStore;
+use crate::connections::store::{ConnectionStore, Opened};
 use crate::drivers::redis::{self, KeyEdit, KeyValue, NewKey, Overview, ScanPage, Text};
 use crate::error::{AppError, Result};
-use crate::statement_log::{self, Origin, StatementLog};
+use crate::statement_log::{Origin, StatementLog};
 
 /// Keys per page of the browser, and items per page of a value.
 const MAX_PAGE: usize = 1000;
 
-fn redis_connection(
-    store: &ConnectionStore,
-    id: &str,
-) -> Result<(crate::connections::model::Connection, Option<String>)> {
-    let connection = store.get(id)?;
-    if connection.engine != Engine::Redis {
-        return Err(AppError::Invalid(format!("{} is not a Redis connection.", connection.name)));
+/// Connection `id` with its password, when it is a Redis connection.
+fn redis_connection(store: &ConnectionStore, id: &str) -> Result<Opened> {
+    let opened = store.open(id)?;
+    if opened.connection.engine != Engine::Redis {
+        return Err(AppError::Invalid(format!("{} is not a Redis connection.", opened.connection.name)));
     }
-    let password = store.password(&connection.id)?;
-    Ok((connection, password))
+    Ok(opened)
 }
 
 /// Server metrics and the number of keys in database `db`.
@@ -31,8 +28,8 @@ pub async fn redis_overview(
     connection_id: String,
     db: i64,
 ) -> Result<Overview> {
-    let (connection, password) = redis_connection(&store, &connection_id)?;
-    statement_log::scoped(&log, &connection.id, Origin::Browse, redis::overview(&connection, password.as_deref(), db))
+    redis_connection(&store, &connection_id)?
+        .run(&log, Origin::Browse, async |connection, password| redis::overview(connection, password, db).await)
         .await
 }
 
@@ -49,15 +46,12 @@ pub async fn redis_scan(
     cursor: String,
     limit: usize,
 ) -> Result<ScanPage> {
-    let (connection, password) = redis_connection(&store, &connection_id)?;
     let limit = limit.clamp(1, MAX_PAGE);
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Browse,
-        redis::scan(&connection, password.as_deref(), db, &pattern, kind.as_deref(), &cursor, limit),
-    )
-    .await
+    redis_connection(&store, &connection_id)?
+        .run(&log, Origin::Browse, async |connection, password| {
+            redis::scan(connection, password, db, &pattern, kind.as_deref(), &cursor, limit).await
+        })
+        .await
 }
 
 /// One page of a key's value, from `cursor` (`None` first).
@@ -73,15 +67,12 @@ pub async fn redis_read_key(
     filter: String,
     limit: usize,
 ) -> Result<KeyValue> {
-    let (connection, password) = redis_connection(&store, &connection_id)?;
     let limit = limit.clamp(1, MAX_PAGE);
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Browse,
-        redis::read_key(&connection, password.as_deref(), db, &key, cursor.as_deref(), &filter, limit),
-    )
-    .await
+    redis_connection(&store, &connection_id)?
+        .run(&log, Origin::Browse, async |connection, password| {
+            redis::read_key(connection, password, db, &key, cursor.as_deref(), &filter, limit).await
+        })
+        .await
 }
 
 /// Changes `key`, which the browser showed as a `kind` (see `redis::KeyEdit`).
@@ -95,14 +86,11 @@ pub async fn redis_edit_key(
     kind: String,
     edit: KeyEdit,
 ) -> Result<()> {
-    let (connection, password) = redis_connection(&store, &connection_id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Edit,
-        redis::edit_key(&connection, password.as_deref(), db, &key, &kind, &edit),
-    )
-    .await
+    redis_connection(&store, &connection_id)?
+        .run(&log, Origin::Edit, async |connection, password| {
+            redis::edit_key(connection, password, db, &key, &kind, &edit).await
+        })
+        .await
 }
 
 /// Creates a key with its first element; refused when the name is taken.
@@ -114,12 +102,7 @@ pub async fn redis_create_key(
     db: i64,
     key: NewKey,
 ) -> Result<()> {
-    let (connection, password) = redis_connection(&store, &connection_id)?;
-    statement_log::scoped(
-        &log,
-        &connection.id,
-        Origin::Edit,
-        redis::create_key(&connection, password.as_deref(), db, &key),
-    )
-    .await
+    redis_connection(&store, &connection_id)?
+        .run(&log, Origin::Edit, async |connection, password| redis::create_key(connection, password, db, &key).await)
+        .await
 }
