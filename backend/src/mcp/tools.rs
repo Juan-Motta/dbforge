@@ -5,16 +5,19 @@
 //! Tools never return a password or anything the app keeps secret: agents
 //! name a connection by its id, and the app opens it with its own credentials.
 
+use rmcp::RoleServer;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::schemars::{self, JsonSchema};
+use rmcp::service::RequestContext;
 use rmcp::{tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use super::approvals::{ApprovalRequest, Approvals};
 use crate::connections::model::{AgentAccess, Connection};
 use crate::connections::store::ConnectionStore;
 use crate::connections::tags::TagStore;
-use crate::drivers::{self, ObjectKind, TableRef};
+use crate::drivers::{self, ObjectKind, QueryOutcome, TableRef};
 use crate::statement_log::{self, Origin, StatementLog};
 
 /// The MCP server's handler: one per agent session, all sharing the app.
@@ -122,6 +125,72 @@ pub struct TableView {
     pub definition: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRequest {
+    pub connection_id: String,
+    /// In the connection's language (see `list_connections`).
+    pub statement: String,
+    /// The database to run it in; the connection's own when left out.
+    pub database: Option<String>,
+    /// Cosmos DB only: the container a query reads.
+    pub container: Option<String>,
+    /// The most rows returned per result, 100 unless given; at most 1000.
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultSet {
+    pub columns: Vec<String>,
+    /// Every value as text, `null` being NULL. Values over 2000 characters are cut, ending in `…`.
+    pub rows: Vec<Vec<Option<String>>>,
+    /// More rows came back than `limit`; the rest were left out.
+    pub truncated: bool,
+    /// Rows returned, or changed by a statement that returns none.
+    pub rows_affected: u64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunResult {
+    /// One per statement that ran.
+    pub results: Vec<ResultSet>,
+    pub elapsed_ms: u64,
+}
+
+const DEFAULT_LIMIT: usize = 100;
+const MAX_LIMIT: usize = 1000;
+/// Long values (JSON documents, blobs as text) would fill an agent's context.
+const MAX_VALUE: usize = 2000;
+
+fn cut(value: String) -> String {
+    match value.char_indices().nth(MAX_VALUE) {
+        Some((end, _)) => format!("{}…", &value[..end]),
+        None => value,
+    }
+}
+
+impl From<QueryOutcome> for RunResult {
+    fn from(outcome: QueryOutcome) -> Self {
+        let results = outcome
+            .results
+            .into_iter()
+            .map(|result| ResultSet {
+                columns: result.columns.into_iter().map(|column| column.name).collect(),
+                rows: result
+                    .rows
+                    .into_iter()
+                    .map(|row| row.into_iter().map(|value| value.map(cut)).collect())
+                    .collect(),
+                truncated: result.truncated,
+                rows_affected: result.rows_affected,
+            })
+            .collect();
+        Self { results, elapsed_ms: outcome.elapsed_ms }
+    }
+}
+
 fn kind_name(kind: ObjectKind) -> &'static str {
     match kind {
         ObjectKind::Database => "database",
@@ -212,6 +281,50 @@ impl Tools {
             row_estimate: structure.row_estimate,
             definition: structure.ddl,
         }))
+    }
+
+    #[tool(
+        description = "Runs a statement that changes data (INSERT, UPDATE, DELETE, DDL, or the engine's equivalent) on a connection you may write to. On a connection that asks before changes, the user approves it in DBForge first; a declined one doesn't run. For reading, use query."
+    )]
+    async fn execute(
+        &self,
+        Parameters(request): Parameters<RunRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<RunResult>, String> {
+        let (connection, password) = self.open(&request.connection_id)?;
+        if connection.agent_access != AgentAccess::Write {
+            return Err(format!(
+                "{} is read-only for agents. Use query, or ask the user to give agents Read and write access to it in DBForge.",
+                connection.name
+            ));
+        }
+        let tag = self
+            .app
+            .state::<TagStore>()
+            .list()
+            .into_iter()
+            .find(|tag| Some(&tag.id) == connection.environment.as_ref());
+        if tag.as_ref().is_some_and(|tag| tag.confirm) {
+            let request = ApprovalRequest {
+                id: uuid::Uuid::new_v4().to_string(),
+                agent: context.peer.peer_info().map(|info| info.client_info.name.clone()),
+                connection_id: connection.id.clone(),
+                connection_name: connection.name.clone(),
+                tag: tag.map(|tag| tag.name),
+                database: request.database.clone(),
+                statement: request.statement.clone(),
+            };
+            if !self.app.state::<Approvals>().ask(&self.app, request).await {
+                return Err("The user declined this change in DBForge, or didn't answer in time. Nothing ran.".into());
+            }
+        }
+        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        let run = async {
+            let (database, container) = (request.database.as_deref(), request.container.as_deref());
+            let mut session = drivers::open_session(&connection, password.as_deref(), database, container).await?;
+            session.run(&request.statement, limit).await
+        };
+        Ok(Json(self.as_agent(&connection, run).await?.into()))
     }
 }
 

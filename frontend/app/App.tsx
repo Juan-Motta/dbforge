@@ -21,6 +21,8 @@ import type { TreeNode } from '../features/explorer/tree'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
 import { StatementConsole } from '../features/statement-log/StatementConsole'
+import { ApprovalDialog } from '../features/mcp/ApprovalDialog'
+import { useApprovals } from '../features/mcp/useApprovals'
 import { useStatementLog } from '../features/statement-log/useStatementLog'
 import { useStoredFlag } from '../components/useStoredFlag'
 import { useTheme } from '../features/settings/useTheme'
@@ -90,6 +92,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Recorded from the start, so opening the console shows what already ran.
   const statements = useStatementLog()
+  // Changes agents ask to make on connections whose tag asks first.
+  const approvals = useApprovals()
   const [statementsOpen, setStatementsOpen] = useStoredFlag('dbforge.statementsOpen', false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const theme = useTheme()
@@ -376,6 +380,15 @@ export function App() {
               setTabs((state) => openTableTab(state, connectionId, table))
             }
             onClose={() => setPaletteOpen(false)}
+          />
+        )}
+
+        {approvals.current && (
+          <ApprovalDialog
+            key={approvals.current.id}
+            request={approvals.current}
+            engine={connections.find((c) => c.id === approvals.current?.connectionId)?.engine}
+            onAnswer={(approved) => approvals.current && approvals.answer(approvals.current.id, approved)}
           />
         )}
 

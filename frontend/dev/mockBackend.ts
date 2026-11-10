@@ -2,6 +2,7 @@
 // browser so the UI can be developed without launching the desktop app.
 import { emit } from '@tauri-apps/api/event'
 import { clearRecordedStatements, recordMock, recordedStatements } from './mockStatements'
+import { exposeMockApproval, mockMcp } from './mockMcp'
 import { mockIPC } from '@tauri-apps/api/mocks'
 import type { Connection } from '../domain/connection'
 import type { ConnectionInput } from '../features/connections/api'
@@ -121,6 +122,7 @@ const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => reso
 const sleeping = new Map<string, () => void>()
 
 export function installMockBackend() {
+  exposeMockApproval()
   mockIPC(
     async (cmd, args) => {
       const payload = args as Record<string, unknown>
@@ -139,6 +141,8 @@ export function installMockBackend() {
 
 /** The mock's answer to each command, as the real backend would give it. */
 async function answer(cmd: string, payload: Record<string, unknown>): Promise<unknown> {
+  const mcp = mockMcp(cmd, payload)
+  if (mcp.handled) return delay(mcp.value)
   switch (cmd) {
     case 'list_statements':
       return delay(recordedStatements())

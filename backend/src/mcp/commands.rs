@@ -56,3 +56,9 @@ pub async fn regenerate_mcp_token(app: AppHandle) -> Result<String> {
     apply(&app, settings).await;
     Ok(token)
 }
+
+/// The user's answer to an agent's change; false when it had already timed out.
+#[tauri::command]
+pub fn answer_mcp_approval(approvals: State<'_, super::approvals::Approvals>, id: String, approved: bool) -> bool {
+    approvals.answer(&id, approved)
+}

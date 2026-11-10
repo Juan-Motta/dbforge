@@ -15,14 +15,15 @@ import {
   type SwitchProgress,
 } from '../connections/api'
 import { ExportSettings } from '../dump/ExportSettings'
+import { McpSettings } from '../mcp/McpSettings'
 import { TagsSection } from '../tags/TagsSection'
 import { messages, type SettingsMessages } from './messages'
 import type { ThemePreference } from './theme'
 import styles from './SettingsDialog.module.css'
 
-type Section = 'appearance' | 'language' | 'tags' | 'exports' | 'passwords' | 'about'
+type Section = 'appearance' | 'language' | 'tags' | 'exports' | 'agents' | 'passwords' | 'about'
 
-const SECTIONS: Section[] = ['appearance', 'language', 'tags', 'exports', 'passwords', 'about']
+const SECTIONS: Section[] = ['appearance', 'language', 'tags', 'exports', 'agents', 'passwords', 'about']
 
 const THEMES: ThemePreference[] = ['dark', 'light', 'system']
 
@@ -63,6 +64,13 @@ export function SettingsDialog({ theme, onThemeChange, onClose }: SettingsDialog
               <h3 className={styles.heading}>{m.exports}</h3>
               <p className={styles.intro}>{m.exportsIntro}</p>
               <ExportSettings />
+            </>
+          )}
+          {section === 'agents' && (
+            <>
+              <h3 className={styles.heading}>{m.agents}</h3>
+              <p className={styles.intro}>{m.agentsIntro}</p>
+              <McpSettings />
             </>
           )}
           {section === 'passwords' && <Passwords />}

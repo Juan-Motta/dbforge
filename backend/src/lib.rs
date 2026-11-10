@@ -36,6 +36,7 @@ pub fn run() {
             let settings = mcp_settings.get();
             app.manage(mcp_settings);
             app.manage(mcp::McpServer::default());
+            app.manage(mcp::Approvals::default());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 mcp::commands::apply(&handle, settings).await;
@@ -91,6 +92,7 @@ pub fn run() {
             mcp::commands::set_mcp_settings,
             mcp::commands::mcp_token,
             mcp::commands::regenerate_mcp_token,
+            mcp::commands::answer_mcp_approval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");

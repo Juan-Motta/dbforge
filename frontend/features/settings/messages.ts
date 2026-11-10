@@ -17,6 +17,9 @@ export const messages = defineMessages({
     tags: 'Tags',
     exports: 'Export and import',
     exportsIntro: 'Where database exports are saved, and the PostgreSQL tools that write and restore them.',
+    agents: 'Agents (MCP)',
+    agentsIntro:
+      'Let AI agents such as Claude Code or Codex query and change your databases through DBForge.',
     passwords: 'Passwords',
     passwordsIntro: 'Where DBForge saves the passwords and keys of your connections.',
     storage: 'Where passwords are saved',
@@ -57,6 +60,9 @@ export const messages = defineMessages({
     exports: 'Exportar e importar',
     exportsIntro:
       'Dónde se guardan los exports de bases de datos, y las herramientas de PostgreSQL que los escriben y restauran.',
+    agents: 'Agentes (MCP)',
+    agentsIntro:
+      'Permite que agentes de IA como Claude Code o Codex consulten y cambien tus bases de datos a través de DBForge.',
     passwords: 'Contraseñas',
     passwordsIntro: 'Dónde guarda DBForge las contraseñas y claves de tus conexiones.',
     storage: 'Dónde se guardan las contraseñas',
