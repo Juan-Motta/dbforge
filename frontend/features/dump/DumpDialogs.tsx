@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Icon, type IconName } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
+import { Option, OptionList } from '../../components/OptionList'
 import { TextField } from '../../components/TextField'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi } from '../explorer/api'
@@ -95,57 +96,44 @@ export function ExportDatabaseDialog({
           <h3 className={styles.sectionTitle} id="dump-content">
             {m.content}
           </h3>
-          <div role="radiogroup" aria-labelledby="dump-content" className={styles.list}>
+          <OptionList role="radiogroup" aria-labelledby="dump-content">
             {contentsOf(m).map((option) => (
-              <label key={option.id} className={styles.option}>
-                <input
-                  type="radio"
-                  name="dump-content"
-                  checked={options.content === option.id}
-                  data-autofocus={options.content === option.id || undefined}
-                  disabled={job.running}
-                  onChange={() => setOptions({ ...options, content: option.id })}
-                />
-                <span className={styles.optionIcon}>
-                  <Icon name={CONTENT_ICONS[option.id]} size={15} />
-                </span>
-                <span className={styles.optionText}>
-                  <span className={styles.optionTitle}>{option.label}</span>
-                  <span className={styles.description}>{option.description}</span>
-                </span>
-              </label>
+              <Option
+                key={option.id}
+                type="radio"
+                name="dump-content"
+                icon={CONTENT_ICONS[option.id]}
+                title={option.label}
+                description={option.description}
+                checked={options.content === option.id}
+                data-autofocus={options.content === option.id || undefined}
+                disabled={job.running}
+                onChange={() => setOptions({ ...options, content: option.id })}
+              />
             ))}
-          </div>
+          </OptionList>
         </section>
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>{m.options}</h3>
-          <div className={styles.list}>
-            <label className={styles.option}>
-              <input
-                type="checkbox"
-                checked={options.clean && options.content !== 'data'}
-                disabled={job.running || options.content === 'data'}
-                onChange={(event) => setOptions({ ...options, clean: event.target.checked })}
-              />
-              <span className={styles.optionText}>
-                <span className={styles.optionTitle}>{m.clean}</span>
-                <span className={styles.description}>{m.cleanDescription}</span>
-              </span>
-            </label>
-            <label className={styles.option}>
-              <input
-                type="checkbox"
-                checked={options.keepOwners}
-                disabled={job.running}
-                onChange={(event) => setOptions({ ...options, keepOwners: event.target.checked })}
-              />
-              <span className={styles.optionText}>
-                <span className={styles.optionTitle}>{m.keepOwners}</span>
-                <span className={styles.description}>{m.keepOwnersDescription}</span>
-              </span>
-            </label>
-          </div>
+          <OptionList>
+            <Option
+              type="checkbox"
+              title={m.clean}
+              description={m.cleanDescription}
+              checked={options.clean && options.content !== 'data'}
+              disabled={job.running || options.content === 'data'}
+              onChange={(event) => setOptions({ ...options, clean: event.target.checked })}
+            />
+            <Option
+              type="checkbox"
+              title={m.keepOwners}
+              description={m.keepOwnersDescription}
+              checked={options.keepOwners}
+              disabled={job.running}
+              onChange={(event) => setOptions({ ...options, keepOwners: event.target.checked })}
+            />
+          </OptionList>
         </section>
 
         <section className={styles.section}>

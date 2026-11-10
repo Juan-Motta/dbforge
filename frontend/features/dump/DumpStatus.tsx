@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Icon } from '../../components/Icon'
+import { Callout, CalloutSpace } from '../../components/Callout'
 import type { Status } from './dumpJob'
-import styles from './DumpDialogs.module.css'
 
 /** Whole seconds since `startedAt`, as 0:07 or 1:12, ticking while mounted. */
 function useElapsed(startedAt: number) {
@@ -16,23 +15,8 @@ function useElapsed(startedAt: number) {
 
 function Running({ title, line, startedAt }: { title: string; line: string; startedAt: number }) {
   const elapsed = useElapsed(startedAt)
-  return (
-    <div className={`${styles.callout} ${styles.running}`} role="status">
-      <span className={styles.spinner} aria-hidden />
-      <span className={styles.calloutText}>
-        <span className={styles.calloutTitle}>
-          {title}
-          <span className={styles.elapsed}>{elapsed}</span>
-        </span>
-        <span className={`${styles.calloutDetail} ${styles.mono} ${styles.oneLine}`} title={line}>
-          {line || ' '}
-        </span>
-      </span>
-    </div>
-  )
+  return <Callout tone="progress" title={title} aside={elapsed} detail={line || ' '} mono oneLine />
 }
-
-const ICONS = { done: 'check', warning: 'warning', failed: 'warning', stopped: 'stop' } as const
 
 /**
  * The box under a dump form: the run in progress (with the tool's last line
@@ -53,19 +37,6 @@ export function DumpStatus({
   status: Status
 }) {
   if (running) return <Running title={runningTitle} line={line} startedAt={startedAt} />
-  if (status.state === 'idle') return <div className={styles.callout} aria-hidden />
-  return (
-    <div
-      className={`${styles.callout} ${styles[status.state]}`}
-      role={status.state === 'failed' ? 'alert' : 'status'}
-    >
-      <Icon name={ICONS[status.state]} size={15} />
-      <span className={styles.calloutText}>
-        <span className={styles.calloutTitle}>{status.title}</span>
-        {status.detail && (
-          <span className={`${styles.calloutDetail} ${status.mono ? styles.mono : ''}`}>{status.detail}</span>
-        )}
-      </span>
-    </div>
-  )
+  if (status.state === 'idle') return <CalloutSpace />
+  return <Callout tone={status.state} title={status.title} detail={status.detail} mono={status.mono} />
 }
