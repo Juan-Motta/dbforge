@@ -12,7 +12,7 @@ mod context;
 pub(crate) mod store;
 
 pub use commands::EventSink;
-pub use context::{Recording, record, scoped, shown_as};
+pub use context::{Recording, scoped, shown_as};
 pub use store::{Sink, StatementLog};
 
 use serde::Serialize;

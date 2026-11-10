@@ -105,27 +105,6 @@ impl Drop for Recording {
     }
 }
 
-/// Sends a statement with `work` and records it: its text, how long it took,
-/// how many rows `rows` reads from its result, or its error.
-pub async fn record<T, E: Display>(
-    database: Option<&str>,
-    text: impl FnOnce() -> String,
-    work: impl Future<Output = Result<T, E>>,
-    rows: impl FnOnce(&T) -> Option<u64>,
-) -> Result<T, E> {
-    let mut recording = Recording::start(database, text);
-    let result = work.await;
-    match &result {
-        Ok(value) => {
-            if let Some(count) = rows(value) {
-                recording.rows(count);
-            }
-        }
-        Err(error) => recording.fail(error),
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,11 +119,12 @@ mod tests {
     async fn records_inside_a_scope_with_its_connection_and_origin() {
         let (log, _) = log();
         scoped(&log, "pg", Origin::Browse, async {
-            let ok: Result<Vec<u8>, String> =
-                record(Some("shop"), || "SELECT 1".into(), async { Ok(vec![1, 2]) }, |v| Some(v.len() as u64)).await;
-            let failed: Result<(), String> =
-                record(None, || "SELEC".into(), async { Err("syntax error".into()) }, |_| None).await;
-            assert!(ok.is_ok() && failed.is_err());
+            let mut ok = Recording::start(Some("shop"), || "SELECT 1".into());
+            ok.rows(2);
+            drop(ok);
+            let mut failed = Recording::start(None, || "SELEC".into());
+            failed.row();
+            failed.fail("syntax error");
         })
         .await;
 
