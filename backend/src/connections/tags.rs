@@ -64,6 +64,11 @@ impl TagStore {
         self.tags.get()
     }
 
+    /// Where the tags file was moved when it couldn't be read at start.
+    pub fn set_aside(&self) -> Option<&std::path::Path> {
+        self.tags.set_aside()
+    }
+
     /// Replaces the tags with `tags`, in that order, after checking them.
     pub fn replace(&self, tags: Vec<Tag>) -> Result<()> {
         let tags = check(tags)?;

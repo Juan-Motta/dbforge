@@ -40,6 +40,7 @@ import {
 import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
 import { explorerMenu, type MenuActions } from './explorerMenu'
+import { SetAsideDialog } from './SetAsideDialog'
 import { Workspace, type TabActions } from './Workspace'
 import { confirmingTag } from '../features/tags/tags'
 import { useTagList } from '../features/tags/useTagList'
@@ -331,6 +332,8 @@ export function App() {
             )}
           </div>
         </div>
+
+        <SetAsideDialog />
 
         {dialog && (
           <ConnectionDialog connection={dialog.connection} onSave={save} onClose={() => setDialog(null)} />

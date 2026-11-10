@@ -56,6 +56,25 @@ fn temporary(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// The settings files that couldn't be read at start, where each was moved.
+pub struct SetAside(pub Vec<String>);
+
+/// The settings files set aside at start, for the window to tell the user once.
+#[tauri::command]
+pub fn set_aside_files(set_aside: tauri::State<'_, SetAside>) -> Vec<String> {
+    set_aside.0.clone()
+}
+
+/// Moves a file that couldn't be read beside itself, as `name.damaged-<time>`.
+fn set_aside(path: &Path) -> Result<PathBuf> {
+    let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!(".damaged-{seconds}"));
+    let kept = PathBuf::from(name);
+    fs::rename(path, &kept)?;
+    Ok(kept)
+}
+
 /// Where a file is written until it is whole: `shop.sql.dbforge-partial`.
 pub fn partial_path(path: &Path) -> PathBuf {
     let mut partial = path.as_os_str().to_owned();
@@ -85,17 +104,30 @@ pub async fn write_finished<T>(path: &Path, write: impl AsyncFnOnce(&Path) -> Re
 pub struct JsonFile<T> {
     path: PathBuf,
     value: Mutex<T>,
+    /// Where a file that couldn't be read was moved, so the app could start.
+    set_aside: Option<PathBuf>,
 }
 
 impl<T: Serialize + DeserializeOwned + Clone> JsonFile<T> {
-    /// The value saved at `path`, or `default` until there is a file.
+    /// The value saved at `path`, or `default` until there is a file. A file
+    /// that isn't the JSON expected (damaged, or edited by hand) is moved
+    /// aside, kept for the user, and `default` used: one bad file must not keep
+    /// the whole app from starting.
     pub fn load(path: PathBuf, default: impl FnOnce() -> T) -> Result<Self> {
-        let value = match fs::read_to_string(&path) {
-            Ok(json) => serde_json::from_str(&json)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => default(),
+        let (value, set_aside) = match fs::read_to_string(&path) {
+            Ok(json) => match serde_json::from_str(&json) {
+                Ok(value) => (value, None),
+                Err(_) => (default(), Some(set_aside(&path)?)),
+            },
+            Err(error) if error.kind() == ErrorKind::NotFound => (default(), None),
             Err(error) => return Err(error.into()),
         };
-        Ok(Self { path, value: Mutex::new(value) })
+        Ok(Self { path, value: Mutex::new(value), set_aside })
+    }
+
+    /// Where the file was moved when it couldn't be read at start.
+    pub fn set_aside(&self) -> Option<&Path> {
+        self.set_aside.as_deref()
     }
 
     pub fn get(&self) -> T {
@@ -192,11 +224,25 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_file_is_an_error_not_a_default() {
+    fn a_damaged_file_is_kept_aside_and_the_default_used() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("list.json");
         fs::write(&path, "[1,").unwrap();
-        assert!(matches!(JsonFile::<Vec<i32>>::load(path, Vec::new), Err(AppError::Format(_))));
+        let file = JsonFile::<Vec<i32>>::load(path.clone(), || vec![7]).unwrap();
+        assert_eq!(file.get(), [7]);
+        let kept = file.set_aside().unwrap();
+        assert!(kept.file_name().unwrap().to_string_lossy().starts_with("list.json.damaged-"), "{kept:?}");
+        assert_eq!(fs::read_to_string(kept).unwrap(), "[1,");
+        assert!(!path.exists());
+        // Saving writes a new file in its place.
+        file.update(|list| {
+            list.push(8);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap().split_whitespace().collect::<String>(), "[7,8]");
+        // A file read fine is set aside never.
+        assert!(JsonFile::<Vec<i32>>::load(path, Vec::new).unwrap().set_aside().is_none());
     }
 
     #[cfg(unix)]

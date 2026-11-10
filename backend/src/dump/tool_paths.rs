@@ -16,6 +16,11 @@ impl ToolPaths {
         Ok(Self { paths: JsonFile::load(file, BTreeMap::new)? })
     }
 
+    /// Where the file was moved when it couldn't be read at start.
+    pub fn set_aside(&self) -> Option<&std::path::Path> {
+        self.paths.set_aside()
+    }
+
     /// Every choice, by tool name.
     pub fn all(&self) -> BTreeMap<String, PathBuf> {
         self.paths.get()

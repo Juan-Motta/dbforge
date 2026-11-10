@@ -32,6 +32,10 @@ export const messages = defineMessages({
     copied: 'Copied to the clipboard.',
     resizeExplorer: 'Resize the explorer',
     loadConnectionsFailed: (error: string) => `Could not load connections: ${error}`,
+    setAsideTitle: 'Some settings could not be read',
+    setAsideNote:
+      'These files were damaged or not in the expected format. DBForge kept them where they are, renamed, and started without them:',
+    setAsideOk: 'OK',
     emptyBefore: 'Double-click a table to see its rows, or press ',
     emptyAfter: '.',
     queryTab: (n: number) => `Query ${n}`,
@@ -74,6 +78,10 @@ export const messages = defineMessages({
     copied: 'Copiado al portapapeles.',
     resizeExplorer: 'Cambiar el ancho del explorador',
     loadConnectionsFailed: (error: string) => `No se pudieron cargar las conexiones: ${error}`,
+    setAsideTitle: 'No se pudieron leer algunos ajustes',
+    setAsideNote:
+      'Estos archivos estaban dañados o no tenían el formato esperado. DBForge los conservó en su lugar, con otro nombre, y arrancó sin ellos:',
+    setAsideOk: 'Entendido',
     emptyBefore: 'Haz doble clic en una tabla para ver sus filas, o pulsa ',
     emptyAfter: '.',
     queryTab: (n: number) => `Consulta ${n}`,

@@ -318,6 +318,8 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       return delay((payload.rows as unknown[]).length)
     case 'format_rows':
       return delay('id,name\n1042,Northwind Traders\n')
+    case 'set_aside_files':
+      return []
     case 'list_history': {
       const search = String(payload.search).toLowerCase()
       return delay(

@@ -40,6 +40,11 @@ impl SettingsFile {
         self.settings.get()
     }
 
+    /// Where the settings file was moved when it couldn't be read at start.
+    pub fn set_aside(&self) -> Option<&std::path::Path> {
+        self.settings.set_aside()
+    }
+
     /// Keeps `settings`, after checking the port.
     pub fn set(&self, settings: McpSettings) -> Result<()> {
         if settings.port < 1024 {

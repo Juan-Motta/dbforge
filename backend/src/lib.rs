@@ -44,11 +44,24 @@ pub fn run() {
                 mcp::commands::apply(&handle, settings).await;
             });
             app.manage(statement_log::StatementLog::new(2000, statement_log::EventSink(app.handle().clone())));
+            // Files that couldn't be read and were set aside, for the window to tell the user.
+            let set_aside = [
+                app.state::<ConnectionStore>().set_aside(),
+                app.state::<connections::tags::TagStore>().set_aside(),
+                app.state::<dump::ToolPaths>().set_aside(),
+                app.state::<mcp::SettingsFile>().set_aside(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|path| path.display().to_string())
+            .collect();
+            app.manage(files::SetAside(set_aside));
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
             app.manage(history::HistoryStore::load(history_path)?);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            files::set_aside_files,
             commands::list_connections,
             commands::save_connection,
             commands::delete_connection,

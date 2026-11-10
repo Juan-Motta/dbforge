@@ -50,6 +50,11 @@ impl ConnectionStore {
         self.credentials.get(id)
     }
 
+    /// Where the connections file was moved when it couldn't be read at start.
+    pub fn set_aside(&self) -> Option<&std::path::Path> {
+        self.connections.set_aside()
+    }
+
     pub fn credentials(&self) -> &Credentials {
         &self.credentials
     }
@@ -229,11 +234,13 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_file_is_reported() {
+    fn a_corrupt_file_is_kept_aside_and_the_store_starts_empty() {
         let (_dir, path) = temp_store();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "not json").unwrap();
         let credentials = Credentials::load(path.parent().unwrap().to_path_buf()).unwrap();
-        assert!(matches!(ConnectionStore::load(path, credentials), Err(AppError::Format(_))));
+        let store = ConnectionStore::load(path, credentials).unwrap();
+        assert!(store.list().is_empty());
+        assert_eq!(fs::read_to_string(store.set_aside().unwrap()).unwrap(), "not json");
     }
 }
