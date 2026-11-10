@@ -209,10 +209,14 @@ export function TableView({
     const cell = picked && cellAt(edits, rows, columns, picked)
     if (!picked || !cell) return null
     const column = columns[picked.column]
+    const info = columnInfo?.find((c) => c.name === column.name)
     return {
       column,
       value: cell.value,
       unset: cell.unset,
+      // Until the structure loads, NULL is offered; the server has the last word.
+      nullable: info?.nullable ?? true,
+      options: info?.options,
       locked: !editable
         ? noKey
         : applying
@@ -225,8 +229,8 @@ export function TableView({
     }
   })()
 
-  /** The inspector's text, as a pending edit of the picked cell. */
-  const saveInspected = (value: string) => {
+  /** The inspector's value, as a pending edit of the picked cell. */
+  const saveInspected = (value: string | null) => {
     if (!picked) return
     const name = columns[picked.column].name
     if (picked.row.startsWith('new:')) {

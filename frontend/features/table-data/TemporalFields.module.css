@@ -1,0 +1,38 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text2);
+}
+
+.row select,
+.row input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: 13px var(--font-sans);
+}
+
+.row select:focus,
+.row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.year {
+  width: 84px;
+}
+
+.row .spinner {
+  width: 58px;
+  font-family: var(--font-mono);
+}
+
+.note {
+  color: var(--text3);
+  font: 12px var(--font-mono);
+}

@@ -197,3 +197,47 @@
 .image {
   color: var(--text3);
 }
+
+/* A typed editor (a list of values, or date and time controls) in place of the text. */
+.typed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 12px;
+  overflow: auto;
+}
+
+.typedActions {
+  display: flex;
+  gap: 6px;
+}
+
+.temporalText {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: 12.5px var(--font-mono);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.temporalText:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.temporalText[aria-invalid='true'] {
+  border-color: var(--err);
+}
+
+.lockedValue {
+  margin: 0;
+  font: 12.5px var(--font-mono);
+  color: var(--text2);
+}

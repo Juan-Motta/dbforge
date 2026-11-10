@@ -1,14 +1,19 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { Button, IconButton } from '../../components/Button'
 import { ResizeHandle } from '../../components/ResizeHandle'
 import { usePanelWidth } from '../../components/usePanelWidth'
 import { CodeEditor } from '../../components/code/CodeEditor'
 import { Icon } from '../../components/Icon'
+import { Select, type SelectOption } from '../../components/Select'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import type { Column } from './api'
 import { messages } from './messages'
 import { compactJson, isJsonDocument, jsonError, prettyJson } from './cellText'
+import { choicesOf, type Choice } from './choices'
+import { temporalKindOf, type TemporalKind } from './temporal'
+import { TemporalFields } from './TemporalFields'
+import { useTemporalDraft } from './useTemporalDraft'
 import styles from './CellInspector.module.css'
 
 type Mode = 'text' | 'json' | 'markdown'
@@ -20,13 +25,17 @@ export interface InspectedCell {
   unset: boolean
   /** Why the value can't be changed here, or `null` when it can. */
   locked: string | null
+  /** Whether the column takes NULL. */
+  nullable: boolean
+  /** The values an enum column takes. */
+  options?: string[]
 }
 
 interface CellInspectorProps {
   /** The picked cell, or `null` when none is. */
   cell: InspectedCell | null
-  /** Puts the text in the cell as a pending edit. */
-  onSave: (value: string) => void
+  /** Puts the value in the cell as a pending edit; `null` is SQL NULL. */
+  onSave: (value: string | null) => void
   onClose: () => void
 }
 
@@ -39,7 +48,7 @@ export function CellInspector({ cell, onSave, onClose }: CellInspectorProps) {
     <aside className={styles.panel} style={{ width }} aria-label={m.cellValue}>
       <ResizeHandle edge="left" label={m.resizePanel} onResize={setWidth} onReset={resetWidth} />
       {cell ? (
-        <Value cell={cell} wrap={wrap} onWrap={() => setWrap(!wrap)} onSave={onSave} onClose={onClose} />
+        <TypedValue cell={cell} wrap={wrap} onWrap={() => setWrap(!wrap)} onSave={onSave} onClose={onClose} />
       ) : (
         <>
           <header className={styles.bar}>
@@ -60,8 +69,178 @@ interface ValueProps {
   cell: InspectedCell
   wrap: boolean
   onWrap: () => void
-  onSave: (value: string) => void
+  onSave: (value: string | null) => void
   onClose: () => void
+}
+
+/** The editor the column's type calls for: a list of values, date and time controls, or text. */
+function TypedValue(props: ValueProps) {
+  const { dataType } = props.cell.column
+  const choices = choicesOf(dataType, props.cell.options)
+  if (choices) return <ChoiceValue {...props} choices={choices} />
+  const kind = temporalKindOf(dataType)
+  if (kind) return <TemporalValue {...props} kind={kind} />
+  return <Value {...props} />
+}
+
+/** The column's name and type, and the panel's close button. */
+function Header({
+  cell,
+  onClose,
+  children,
+}: {
+  cell: InspectedCell
+  onClose: () => void
+  children?: ReactNode
+}) {
+  const m = useMessages(messages)
+  return (
+    <header className={styles.bar}>
+      <span className={styles.title} title={cell.column.dataType}>
+        {cell.column.name}
+        <span className={styles.type}>{cell.column.dataType}</span>
+      </span>
+      <span className={styles.spacer} />
+      {children}
+      <IconButton label={m.close} onClick={onClose}>
+        <Icon name="close" />
+      </IconButton>
+    </header>
+  )
+}
+
+/** Revert and Save under a typed editor, with what the value is now. */
+function Footer({
+  status,
+  error,
+  changed,
+  canSave,
+  locked,
+  onRevert,
+  onSave,
+}: {
+  status: string
+  error?: boolean
+  changed: boolean
+  canSave: boolean
+  locked: string | null
+  onRevert: () => void
+  onSave: () => void
+}) {
+  const m = useMessages(messages)
+  return (
+    <footer className={styles.footer}>
+      <span className={error ? styles.error : styles.status} title={status}>
+        {status}
+      </span>
+      <span className={styles.spacer} />
+      <Button disabled={!changed} onClick={onRevert}>
+        {m.revert}
+      </Button>
+      <Button variant="primary" disabled={!canSave} title={locked ?? undefined} onClick={onSave}>
+        {m.save}
+      </Button>
+    </footer>
+  )
+}
+
+/** ⌘S keeps the value in the cell; a second ⌘S applies every change. */
+function saveKey(save: () => void, canSave: boolean) {
+  return (event: KeyboardEvent) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 's' && canSave) {
+      event.preventDefault()
+      event.stopPropagation()
+      save()
+    }
+  }
+}
+
+/** Stands for NULL among a list's string values. */
+const NULL_CHOICE = '\u0000null'
+
+/** A boolean or an enum: a dropdown of its values (and NULL where the column takes it). */
+function ChoiceValue({ cell, onSave, onClose, choices }: ValueProps & { choices: Choice[] }) {
+  const m = useMessages(messages)
+  const [draft, setDraft] = useState<string | null>(cell.value)
+  const changed = draft !== cell.value
+  const canSave = changed && !cell.locked
+  const save = () => canSave && onSave(draft)
+  const options: SelectOption<string>[] = [
+    ...choices.map((choice) => ({ value: choice.value, label: choice.label })),
+    ...(cell.nullable || cell.value === null ? [{ value: NULL_CHOICE, label: 'NULL' }] : []),
+  ]
+  return (
+    <div className={styles.value} onKeyDown={saveKey(save, canSave)}>
+      <Header cell={cell} onClose={onClose} />
+      <div className={styles.typed}>
+        {cell.locked ? (
+          <p className={styles.lockedValue}>{cell.value ?? 'NULL'}</p>
+        ) : (
+          <Select
+            label={m.valueOf(cell.column.name)}
+            value={draft ?? NULL_CHOICE}
+            options={options}
+            autoFocus
+            onChange={(value) => setDraft(value === NULL_CHOICE ? null : value)}
+          />
+        )}
+      </div>
+      <Footer
+        status={cell.unset && !changed ? 'DEFAULT' : (draft ?? 'NULL')}
+        changed={changed}
+        canSave={canSave}
+        locked={cell.locked}
+        onRevert={() => setDraft(cell.value)}
+        onSave={save}
+      />
+    </div>
+  )
+}
+
+/** A date or a time: its text and the same controls as the cell's editor, Now or Today, and NULL. */
+function TemporalValue({ cell, onSave, onClose, kind }: ValueProps & { kind: TemporalKind }) {
+  const m = useMessages(messages)
+  const offsetSpace = /datetimeoffset/i.test(cell.column.dataType)
+  const draft = useTemporalDraft(cell.value, kind, offsetSpace)
+  const changed = draft.text !== (cell.value ?? '')
+  const canSave = changed && !cell.locked && draft.value !== null
+  const save = () => canSave && onSave(draft.value)
+  return (
+    <div className={styles.value} onKeyDown={saveKey(save, canSave)}>
+      <Header cell={cell} onClose={onClose} />
+      <div className={styles.typed}>
+        <input
+          className={styles.temporalText}
+          aria-label={m.valueOf(cell.column.name)}
+          aria-invalid={!draft.valid}
+          readOnly={cell.locked !== null}
+          spellCheck={false}
+          value={draft.text}
+          placeholder={cell.value === null ? 'NULL' : undefined}
+          onChange={(event) => draft.type(event.target.value)}
+          onKeyDown={(event) => event.key === 'Enter' && save()}
+        />
+        {!cell.locked && (
+          <>
+            <TemporalFields kind={kind} parts={draft.parts} onChange={draft.change} />
+            <div className={styles.typedActions}>
+              <Button onClick={draft.now}>{kind === 'date' ? m.today : m.now}</Button>
+              {cell.nullable && cell.value !== null && <Button onClick={() => onSave(null)}>NULL</Button>}
+            </div>
+          </>
+        )}
+      </div>
+      <Footer
+        status={cell.unset && !changed ? 'DEFAULT' : draft.text || 'NULL'}
+        error={!draft.valid}
+        changed={changed}
+        canSave={canSave}
+        locked={cell.locked}
+        onRevert={() => draft.type(cell.value ?? '')}
+        onSave={save}
+      />
+    </div>
+  )
 }
 
 /** One cell's value; the panel mounts it again for another cell, so the draft starts over. */
