@@ -10,7 +10,6 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::connections::model::Connection;
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, CancelTarget, QueryOutcome};
 use crate::error::{AppError, Result};
@@ -34,6 +33,8 @@ pub struct QuerySessions(Mutex<HashMap<String, Arc<QuerySession>>>);
 struct QuerySession {
     /// The connection's settings when the session opened.
     connection: Connection,
+    /// Its password then, to cancel with.
+    password: Option<String>,
     scope: QueryScope,
     cancel_target: CancelTarget,
     /// Locked while a query runs; one query at a time per session.
@@ -63,11 +64,10 @@ impl QuerySessions {
 }
 
 impl QuerySession {
-    async fn open(connection: Connection, scope: QueryScope) -> Result<Self> {
-        let password = secrets::get_password(&connection.id)?;
+    async fn open(connection: Connection, password: Option<String>, scope: QueryScope) -> Result<Self> {
         let (database, container) = (scope.database.as_deref(), scope.container.as_deref());
         let driver = drivers::open_session(&connection, password.as_deref(), database, container).await?;
-        Ok(Self { cancel_target: driver.cancel_target(), connection, scope, driver: driver.into() })
+        Ok(Self { cancel_target: driver.cancel_target(), connection, password, scope, driver: driver.into() })
     }
 
     fn is_running(&self) -> bool {
@@ -75,9 +75,8 @@ impl QuerySession {
     }
 
     async fn cancel(&self) -> Result<()> {
-        let password = secrets::get_password(&self.connection.id)?;
         let database = self.scope.database.as_deref();
-        drivers::cancel(&self.connection, password.as_deref(), database, self.cancel_target.clone()).await
+        drivers::cancel(&self.connection, self.password.as_deref(), database, self.cancel_target.clone()).await
     }
 }
 
@@ -96,7 +95,9 @@ pub async fn run_query(
     let connection = store.get(&connection_id)?;
     let executed_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let started = Instant::now();
-    let outcome = run_in_session(&sessions, &session_id, connection.clone(), scope.clone(), &sql).await;
+    // Read now, used only if a session opens; a failure is recorded like any other.
+    let password = store.password(&connection.id);
+    let outcome = run_in_session(&sessions, &session_id, connection.clone(), password, scope.clone(), &sql).await;
 
     let entry = HistoryEntry {
         id: Uuid::new_v4().to_string(),
@@ -125,6 +126,7 @@ async fn run_in_session(
     sessions: &QuerySessions,
     session_id: &str,
     connection: Connection,
+    password: Result<Option<String>>,
     scope: QueryScope,
     sql: &str,
 ) -> Result<QueryOutcome> {
@@ -132,7 +134,7 @@ async fn run_in_session(
         // Edited connection settings, or another database or container, take effect on the next run.
         Some(session) if session.connection == connection && session.scope == scope => session,
         _ => {
-            let session = Arc::new(QuerySession::open(connection, scope).await?);
+            let session = Arc::new(QuerySession::open(connection, password?, scope).await?);
             sessions.insert(session_id.to_string(), session.clone());
             session
         }
@@ -160,7 +162,7 @@ pub async fn explain_query(
     analyze: bool,
 ) -> Result<serde_json::Value> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     let (database, container) = (scope.database.as_deref(), scope.container.as_deref());
     drivers::explain(&connection, password.as_deref(), database, container, &sql, analyze).await
 }

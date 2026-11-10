@@ -1,6 +1,5 @@
 use tauri::State;
 
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, DbObject, RelationList, RowFilter, RowsPage, SchemaDiagram, TableRef, TableStructure};
 use crate::error::Result;
@@ -13,7 +12,7 @@ pub async fn list_objects(
     path: Vec<String>,
 ) -> Result<Vec<DbObject>> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::list_objects(&connection, password.as_deref(), &path).await
 }
 
@@ -26,7 +25,7 @@ pub async fn list_relations(
     database: Option<String>,
 ) -> Result<RelationList> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::list_relations(&connection, password.as_deref(), database.as_deref()).await
 }
 
@@ -44,7 +43,7 @@ pub async fn fetch_rows(
     limit: u32,
 ) -> Result<RowsPage> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
     drivers::fetch_rows(&connection, password.as_deref(), &table, &filter.unwrap_or_default(), offset, limit).await
 }
@@ -57,7 +56,7 @@ pub async fn table_structure(
     table: TableRef,
 ) -> Result<TableStructure> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::table_structure(&connection, password.as_deref(), &table).await
 }
 
@@ -70,6 +69,6 @@ pub async fn schema_diagram(
     schema: String,
 ) -> Result<SchemaDiagram> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::schema_diagram(&connection, password.as_deref(), &database, &schema).await
 }

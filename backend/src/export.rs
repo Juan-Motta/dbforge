@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tauri::State;
 
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, Column, RowFilter, RowSink, TableRef};
 use crate::error::Result;
@@ -229,7 +228,7 @@ pub async fn export_table(
     path: PathBuf,
 ) -> Result<u64> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     let name = format!("{}.{}", quote_ident(&table.schema), quote_ident(&table.name));
     let mut writer = RowWriter::new(BufWriter::new(File::create(path)?), format, &name);
     drivers::stream_table(&connection, password.as_deref(), &table, &filter.unwrap_or_default(), &mut writer).await?;

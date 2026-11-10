@@ -20,7 +20,6 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::connections::model::{Connection, Engine};
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::postgres;
 use crate::error::{AppError, Result};
@@ -268,7 +267,7 @@ pub async fn export_database(
     request: ExportRequest,
 ) -> Result<Exported> {
     let connection = store.get(&request.connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     let cancel = jobs.start(&request.job_id);
     let report = |line: &str| {
         let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });
@@ -288,7 +287,7 @@ pub async fn import_database(
     request: ImportRequest,
 ) -> Result<Imported> {
     let connection = store.get(&request.connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     let cancel = jobs.start(&request.job_id);
     let report = |line: &str| {
         let _ = app.emit(PROGRESS, Progress { job_id: &request.job_id, line });

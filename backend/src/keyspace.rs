@@ -3,7 +3,6 @@
 use tauri::State;
 
 use crate::connections::model::Engine;
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::redis::{self, KeyEdit, KeyValue, NewKey, Overview, ScanPage};
 use crate::error::{AppError, Result};
@@ -19,7 +18,7 @@ fn redis_connection(
     if connection.engine != Engine::Redis {
         return Err(AppError::Invalid(format!("{} is not a Redis connection.", connection.name)));
     }
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     Ok((connection, password))
 }
 

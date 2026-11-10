@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use tauri::State;
 
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, NewObject};
 use crate::error::Result;
@@ -17,6 +16,6 @@ pub struct CreateRequest {
 #[tauri::command]
 pub async fn create_object(store: State<'_, ConnectionStore>, request: CreateRequest) -> Result<()> {
     let connection = store.get(&request.connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::create_object(&connection, password.as_deref(), &request.object).await
 }

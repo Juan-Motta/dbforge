@@ -1,5 +1,6 @@
 mod admin;
 mod connections;
+mod credentials;
 mod cursor;
 mod drivers;
 mod dump;
@@ -22,8 +23,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             cursor::install();
-            let path = app.path().app_config_dir()?.join("connections.json");
-            app.manage(ConnectionStore::load(path)?);
+            let config = app.path().app_config_dir()?;
+            let credentials = credentials::Credentials::load(config.clone())?;
+            app.manage(ConnectionStore::load(config.join("connections.json"), credentials)?);
             app.manage(query::QuerySessions::default());
             app.manage(dump::DumpJobs::default());
             let history_path = app.path().app_data_dir()?.join("history.jsonl");
@@ -35,6 +37,8 @@ pub fn run() {
             commands::save_connection,
             commands::delete_connection,
             commands::test_connection,
+            commands::credential_storage,
+            commands::set_credential_storage,
             admin::create_object,
             explorer::list_objects,
             explorer::list_relations,

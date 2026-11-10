@@ -2,7 +2,6 @@
 
 use tauri::State;
 
-use crate::connections::secrets;
 use crate::connections::store::ConnectionStore;
 use crate::drivers::{self, ApplySummary, RowChange, TableRef};
 use crate::error::Result;
@@ -16,7 +15,7 @@ pub async fn apply_changes(
     changes: Vec<RowChange>,
 ) -> Result<ApplySummary> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::apply_changes(&connection, password.as_deref(), &table, &changes).await
 }
 
@@ -29,6 +28,6 @@ pub async fn preview_changes(
     changes: Vec<RowChange>,
 ) -> Result<Vec<String>> {
     let connection = store.get(&connection_id)?;
-    let password = secrets::get_password(&connection.id)?;
+    let password = store.password(&connection.id)?;
     drivers::preview_changes(&connection, password.as_deref(), &table, &changes).await
 }

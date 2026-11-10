@@ -3,23 +3,35 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use super::model::Connection;
+use crate::credentials::Credentials;
 use crate::error::{AppError, Result};
 
-/// Saved connections, kept in memory and persisted to a JSON file.
+/// Saved connections, kept in memory and persisted to a JSON file, and their
+/// passwords, kept where the user chose.
 pub struct ConnectionStore {
     path: PathBuf,
     connections: Mutex<Vec<Connection>>,
+    credentials: Credentials,
 }
 
 impl ConnectionStore {
     /// Loads the store from `path`. A missing file means no connections yet.
-    pub fn load(path: PathBuf) -> Result<Self> {
+    pub fn load(path: PathBuf, credentials: Credentials) -> Result<Self> {
         let connections = match fs::read_to_string(&path) {
             Ok(json) => serde_json::from_str(&json)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(error.into()),
         };
-        Ok(Self { path, connections: Mutex::new(connections) })
+        Ok(Self { path, connections: Mutex::new(connections), credentials })
+    }
+
+    /// The saved password of connection `id`, if any.
+    pub fn password(&self, id: &str) -> Result<Option<String>> {
+        self.credentials.get(id)
+    }
+
+    pub fn credentials(&self) -> &Credentials {
+        &self.credentials
     }
 
     pub fn list(&self) -> Vec<Connection> {
@@ -88,6 +100,12 @@ mod tests {
         }
     }
 
+    /// The store at `path`, with its credentials next to it.
+    fn load(path: PathBuf) -> ConnectionStore {
+        let credentials = Credentials::load(path.parent().unwrap().to_path_buf()).unwrap();
+        ConnectionStore::load(path, credentials).unwrap()
+    }
+
     fn temp_store() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("connections.json");
@@ -97,18 +115,18 @@ mod tests {
     #[test]
     fn missing_file_loads_as_empty() {
         let (_dir, path) = temp_store();
-        assert!(ConnectionStore::load(path).unwrap().list().is_empty());
+        assert!(load(path).list().is_empty());
     }
 
     #[test]
     fn upsert_adds_then_replaces_and_persists() {
         let (_dir, path) = temp_store();
-        let store = ConnectionStore::load(path.clone()).unwrap();
+        let store = load(path.clone());
         store.upsert(connection("a", "first")).unwrap();
         store.upsert(connection("a", "renamed")).unwrap();
         store.upsert(connection("b", "second")).unwrap();
 
-        let reloaded = ConnectionStore::load(path).unwrap();
+        let reloaded = load(path);
         let names: Vec<_> = reloaded.list().into_iter().map(|c| c.name).collect();
         assert_eq!(names, ["renamed", "second"]);
     }
@@ -116,16 +134,16 @@ mod tests {
     #[test]
     fn remove_deletes_and_persists() {
         let (_dir, path) = temp_store();
-        let store = ConnectionStore::load(path.clone()).unwrap();
+        let store = load(path.clone());
         store.upsert(connection("a", "first")).unwrap();
         store.remove("a").unwrap();
-        assert!(ConnectionStore::load(path).unwrap().list().is_empty());
+        assert!(load(path).list().is_empty());
     }
 
     #[test]
     fn unknown_ids_are_not_found() {
         let (_dir, path) = temp_store();
-        let store = ConnectionStore::load(path).unwrap();
+        let store = load(path);
         assert!(matches!(store.get("x"), Err(AppError::NotFound(_))));
         assert!(matches!(store.remove("x"), Err(AppError::NotFound(_))));
     }
@@ -135,6 +153,7 @@ mod tests {
         let (_dir, path) = temp_store();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "not json").unwrap();
-        assert!(matches!(ConnectionStore::load(path), Err(AppError::Format(_))));
+        let credentials = Credentials::load(path.parent().unwrap().to_path_buf()).unwrap();
+        assert!(matches!(ConnectionStore::load(path, credentials), Err(AppError::Format(_))));
     }
 }
