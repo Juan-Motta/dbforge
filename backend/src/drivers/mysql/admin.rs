@@ -7,9 +7,11 @@ use super::{connect, quote_ident};
 use crate::connections::model::Connection;
 use crate::drivers::{NewObject, or_default};
 use crate::error::Result;
+use crate::statement_log;
 
 /// Creates `object`. Account names and passwords are quoted by the server
-/// (`QUOTE`), which escapes quotes with a backslash.
+/// (`QUOTE`), which escapes quotes with a backslash. A user's password is
+/// recorded in the statement log as `'***'`, never as written.
 pub async fn create_object(connection: &Connection, password: Option<&str>, object: &NewObject) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;
     create_on(&mut conn, object).await?;
@@ -19,21 +21,28 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
 
 async fn create_on(conn: &mut Conn, object: &NewObject) -> Result<()> {
     backslashes_escape(conn).await?;
-    let statement: String = match object {
-        NewObject::Database { name, .. } => format!("CREATE DATABASE {}", quote_ident(name)),
+    let (statement, shown): (String, String) = match object {
+        NewObject::Database { name, .. } => {
+            let statement = format!("CREATE DATABASE {}", quote_ident(name));
+            (statement.clone(), statement)
+        }
         NewObject::Role { name, .. } => {
-            sqlx::query_scalar("SELECT CONCAT('CREATE ROLE ', QUOTE(?))").bind(name).fetch_one(&mut *conn).await?
+            let statement: String =
+                sqlx::query_scalar("SELECT CONCAT('CREATE ROLE ', QUOTE(?))").bind(name).fetch_one(&mut *conn).await?;
+            (statement.clone(), statement)
         }
         NewObject::User { name, password: secret, host, .. } => {
-            sqlx::query_scalar("SELECT CONCAT('CREATE USER ', QUOTE(?), '@', QUOTE(?), ' IDENTIFIED BY ', QUOTE(?))")
-                .bind(name)
-                .bind(or_default(host, "%"))
-                .bind(secret)
-                .fetch_one(&mut *conn)
-                .await?
+            let (account, secret): (String, String) =
+                sqlx::query_as("SELECT CONCAT('CREATE USER ', QUOTE(?), '@', QUOTE(?), ' IDENTIFIED BY'), QUOTE(?)")
+                    .bind(name)
+                    .bind(or_default(host, "%"))
+                    .bind(secret)
+                    .fetch_one(&mut *conn)
+                    .await?;
+            (format!("{account} {secret}"), format!("{account} '***'"))
         }
     };
-    sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut *conn).await?;
+    statement_log::shown_as(shown, sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut *conn)).await?;
     Ok(())
 }
 

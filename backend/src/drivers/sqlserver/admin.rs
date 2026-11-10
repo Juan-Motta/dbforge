@@ -4,19 +4,29 @@ use super::{connect, quote_ident};
 use crate::connections::model::Connection;
 use crate::drivers::NewObject;
 use crate::error::Result;
+use crate::statement_log;
 
 /// Creates `object` at the server level: a database, a server role, or a
-/// login with SQL Server authentication.
+/// login with SQL Server authentication. A login's password is recorded in
+/// the statement log as `N'***'`, never as written.
 pub async fn create_object(connection: &Connection, password: Option<&str>, object: &NewObject) -> Result<()> {
-    let statement = match object {
-        NewObject::Database { name, .. } => format!("CREATE DATABASE {}", quote_ident(name)),
-        NewObject::Role { name, .. } => format!("CREATE SERVER ROLE {}", quote_ident(name)),
+    let (statement, shown) = match object {
+        NewObject::Database { name, .. } => {
+            let statement = format!("CREATE DATABASE {}", quote_ident(name));
+            (statement.clone(), statement)
+        }
+        NewObject::Role { name, .. } => {
+            let statement = format!("CREATE SERVER ROLE {}", quote_ident(name));
+            (statement.clone(), statement)
+        }
         NewObject::User { name, password: secret, .. } => {
-            format!("CREATE LOGIN {} WITH PASSWORD = {}", quote_ident(name), quote_literal(secret))
+            let login = format!("CREATE LOGIN {} WITH PASSWORD =", quote_ident(name));
+            (format!("{login} {}", quote_literal(secret)), format!("{login} N'***'"))
         }
     };
     let mut client = connect(connection, password, Some("master")).await?;
-    client.simple_query(statement).await?.into_results().await?;
+    let created = async { client.simple_query(statement).await?.into_results().await };
+    statement_log::shown_as(shown, created).await?;
     client.close().await?;
     Ok(())
 }

@@ -6,27 +6,37 @@ use super::connect;
 use crate::connections::model::Connection;
 use crate::drivers::NewObject;
 use crate::error::Result;
+use crate::statement_log;
 
 /// Creates `object`. The server quotes names and passwords itself (`format`
-/// with `%I` and `%L`), whatever settings change how literals read.
+/// with `%I` and `%L`), whatever settings change how literals read. A user's
+/// password is recorded in the statement log as `'***'`, never as written.
 pub async fn create_object(connection: &Connection, password: Option<&str>, object: &NewObject) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;
-    let statement: String = match object {
+    let (statement, shown): (String, String) = match object {
         NewObject::Database { name, .. } => {
-            sqlx::query_scalar("SELECT format('CREATE DATABASE %I', $1::text)").bind(name).fetch_one(&mut conn).await?
+            let statement: String = sqlx::query_scalar("SELECT format('CREATE DATABASE %I', $1::text)")
+                .bind(name)
+                .fetch_one(&mut conn)
+                .await?;
+            (statement.clone(), statement)
         }
         NewObject::Role { name, .. } => {
-            sqlx::query_scalar("SELECT format('CREATE ROLE %I', $1::text)").bind(name).fetch_one(&mut conn).await?
+            let statement: String =
+                sqlx::query_scalar("SELECT format('CREATE ROLE %I', $1::text)").bind(name).fetch_one(&mut conn).await?;
+            (statement.clone(), statement)
         }
         NewObject::User { name, password: secret, .. } => {
-            sqlx::query_scalar("SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', $1::text, $2::text)")
-                .bind(name)
-                .bind(secret)
-                .fetch_one(&mut conn)
-                .await?
+            let (role, secret): (String, String) =
+                sqlx::query_as("SELECT format('CREATE ROLE %I LOGIN PASSWORD', $1::text), format('%L', $2::text)")
+                    .bind(name)
+                    .bind(secret)
+                    .fetch_one(&mut conn)
+                    .await?;
+            (format!("{role} {secret}"), format!("{role} '***'"))
         }
     };
-    sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut conn).await?;
+    statement_log::shown_as(shown, sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut conn)).await?;
     conn.close().await?;
     Ok(())
 }
@@ -36,6 +46,8 @@ mod tests {
     use super::super::tests::{PASSWORD, local};
     use super::*;
     use crate::drivers::create_object as create;
+    use crate::statement_log::store::tests::Collected;
+    use crate::statement_log::{Origin, StatementLog};
 
     async fn scalar(sql: &str, name: &str) -> bool {
         let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
@@ -55,13 +67,20 @@ mod tests {
         run(&format!("DROP ROLE IF EXISTS {role}")).await;
         run("DROP ROLE IF EXISTS \"admin test \"\"user\"\"\"").await;
 
-        let new = |object| async move { create(&local(), PASSWORD, &object).await };
+        let log = StatementLog::new(50, Collected::default());
+        let new = |object| {
+            let log = log.clone();
+            async move { statement_log::scoped(&log, "pg", Origin::Admin, create(&local(), PASSWORD, &object)).await }
+        };
         new(NewObject::Database { name: database.into(), collection: None }).await.unwrap();
         new(NewObject::Role { name: role.into(), database: None }).await.unwrap();
         new(NewObject::User { name: user.into(), password: "it's \\ secret".into(), host: None, database: None })
             .await
             .unwrap();
 
+        let texts: Vec<_> = log.entries().into_iter().map(|e| e.text).collect();
+        assert!(texts.iter().any(|t| t.starts_with("CREATE ROLE") && t.ends_with("LOGIN PASSWORD '***'")), "{texts:?}");
+        assert!(texts.iter().all(|text| !text.contains("secret")), "{texts:?}");
         assert!(scalar("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)", database).await);
         assert!(!scalar("SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", role).await);
         assert!(scalar("SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", user).await);
