@@ -41,10 +41,7 @@ export interface MenuActions {
  * The database and schema a node's ER diagram shows: a schema, or a
  * database that is its own schema (MySQL); `null` when it has none.
  */
-export function diagramTarget(
-  node: TreeNode,
-  connection: Connection,
-): { database: string; schema: string } | null {
+function diagramTarget(node: TreeNode, connection: Connection): { database: string; schema: string } | null {
   if (!hasDiagram(connection.engine)) return null
   const [database, schemaName] = node.path
   if (node.kind === 'schema') return { database, schema: schemaName }

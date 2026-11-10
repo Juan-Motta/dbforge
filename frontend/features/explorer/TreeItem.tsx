@@ -1,5 +1,4 @@
 import { Badge } from '../../components/Badge'
-import { IconButton } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
 import { Icon, type IconName } from '../../components/Icon'
 import type { Environment } from '../../domain/connection'
@@ -32,8 +31,6 @@ interface TreeItemProps {
   onSelect: (node: TreeNode) => void
   onToggle: (node: TreeNode) => void
   onOpen: (node: TreeNode) => void
-  /** Present on schemas (or schemaless databases) whose ER diagram can open. */
-  onDiagram?: (node: TreeNode) => void
   /** Opens the node's right-click menu at the pointer. */
   onMenu: (node: TreeNode, x: number, y: number) => void
 }
@@ -46,7 +43,6 @@ export function TreeItem({
   onSelect,
   onToggle,
   onOpen,
-  onDiagram,
   onMenu,
 }: TreeItemProps) {
   const m = useMessages(messages)
@@ -93,20 +89,6 @@ export function TreeItem({
       {environment && <Badge tone={ENV_BADGES[environment].tone}>{ENV_BADGES[environment].label}</Badge>}
       {isConnection && node.children && <span className={styles.liveDot} title={m.connected} />}
       {node.meta && <span className={styles.meta}>{node.meta}</span>}
-
-      {onDiagram && (
-        <IconButton
-          label={m.showDiagram(node.name)}
-          title={m.diagram}
-          className={styles.edit}
-          onClick={(event) => {
-            event.stopPropagation()
-            onDiagram(node)
-          }}
-        >
-          <Icon name="diagram" size={14} />
-        </IconButton>
-      )}
     </div>
   )
 }

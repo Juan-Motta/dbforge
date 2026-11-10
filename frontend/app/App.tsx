@@ -34,7 +34,7 @@ import {
 } from './tabs'
 import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
-import { diagramTarget, explorerMenu, type MenuActions } from './explorerMenu'
+import { explorerMenu, type MenuActions } from './explorerMenu'
 import { Workspace } from './Workspace'
 import { Notice, type NoticeState } from '../components/Notice'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
@@ -246,13 +246,6 @@ export function App() {
               if (node.kind === 'database' && connection?.engine === 'redis') {
                 setTabs((state) => openKeyspaceTab(state, connection.id, connection.name, node.name))
               }
-            }}
-            diagramOf={(node) => {
-              const connection = connections.find((c) => c.id === node.connectionId)
-              const target = connection && diagramTarget(node, connection)
-              if (!connection || !target) return null
-              return () =>
-                setTabs((state) => openDiagramTab(state, m, connection.id, target.database, target.schema))
             }}
             onNewConnection={() => setDialog({})}
             menuOf={menuOf}

@@ -15,21 +15,12 @@ interface ExplorerProps {
   onSelect: (node: TreeNode) => void
   /** Double-click on a table or view. */
   onOpen: (node: TreeNode) => void
-  /** Opens the ER diagram of a schema node; `null` when the node has none. */
-  diagramOf: (node: TreeNode) => (() => void) | null
   onNewConnection: () => void
   /** A node's right-click menu; `refresh` reloads the tree, e.g. once a database was created. */
   menuOf: (node: TreeNode, refresh: () => void) => MenuItem[]
 }
 
-export function Explorer({
-  connections,
-  onSelect,
-  onOpen,
-  diagramOf,
-  onNewConnection,
-  menuOf,
-}: ExplorerProps) {
+export function Explorer({ connections, onSelect, onOpen, onNewConnection, menuOf }: ExplorerProps) {
   const m = useMessages(messages)
   const { roots, expanded, toggle, collapseAll, refresh } = useExplorerTree(connections)
   const [query, setQuery] = useState('')
@@ -85,7 +76,6 @@ export function Explorer({
               onSelect={select}
               onToggle={toggle}
               onOpen={onOpen}
-              onDiagram={diagramOf(row.node) ?? undefined}
               onMenu={(node, x, y) => {
                 const items = menuOf(node, refresh)
                 setMenu(items.length > 0 ? { x, y, items } : null)

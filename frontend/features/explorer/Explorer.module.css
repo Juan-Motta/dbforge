@@ -123,18 +123,6 @@
   color: var(--text3);
 }
 
-.edit {
-  width: 22px;
-  height: 22px;
-  margin: 0 -4px 0 auto;
-  visibility: hidden;
-}
-
-.item:hover .edit,
-.edit:focus-visible {
-  visibility: visible;
-}
-
 .message,
 .error {
   margin: 0;
