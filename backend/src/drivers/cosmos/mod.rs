@@ -11,6 +11,7 @@ mod admin;
 mod client;
 mod edit;
 mod explain;
+mod logged;
 mod query;
 mod session;
 mod structure;

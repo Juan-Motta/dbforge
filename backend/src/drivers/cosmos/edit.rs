@@ -301,6 +301,8 @@ mod tests {
     use super::super::tests::{KEY, database, table};
     use super::*;
     use crate::drivers::cosmos::fetch_rows;
+    use crate::statement_log::store::tests::Collected;
+    use crate::statement_log::{self, Origin, StatementLog};
 
     /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
     fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
@@ -378,6 +380,65 @@ mod tests {
         assert_eq!(rows[2][..3], [Some("4".into()), Some("c".into()), Some("40".into())]);
         // The new item without an id got one.
         assert!(rows.iter().any(|row| row[1].as_deref() == Some("d") && row[0].as_ref().unwrap().len() == 36));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Cosmos DB emulator on port 58081"]
+    async fn records_every_request_with_values_written_in() {
+        let connection = database("dbforge_edit_log", &[("orders", "/customer", orders())]).await;
+        let table = table("dbforge_edit_log", "orders");
+        let changes = vec![
+            RowChange::Update {
+                key: map(&[("id", Some("1")), ("customer", Some("a"))]),
+                values: [("total".to_string(), CellValue::Text("15".into()))].into(),
+            },
+            RowChange::Delete { key: map(&[("id", Some("2")), ("customer", Some("b"))]) },
+        ];
+        let log = StatementLog::new(50, Collected::default());
+
+        statement_log::scoped(&log, "cosmos", Origin::Edit, apply_changes(&connection, KEY, &table, &changes))
+            .await
+            .unwrap();
+
+        let entries = log.entries();
+        let mut texts: Vec<_> = entries.iter().map(|e| e.text.as_str()).collect();
+        // A query is one entry per page, and the gateway may answer in several.
+        texts.dedup();
+        assert_eq!(
+            texts,
+            [
+                "READ dbs/dbforge_edit_log/colls/orders",
+                r#"SELECT * FROM c WHERE c.id = "1""#,
+                r#"SELECT * FROM c WHERE c.id = "2""#,
+                r#"REPLACE dbs/dbforge_edit_log/colls/orders/docs/1 PARTITION ["a"] {"id":"1","customer":"a","total":15,"note":"x","tags":["t"]}"#,
+                r#"DELETE dbs/dbforge_edit_log/colls/orders/docs/2 PARTITION ["b"]"#,
+            ]
+        );
+        let context =
+            |e: &statement_log::Entry| (e.connection_id.clone(), e.database.clone(), e.origin, e.error.clone());
+        assert!(
+            entries
+                .iter()
+                .all(|e| context(e) == ("cosmos".into(), Some("dbforge_edit_log".into()), Origin::Edit, None))
+        );
+        let found = |id: &str| {
+            let text = format!(r#"SELECT * FROM c WHERE c.id = "{id}""#);
+            entries.iter().filter(|e| e.text == text).filter_map(|e| e.rows).sum::<u64>()
+        };
+        assert_eq!((found("1"), found("2")), (1, 1));
+        assert!(entries[entries.len() - 2..].iter().all(|e| e.rows == Some(1)));
+
+        // A failed query is recorded with the server's message.
+        let log = StatementLog::new(50, Collected::default());
+        let filter = RowFilter { filter: "nope".into(), order: String::new() };
+        statement_log::scoped(&log, "cosmos", Origin::Browse, fetch_rows(&connection, KEY, &table, &filter, 0, 10))
+            .await
+            .unwrap_err();
+        let failed = log.entries().into_iter().find(|e| e.error.is_some()).unwrap();
+        assert_eq!(
+            (failed.text.as_str(), failed.error.as_deref(), failed.rows),
+            ("SELECT * FROM c WHERE nope", Some("Identifier 'nope' could not be resolved."), None)
+        );
     }
 
     #[tokio::test]

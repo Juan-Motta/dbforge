@@ -1,6 +1,7 @@
 //! A small client for Cosmos DB's REST API: every request is signed with the
-//! account key, throttled requests are retried when the server says to, and a
-//! failed one becomes the server's own message.
+//! account key, recorded in the statement log (see [`logged`](super::logged)),
+//! throttled requests are retried when the server says to, and a failed one
+//! becomes the server's own message.
 
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use reqwest::{Method, StatusCode};
 use serde_json::Value;
 use sha2::Sha256;
 
+use super::logged::{self, Request};
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -68,6 +70,23 @@ impl Target {
 
     pub fn partition_key_ranges(database: &str, container: &str) -> Self {
         Target::Feed { kind: "pkranges", parent: container_link(database, container) }
+    }
+
+    /// The resource's or feed's link as Cosmos DB names it, unencoded:
+    /// `dbs/shop/colls/orders`, `dbs/shop/colls`, `dbs`; `""` is the account.
+    pub fn link(&self) -> String {
+        match self {
+            Target::Resource { link, .. } => link.clone(),
+            Target::Feed { kind, parent } if parent.is_empty() => (*kind).to_string(),
+            Target::Feed { kind, parent } => format!("{parent}/{kind}"),
+        }
+    }
+
+    /// The database the request is on, if it is on one.
+    pub fn database_name(&self) -> Option<&str> {
+        let (_, link) = self.signed();
+        // Names can't hold `/`, so the database is the link's second segment.
+        link.strip_prefix("dbs/").and_then(|rest| rest.split('/').next()).filter(|name| !name.is_empty())
     }
 
     /// The type and link the request is signed with.
@@ -141,10 +160,23 @@ impl Client {
         self.send(Method::GET, target, headers, None).await
     }
 
-    /// Sends `body` as JSON, or as a query when `headers` say it is one.
+    /// Sends `body` as JSON, or as a query when `headers` say it is one. The
+    /// only way a request reaches the server, so every one is recorded.
     pub async fn send(
         &self,
         method: Method,
+        target: &Target,
+        headers: &[(&str, &str)],
+        body: Option<&Value>,
+    ) -> Result<Reply> {
+        let request = Request::new(&method, target, headers, body);
+        logged::record(request, self.exchange(&method, target, headers, body)).await
+    }
+
+    /// Sends the request until it is answered, again while it is throttled.
+    async fn exchange(
+        &self,
+        method: &Method,
         target: &Target,
         headers: &[(&str, &str)],
         body: Option<&Value>,
@@ -210,7 +242,7 @@ impl Client {
             .header("x-ms-date", &date)
             .header("x-ms-version", API_VERSION)
             .header("accept", "application/json");
-        let query = headers.iter().any(|(name, _)| *name == "x-ms-documentdb-isquery");
+        let query = is_query(headers);
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
@@ -230,6 +262,11 @@ impl Client {
         let signature = BASE64.encode(mac.finalize().into_bytes());
         encode(&format!("type=master&ver=1.0&sig={signature}"))
     }
+}
+
+/// Whether the request is a query, which Cosmos DB reads from its headers.
+pub(super) fn is_query(headers: &[(&str, &str)]) -> bool {
+    headers.iter().any(|(name, _)| *name == "x-ms-documentdb-isquery")
 }
 
 /// The wait a throttled reply asks for, kept short.
