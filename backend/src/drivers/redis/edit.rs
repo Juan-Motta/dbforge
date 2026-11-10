@@ -4,10 +4,10 @@
 //! they are also checked against the value shown, under `WATCH`: if the list
 //! changes in between, nothing is applied.
 
-use redis::aio::MultiplexedConnection;
 use serde::Deserialize;
 
 use super::browse;
+use super::logged::LoggedConnection;
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -199,7 +199,7 @@ pub async fn edit_key(
 
 /// Redis deletes a hash, list or set when its last element goes, so removing
 /// that element is refused: deleting the key is a separate, explicit action.
-async fn last_element(conn: &mut MultiplexedConnection, key: &str, length: &str) -> Result<()> {
+async fn last_element(conn: &mut LoggedConnection, key: &str, length: &str) -> Result<()> {
     let count: i64 = redis::cmd(length).arg(key).query_async(conn).await?;
     if count <= 1 {
         return Err(AppError::Invalid(
@@ -212,7 +212,7 @@ async fn last_element(conn: &mut MultiplexedConnection, key: &str, length: &str)
 /// Runs `change` on the list item at `index` only if it still reads `old` and
 /// the list doesn't change before the change is applied.
 async fn guarded_item(
-    conn: &mut MultiplexedConnection,
+    conn: &mut LoggedConnection,
     key: &str,
     index: i64,
     old: &str,

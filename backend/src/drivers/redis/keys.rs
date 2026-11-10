@@ -2,10 +2,10 @@
 //! live, and the value of one key read a page at a time. Keys and values are
 //! bytes; they are shown as text when they are UTF-8, else as hex.
 
-use redis::aio::MultiplexedConnection;
 use serde::Serialize;
 
 use super::browse;
+use super::logged::LoggedConnection;
 use crate::connections::model::Connection;
 use crate::error::{AppError, Result};
 
@@ -273,14 +273,14 @@ fn member(name: &[u8], score: f64) -> Entry {
     Entry { key: None, size: name.len(), value: text(name), score: Some(score) }
 }
 
-async fn count(conn: &mut MultiplexedConnection, command: &str, key: &str) -> Result<i64> {
+async fn count(conn: &mut LoggedConnection, command: &str, key: &str) -> Result<i64> {
     Ok(redis::cmd(command).arg(key).query_async(conn).await?)
 }
 
 /// `HSCAN`/`SSCAN`/`ZSCAN` rounds until about `limit` items are read; the
 /// reply's flat list of items and the cursor to continue from.
 async fn scan_value(
-    conn: &mut MultiplexedConnection,
+    conn: &mut LoggedConnection,
     command: &str,
     key: &str,
     cursor: Option<&str>,

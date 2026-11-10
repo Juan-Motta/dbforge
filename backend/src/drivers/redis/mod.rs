@@ -7,11 +7,11 @@ mod admin;
 mod cli;
 mod edit;
 mod keys;
+mod logged;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use redis::aio::MultiplexedConnection;
 use redis::{AsyncConnectionConfig, Client, ConnectionAddr, ConnectionInfo, IntoConnectionInfo, RedisConnectionInfo};
 use serde::Serialize;
 
@@ -19,6 +19,7 @@ pub use admin::create_user;
 pub use cli::{Session, cancel, open_session};
 pub use edit::{KeyEdit, NewKey, create_key, edit_key};
 pub use keys::{KeyValue, ScanPage, read_key, scan};
+use logged::LoggedConnection;
 
 use super::{DbObject, ObjectKind};
 use crate::connections::model::Connection;
@@ -29,14 +30,14 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// A connection to database `db`, or the connection's own when `None`, over TLS
-/// when the connection asks for it. Hosts saved as a whole `redis://` or
+/// when the connection asks for it, recording every command sent on it. Hosts saved as a whole `redis://` or
 /// `rediss://` URL, before the form split URLs into fields, still work.
 pub(crate) async fn connect(
     connection: &Connection,
     password: Option<&str>,
     db: Option<i64>,
     response_timeout: Option<Duration>,
-) -> Result<MultiplexedConnection> {
+) -> Result<LoggedConnection> {
     let url = is_url(&connection.host);
     if connection.tls || connection.host.starts_with("rediss://") {
         super::install_crypto();
@@ -67,7 +68,8 @@ pub(crate) async fn connect(
     let config = AsyncConnectionConfig::new()
         .set_connection_timeout(Some(CONNECT_TIMEOUT))
         .set_response_timeout(response_timeout);
-    Ok(Client::open(info)?.get_multiplexed_async_connection_with_config(&config).await?)
+    let inner = Client::open(info)?.get_multiplexed_async_connection_with_config(&config).await?;
+    Ok(LoggedConnection::new(inner, db))
 }
 
 fn is_url(host: &str) -> bool {
@@ -87,12 +89,12 @@ pub fn database_number(text: &str) -> Result<i64> {
         .ok_or_else(|| AppError::Invalid(format!("\"{text}\" isn't a Redis database number. Use 0, 1, 2…")))
 }
 
-async fn browse(connection: &Connection, password: Option<&str>, db: Option<i64>) -> Result<MultiplexedConnection> {
+async fn browse(connection: &Connection, password: Option<&str>, db: Option<i64>) -> Result<LoggedConnection> {
     connect(connection, password, db, Some(RESPONSE_TIMEOUT)).await
 }
 
 /// `INFO` as `section field → value`, flattened to `field → value`.
-async fn info(conn: &mut MultiplexedConnection, section: &str) -> Result<BTreeMap<String, String>> {
+async fn info(conn: &mut LoggedConnection, section: &str) -> Result<BTreeMap<String, String>> {
     let text: String = redis::cmd("INFO").arg(section).query_async(conn).await?;
     Ok(text
         .lines()
@@ -143,7 +145,7 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
 }
 
 /// Keys per database, from `INFO keyspace` (`db0:keys=12,expires=1,…`).
-async fn keyspace(conn: &mut MultiplexedConnection) -> Result<BTreeMap<i64, i64>> {
+async fn keyspace(conn: &mut LoggedConnection) -> Result<BTreeMap<i64, i64>> {
     Ok(info(conn, "keyspace")
         .await?
         .into_iter()
@@ -220,7 +222,7 @@ pub(super) mod tests {
     }
 
     /// Database `db` emptied, with `setup` run in it. Each test uses its own database.
-    pub async fn database(db: i64, setup: &[&[&str]]) -> (Connection, MultiplexedConnection) {
+    pub async fn database(db: i64, setup: &[&[&str]]) -> (Connection, LoggedConnection) {
         let connection = Connection { database: db.to_string(), ..local() };
         let mut conn = connect(&connection, PASSWORD, None, None).await.unwrap();
         redis::cmd("FLUSHDB").query_async::<()>(&mut conn).await.unwrap();

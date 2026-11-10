@@ -8,9 +8,9 @@
 use std::time::Instant;
 
 use redis::Value;
-use redis::aio::MultiplexedConnection;
 
 use super::connect;
+use super::logged::{LoggedConnection, quote};
 use crate::connections::model::Connection;
 use crate::drivers::{Column, QueryOutcome, StatementResult};
 use crate::error::{AppError, Result};
@@ -20,7 +20,7 @@ use crate::error::{AppError, Result};
 const STREAMING: [&str; 7] = ["SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "MONITOR", "SYNC", "PSYNC", "SHUTDOWN"];
 
 pub struct Session {
-    conn: MultiplexedConnection,
+    conn: LoggedConnection,
     /// The server's id for this connection, which `CLIENT UNBLOCK` takes.
     client_id: i64,
 }
@@ -205,29 +205,6 @@ fn numbered(items: impl ExactSizeIterator<Item = Vec<String>>) -> Vec<String> {
         }
     }
     lines
-}
-
-/// A bulk string in double quotes, with redis-cli's escapes.
-fn quote(bytes: &[u8]) -> String {
-    let mut text = String::from("\"");
-    for chunk in bytes.utf8_chunks() {
-        for c in chunk.valid().chars() {
-            match c {
-                '"' => text.push_str("\\\""),
-                '\\' => text.push_str("\\\\"),
-                '\n' => text.push_str("\\n"),
-                '\r' => text.push_str("\\r"),
-                '\t' => text.push_str("\\t"),
-                c if c.is_control() => text.push_str(&format!("\\x{:02x}", c as u32)),
-                c => text.push(c),
-            }
-        }
-        for byte in chunk.invalid() {
-            text.push_str(&format!("\\x{byte:02x}"));
-        }
-    }
-    text.push('"');
-    text
 }
 
 #[cfg(test)]
