@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TableStructure } from './api'
 import { columnKeys, formatBytes, summary } from './format'
+import { messages } from './messages'
 
 const structure = (overrides: Partial<TableStructure> = {}): TableStructure => ({
   kind: 'table',
@@ -95,6 +96,7 @@ describe('formatBytes', () => {
 describe('summary', () => {
   it('shows rows and sizes for tables', () => {
     expect(summary(structure())).toBe('~48,213 rows · 9.4 MB data · 3.1 MB indexes')
+    expect(summary(structure(), messages.es)).toBe('~48,213 filas · 9.4 MB de datos · 3.1 MB de índices')
   })
 
   it('leaves out what a view or a never-analyzed table lacks', () => {

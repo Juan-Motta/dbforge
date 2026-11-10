@@ -1,5 +1,8 @@
 import type { Connection } from '../../domain/connection'
 import type { DbObject } from './api'
+import type { messages } from './messages'
+
+type Messages = typeof messages.en
 
 export type ObjectKind = 'database' | 'schema' | 'folder' | 'table' | 'view'
 
@@ -44,9 +47,10 @@ const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
 
 /**
  * Turns the objects listed under `parent` into tree nodes. Tables and views are
- * grouped into "Tables" and "Views" folders, which arrive already loaded.
+ * grouped into "Tables" and "Views" folders, named in the language of `m`, which
+ * arrive already loaded.
  */
-export function toChildNodes(parent: TreeNode, objects: DbObject[]): TreeNode[] {
+export function toChildNodes(parent: TreeNode, objects: DbObject[], m: Messages): TreeNode[] {
   // A Redis database holds keys, not schemas: it opens in the key browser.
   const keyspaces = parent.kind === 'connection' && parent.connection.engine === 'redis'
   const toNode = (object: DbObject): TreeNode => ({
@@ -59,12 +63,13 @@ export function toChildNodes(parent: TreeNode, objects: DbObject[]): TreeNode[] 
     expandable: (object.kind === 'database' && !keyspaces) || object.kind === 'schema',
   })
 
-  const folder = (name: string, kind: DbObject['kind']): TreeNode[] => {
+  // `key` names the folder in its id, the same in every language, so it stays expanded.
+  const folder = (key: string, name: string, kind: DbObject['kind']): TreeNode[] => {
     const items = objects.filter((o) => o.kind === kind).map(toNode)
     if (items.length === 0) return []
     return [
       {
-        id: parent.id + SEP + '#' + name,
+        id: parent.id + SEP + '#' + key,
         name,
         kind: 'folder',
         meta: String(items.length),
@@ -77,11 +82,16 @@ export function toChildNodes(parent: TreeNode, objects: DbObject[]): TreeNode[] 
   }
 
   const others = objects.filter((o) => o.kind !== 'table' && o.kind !== 'view').map(toNode)
-  return [...others, ...folder('Tables', 'table'), ...folder('Views', 'view')]
+  return [...others, ...folder('Tables', m.tables, 'table'), ...folder('Views', m.views, 'view')]
 }
 
 /** Flattens the tree into the rows currently visible on screen. */
-export function visibleRows(nodes: TreeNode[], isExpanded: (id: string) => boolean, depth = 0): TreeRow[] {
+export function visibleRows(
+  nodes: TreeNode[],
+  isExpanded: (id: string) => boolean,
+  m: Messages,
+  depth = 0,
+): TreeRow[] {
   return nodes.flatMap((node): TreeRow[] => {
     const hasContent = node.children !== undefined || node.loading || node.error !== undefined
     const expanded = node.expandable && isExpanded(node.id) && hasContent
@@ -92,10 +102,10 @@ export function visibleRows(nodes: TreeNode[], isExpanded: (id: string) => boole
       row,
       { type: 'message', id: node.id + SEP + '#message', depth: depth + 1, text, tone },
     ]
-    if (node.loading) return message('Loading…', 'muted')
+    if (node.loading) return message(m.loading, 'muted')
     if (node.error !== undefined) return message(node.error, 'error')
-    if (node.children!.length === 0) return message('No objects', 'muted')
-    return [row, ...visibleRows(node.children!, isExpanded, depth + 1)]
+    if (node.children!.length === 0) return message(m.noObjects, 'muted')
+    return [row, ...visibleRows(node.children!, isExpanded, m, depth + 1)]
   })
 }
 

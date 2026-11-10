@@ -1,3 +1,7 @@
+import type { messages } from './messages'
+
+type Messages = typeof messages.en
+
 /** One node of a plan, flattened in display order (depth-first). */
 export interface PlanNode {
   id: string
@@ -31,15 +35,18 @@ export interface Plan {
 
 type RawNode = Record<string, unknown> & { Plans?: RawNode[] }
 
-/** Reads the JSON that `EXPLAIN (FORMAT JSON[, ANALYZE])` returns. */
-export function parsePlan(json: unknown): Plan {
+/**
+ * Reads the JSON that `EXPLAIN (FORMAT JSON[, ANALYZE])` returns; the texts it
+ * writes (warnings, details) are in the language of `m`.
+ */
+export function parsePlan(json: unknown, m: Messages): Plan {
   const top = (Array.isArray(json) ? json[0] : json) as Record<string, unknown>
   const root = top.Plan as RawNode
   const analyzed = 'Actual Total Time' in root
 
   const nodes: PlanNode[] = []
   const walk = (raw: RawNode, depth: number, processes: number) => {
-    nodes.push(toNode(raw, depth, String(nodes.length), analyzed, processes))
+    nodes.push(toNode(raw, depth, String(nodes.length), analyzed, processes, m))
     const childProcesses = parallelProcesses(raw) ?? processes
     raw.Plans?.forEach((child) => walk(child, depth + 1, childProcesses))
   }
@@ -70,7 +77,14 @@ function parallelProcesses(raw: RawNode): number | null {
   return num(raw['Workers Launched'], num(raw['Workers Planned'])) + 1
 }
 
-function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean, processes: number): PlanNode {
+function toNode(
+  raw: RawNode,
+  depth: number,
+  id: string,
+  analyzed: boolean,
+  processes: number,
+  m: Messages,
+): PlanNode {
   const children = raw.Plans ?? []
   const childProcesses = parallelProcesses(raw) ?? processes
   const loops = num(raw['Actual Loops'], 1)
@@ -85,7 +99,7 @@ function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean, proc
     id,
     depth,
     nodeType: String(raw['Node Type']),
-    detail: describe(raw),
+    detail: describe(raw, m),
     estimatedRows,
     actualRows: analyzed ? actualPerLoop * loops : null,
     selfMs: analyzed
@@ -109,13 +123,11 @@ function toNode(raw: RawNode, depth: number, id: string, analyzed: boolean, proc
         ? [0, 0]
         : [Math.min(estimatedRows, actualPerLoop), Math.max(estimatedRows, actualPerLoop)]
     if (estimatedRows !== null && high >= 100 && high >= Math.max(low, 1) * 10) {
-      node.warnings.push(
-        `Estimated ${fmt(estimatedRows)} rows but got ${fmt(actualPerLoop)}; statistics may be stale.`,
-      )
+      node.warnings.push(m.staleStatistics(fmt(estimatedRows), fmt(actualPerLoop)))
     }
     const removed = num(raw['Rows Removed by Filter']) * loops
     if (node.nodeType === 'Seq Scan' && removed > 1000 && removed > (node.actualRows ?? 0) * 10) {
-      node.warnings.push(`Reads ${fmt(removed)} rows only to discard them; an index on the filter may help.`)
+      node.warnings.push(m.discardedRows(fmt(removed)))
     }
   }
   return node
@@ -133,7 +145,7 @@ function fieldsOf(raw: RawNode): [string, string][] {
 }
 
 /** The parts of a node worth a glance, joined: `orders o · Filter: (total > 100)`. */
-function describe(raw: RawNode): string {
+function describe(raw: RawNode, m: Messages): string {
   const parts: string[] = []
   // MySQL plans come with their description already written out.
   if (typeof raw['Detail'] === 'string') parts.push(raw['Detail'])
@@ -142,7 +154,7 @@ function describe(raw: RawNode): string {
     const alias = raw['Alias']
     parts.push(alias && alias !== relation ? `${relation} ${alias}` : relation)
   }
-  if (typeof raw['Index Name'] === 'string') parts.push(`using ${raw['Index Name']}`)
+  if (typeof raw['Index Name'] === 'string') parts.push(m.usingIndex(raw['Index Name']))
   for (const key of ['Hash Cond', 'Merge Cond', 'Join Filter', 'Index Cond', 'Recheck Cond', 'Filter']) {
     if (typeof raw[key] === 'string') parts.push(`${key}: ${raw[key]}`)
   }

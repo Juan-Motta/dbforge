@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import type { SqlDialect } from '../../domain/connection'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi } from '../explorer/api'
 import type { HistoryEntry } from '../history/api'
 import { HistoryPanel } from '../history/HistoryPanel'
 import type { StatementResult } from './api'
 import { PlanView } from './PlanView'
 import { ResultsPanel } from './ResultsPanel'
+import { messages } from './messages'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor'
 import { useQueryRunner } from './useQueryRunner'
 import styles from './QueryConsole.module.css'
@@ -42,6 +44,7 @@ export function QueryConsole({
   onOpenQuery,
   canOpen,
 }: QueryConsoleProps) {
+  const m = useMessages(messages)
   const editor = useRef<SqlEditorHandle>(null)
   const containers = useContainers(dialect === 'cosmosdb' ? connectionId : null, database)
   const [picked, setPicked] = useState(firstContainer)
@@ -69,17 +72,17 @@ export function QueryConsole({
     >
       <div className={styles.toolbar}>
         <span className="muted">
-          <Icon name="database" size={14} className={styles.inline} /> {database ?? 'default database'}
+          <Icon name="database" size={14} className={styles.inline} /> {database ?? m.defaultDatabase}
         </span>
         {containers && (
           <select
             className={styles.container}
-            aria-label="Container to query"
+            aria-label={m.containerToQuery}
             value={container ?? ''}
             disabled={running || explaining || containers.length === 0}
             onChange={(event) => setPicked(event.target.value)}
           >
-            {containers.length === 0 && <option value="">No containers</option>}
+            {containers.length === 0 && <option value="">{m.noContainers}</option>}
             {containers.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -88,36 +91,33 @@ export function QueryConsole({
           </select>
         )}
         <span className={styles.spacer} />
-        {cancelError && <span className={styles.cancelError}>Could not cancel: {cancelError}</span>}
+        {cancelError && <span className={styles.cancelError}>{m.couldNotCancel(cancelError)}</span>}
         <Button
           aria-pressed={historyOpen}
           className={historyOpen ? styles.toggled : undefined}
-          title="Query history ⌘Y"
+          title={m.historyTitle}
           onClick={() => setHistoryOpen((open) => !open)}
         >
           <Icon name="history" />
-          History
+          {m.history}
         </Button>
-        <label
-          className={styles.analyze}
-          title="Runs the statement to measure it, inside a transaction that is rolled back"
-        >
+        <label className={styles.analyze} title={m.analyzeTitle}>
           <input type="checkbox" checked={analyze} onChange={(event) => setAnalyze(event.target.checked)} />
-          Analyze
+          {m.analyze}
         </label>
         <Button disabled={running || explaining} onClick={() => explain(textToRun(), analyze)}>
           <Icon name="plan" />
-          {explaining ? 'Explaining…' : 'Explain'}
+          {explaining ? m.explaining : m.explain}
         </Button>
         {running ? (
           <Button disabled={cancelling} onClick={cancel}>
             <Icon name="stop" />
-            {cancelling ? 'Cancelling…' : 'Cancel'}
+            {cancelling ? m.cancelling : m.cancel}
           </Button>
         ) : (
           <Button variant="primary" disabled={explaining} onClick={() => run(textToRun())}>
             <Icon name="play" />
-            Run
+            {m.run}
             <span className={styles.shortcut}>⌘↵</span>
           </Button>
         )}
@@ -138,11 +138,7 @@ export function QueryConsole({
               // Remount per run so the selected result tab resets.
               <ResultsPanel key={lastRun.id} outcome={lastRun.outcome} onExport={onExportResult} />
             ) : (
-              <p className={styles.placeholder}>
-                {running || explaining
-                  ? 'Running…'
-                  : 'Write a query and press ⌘↵ to run it. Select text to run only that part.'}
-              </p>
+              <p className={styles.placeholder}>{running || explaining ? m.running : m.placeholder}</p>
             )}
           </div>
         </div>

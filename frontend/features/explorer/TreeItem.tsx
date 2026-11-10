@@ -3,6 +3,8 @@ import { IconButton } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
 import { Icon, type IconName } from '../../components/Icon'
 import type { Environment } from '../../domain/connection'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
 import type { ObjectKind, TreeNode } from './tree'
 import styles from './Explorer.module.css'
 
@@ -47,6 +49,7 @@ export function TreeItem({
   onDiagram,
   onMenu,
 }: TreeItemProps) {
+  const m = useMessages(messages)
   const isConnection = node.kind === 'connection'
   const environment = isConnection ? node.connection.environment : null
 
@@ -88,13 +91,13 @@ export function TreeItem({
 
       <span className={styles.name}>{node.name}</span>
       {environment && <Badge tone={ENV_BADGES[environment].tone}>{ENV_BADGES[environment].label}</Badge>}
-      {isConnection && node.children && <span className={styles.liveDot} title="Connected" />}
+      {isConnection && node.children && <span className={styles.liveDot} title={m.connected} />}
       {node.meta && <span className={styles.meta}>{node.meta}</span>}
 
       {onDiagram && (
         <IconButton
-          label={`Show ${node.name} ER diagram`}
-          title="ER diagram"
+          label={m.showDiagram(node.name)}
+          title={m.diagram}
           className={styles.edit}
           onClick={(event) => {
             event.stopPropagation()

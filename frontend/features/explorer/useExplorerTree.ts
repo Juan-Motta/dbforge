@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { Connection } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
-import { explorerApi } from './api'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { explorerApi, type DbObject } from './api'
+import { messages } from './messages'
 import { connectionNode, toChildNodes, type TreeNode } from './tree'
 
+// The listed objects are kept, not their nodes, so folder names follow the language.
 type ChildState =
-  { status: 'loading' } | { status: 'loaded'; nodes: TreeNode[] } | { status: 'error'; message: string }
+  { status: 'loading' } | { status: 'loaded'; objects: DbObject[] } | { status: 'error'; message: string }
 
 /** A node whose children come from the backend (folders arrive pre-loaded). */
 const loadsChildren = (node: TreeNode) => node.expandable && node.kind !== 'folder'
@@ -15,6 +18,7 @@ const loadsChildren = (node: TreeNode) => node.expandable && node.kind !== 'fold
  * backend the first time it is expanded; `refresh` reloads every expanded node.
  */
 export function useExplorerTree(connections: Connection[]) {
+  const m = useMessages(messages)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [children, setChildren] = useState<Record<string, ChildState>>({})
 
@@ -25,10 +29,10 @@ export function useExplorerTree(connections: Connection[]) {
       if (!state) return node
       if (state.status === 'loading') return { ...node, loading: true }
       if (state.status === 'error') return { ...node, error: state.message }
-      return { ...node, children: state.nodes.map(attach) }
+      return { ...node, children: toChildNodes(node, state.objects, m).map(attach) }
     }
     return connections.map((c) => attach(connectionNode(c)))
-  }, [connections, children])
+  }, [connections, children, m])
 
   const load = useCallback((nodes: TreeNode[]) => {
     setChildren((current) => {
@@ -39,8 +43,7 @@ export function useExplorerTree(connections: Connection[]) {
     nodes.forEach(async (node) => {
       let state: ChildState
       try {
-        const objects = await explorerApi.listObjects(node.connectionId, node.path)
-        state = { status: 'loaded', nodes: toChildNodes(node, objects) }
+        state = { status: 'loaded', objects: await explorerApi.listObjects(node.connectionId, node.path) }
       } catch (error) {
         state = { status: 'error', message: errorMessage(error) }
       }

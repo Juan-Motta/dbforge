@@ -1,10 +1,17 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
-import { formatMs, type Plan, type PlanNode } from './plan'
+import { useMessages } from '../../lib/i18n/useLanguage'
+import { messages } from './messages'
+import { formatMs, parsePlan, type PlanNode } from './plan'
 import styles from './PlanView.module.css'
 
-/** A statement's plan: totals on top, the node tree, and the selected node's fields. */
-export function PlanView({ plan }: { plan: Plan }) {
+/**
+ * A statement's plan, from the JSON the server returned: totals on top, the node
+ * tree, and the selected node's fields.
+ */
+export function PlanView({ plan: json }: { plan: unknown }) {
+  const m = useMessages(messages)
+  const plan = useMemo(() => parsePlan(json, m), [json, m])
   // Start on the costliest node: that is usually what the user came for.
   const [selectedId, setSelectedId] = useState(() => costliest(plan.nodes).id)
   const selected = plan.nodes.find((n) => n.id === selectedId) ?? plan.nodes[0]
@@ -15,29 +22,29 @@ export function PlanView({ plan }: { plan: Plan }) {
       <div className={styles.stats}>
         {plan.analyzed ? (
           <>
-            {plan.executionMs !== null && <Stat label="Execution" value={formatMs(plan.executionMs)} />}
+            {plan.executionMs !== null && <Stat label={m.execution} value={formatMs(plan.executionMs)} />}
             {/* MySQL doesn't report planning time. */}
-            {plan.planningMs !== null && <Stat label="Planning" value={formatMs(plan.planningMs)} />}
-            <Stat label="Rows returned" value={(plan.rows ?? 0).toLocaleString('en-US')} />
+            {plan.planningMs !== null && <Stat label={m.planning} value={formatMs(plan.planningMs)} />}
+            <Stat label={m.rowsReturned} value={(plan.rows ?? 0).toLocaleString('en-US')} />
           </>
         ) : (
-          <Stat label="Estimate only" value="Turn on Analyze to measure" />
+          <Stat label={m.estimateOnly} value={m.turnOnAnalyze} />
         )}
         <Stat
-          label="Warnings"
-          value={warnings === 0 ? 'None' : String(warnings)}
+          label={m.warnings}
+          value={warnings === 0 ? m.none : String(warnings)}
           tone={warnings ? 'warn' : undefined}
         />
       </div>
 
       <div className={styles.body}>
-        <div className={styles.tree} role="tree" aria-label="Plan nodes">
+        <div className={styles.tree} role="tree" aria-label={m.planNodes}>
           <div className={`${styles.row} ${styles.header}`} aria-hidden="true">
-            <span>Node</span>
-            <span className={styles.numeric}>{plan.analyzed ? 'Rows' : ''}</span>
-            <span className={styles.numeric}>Est. rows</span>
-            <span className={styles.numeric}>{plan.analyzed ? 'Self time' : 'Self cost'}</span>
-            <span>Share</span>
+            <span>{m.node}</span>
+            <span className={styles.numeric}>{plan.analyzed ? m.rowsColumn : ''}</span>
+            <span className={styles.numeric}>{m.estimatedRows}</span>
+            <span className={styles.numeric}>{plan.analyzed ? m.selfTime : m.selfCost}</span>
+            <span>{m.share}</span>
           </div>
           {plan.nodes.map((node) => (
             <div
@@ -54,7 +61,7 @@ export function PlanView({ plan }: { plan: Plan }) {
                 <span className={styles.type}>{node.nodeType}</span>
                 <span className={styles.detail}>{node.detail}</span>
                 {node.warnings.length > 0 && (
-                  <Icon name="warning" size={13} className={styles.warnIcon} aria-label="Has warnings" />
+                  <Icon name="warning" size={13} className={styles.warnIcon} aria-label={m.hasWarnings} />
                 )}
               </span>
               <span className={styles.numeric}>{node.actualRows?.toLocaleString('en-US') ?? ''}</span>
@@ -72,7 +79,7 @@ export function PlanView({ plan }: { plan: Plan }) {
           ))}
         </div>
 
-        <aside className={styles.details} aria-label="Node details">
+        <aside className={styles.details} aria-label={m.nodeDetails}>
           <h3>{selected.nodeType}</h3>
           {selected.warnings.map((warning) => (
             <p key={warning} className={styles.warning}>

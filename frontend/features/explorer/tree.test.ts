@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { Connection } from '../../domain/connection'
 import type { DbObject } from './api'
-import { connectionNode, filterTree, toChildNodes, visibleRows, type TreeNode, type TreeRow } from './tree'
+import { messages } from './messages'
+import {
+  connectionNode,
+  filterTree,
+  toChildNodes as toNodes,
+  visibleRows as rowsOf,
+  type TreeNode,
+  type TreeRow,
+} from './tree'
+
+// The English texts, unless a test asks for another language.
+const toChildNodes = (parent: TreeNode, objects: DbObject[]) => toNodes(parent, objects, messages.en)
+const visibleRows = (nodes: TreeNode[], isExpanded: (id: string) => boolean) =>
+  rowsOf(nodes, isExpanded, messages.en)
 
 const connection: Connection = {
   id: 'pg',
@@ -62,6 +75,14 @@ describe('toChildNodes', () => {
   it('omits empty folders', () => {
     const nodes = toChildNodes(connectionNode(connection), [object('t', 'table')])
     expect(nodes.map((n) => n.name)).toEqual(['Tables'])
+  })
+
+  it('names the folders in the language it is given, under the same ids', () => {
+    const objects = [object('t', 'table'), object('v', 'view')]
+    const english = toChildNodes(connectionNode(connection), objects)
+    const spanish = toNodes(connectionNode(connection), objects, messages.es)
+    expect(spanish.map((n) => n.name)).toEqual(['Tablas', 'Vistas'])
+    expect(spanish.map((n) => n.id)).toEqual(english.map((n) => n.id))
   })
 })
 

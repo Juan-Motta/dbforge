@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } 
 import { Button, IconButton } from '../../components/Button'
 import { shortTypeName } from '../../components/data-grid/columns'
 import { Icon } from '../../components/Icon'
+import { useMessages } from '../../lib/i18n/useLanguage'
 import type { SchemaDiagram } from './api'
 import {
   CARD_WIDTH,
@@ -19,6 +20,7 @@ import {
   type Point,
   type View,
 } from './layout'
+import { messages } from './messages'
 import { useSchemaDiagram } from './useSchemaDiagram'
 import styles from './DiagramView.module.css'
 
@@ -34,12 +36,13 @@ interface DiagramViewProps {
 
 /** The ER diagram of one schema, or of one table and its neighbours. */
 export function DiagramView({ connectionId, database, schema, focus, onOpenSchema }: DiagramViewProps) {
+  const m = useMessages(messages)
   const { diagram, error, reload } = useSchemaDiagram(connectionId, database, schema)
   if (error) return <p className={styles.message + ' ' + styles.error}>{error}</p>
-  if (!diagram) return <p className={styles.message}>Loading {schema}…</p>
-  if (diagram.tables.length === 0) return <p className={styles.message}>{schema} has no tables.</p>
+  if (!diagram) return <p className={styles.message}>{m.loading(schema)}</p>
+  if (diagram.tables.length === 0) return <p className={styles.message}>{m.noTables(schema)}</p>
   if (focus && !diagram.tables.some((t) => t.name === focus)) {
-    return <p className={styles.message}>{focus} is a view: only tables have relations to draw.</p>
+    return <p className={styles.message}>{m.isView(focus)}</p>
   }
   return (
     <Diagram
@@ -54,10 +57,10 @@ export function DiagramView({ connectionId, database, schema, focus, onOpenSchem
 }
 
 /** How far a table's diagram follows relations; `null` shows the whole schema. */
-const REACH: { label: string; steps: number | null }[] = [
-  { label: 'Direct', steps: 1 },
-  { label: '2 steps', steps: 2 },
-  { label: 'Whole schema', steps: null },
+const REACH: { label: 'direct' | 'twoSteps' | 'wholeSchema'; steps: number | null }[] = [
+  { label: 'direct', steps: 1 },
+  { label: 'twoSteps', steps: 2 },
+  { label: 'wholeSchema', steps: null },
 ]
 
 /** What a pointer drag is moving: the whole canvas, or one card. */
@@ -75,6 +78,7 @@ interface DiagramProps {
 }
 
 function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: DiagramProps) {
+  const m = useMessages(messages)
   const relationships = useMemo(() => localRelationships(diagram, schema), [diagram, schema])
   // Every foreign key column gets a mark, even when its target is in another schema.
   const foreignKeys = useMemo(
@@ -265,20 +269,18 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
   return (
     <div className={styles.diagram}>
       {!focus && (
-        <aside className={styles.sidebar} aria-label="Diagram tables">
+        <aside className={styles.sidebar} aria-label={m.tables}>
           <div className={styles.sidebarHeader}>
             <span className={styles.title}>
               {database}.{schema}
             </span>
-            <span className="muted">
-              {visible.size} of {diagram.tables.length}
-            </span>
+            <span className="muted">{m.shownOf(visible.size, diagram.tables.length)}</span>
           </div>
           <input
             type="search"
             className={styles.filter}
-            aria-label="Filter tables"
-            placeholder="Filter tables…"
+            aria-label={m.filter}
+            placeholder={m.filterPlaceholder}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
@@ -287,7 +289,7 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
               type="button"
               onClick={() => setVisible(new Set([...visible, ...listed.map((t) => t.name)]))}
             >
-              Show all
+              {m.showAll}
             </button>
             <button
               type="button"
@@ -295,7 +297,7 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
                 setVisible(new Set([...visible].filter((n) => !listed.some((t) => t.name === n))))
               }
             >
-              Hide all
+              {m.hideAll}
             </button>
           </div>
           <div className={styles.tables}>
@@ -395,7 +397,7 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
 
         <div className={styles.toolbar} onPointerDown={(event) => event.stopPropagation()}>
           {focus && (
-            <div className={styles.segmented} role="group" aria-label="Relations followed">
+            <div className={styles.segmented} role="group" aria-label={m.relationsFollowed}>
               {REACH.map((option) => (
                 <button
                   key={option.label}
@@ -403,35 +405,35 @@ function Diagram({ diagram, schema, database, focus, onOpenSchema, onReload }: D
                   aria-pressed={reach === option.steps}
                   onClick={() => changeReach(option.steps)}
                 >
-                  {option.label}
+                  {m[option.label]}
                 </button>
               ))}
             </div>
           )}
-          <div className={styles.segmented} role="group" aria-label="Columns shown">
+          <div className={styles.segmented} role="group" aria-label={m.columnsShown}>
             <button type="button" aria-pressed={mode === 'all'} onClick={() => setMode('all')}>
-              Columns
+              {m.columns}
             </button>
             <button type="button" aria-pressed={mode === 'keys'} onClick={() => setMode('keys')}>
-              Keys only
+              {m.keysOnly}
             </button>
           </div>
-          <Button onClick={() => setMoved(new Map())}>Auto layout</Button>
-          <IconButton label="Reload diagram" onClick={onReload}>
+          <Button onClick={() => setMoved(new Map())}>{m.autoLayout}</Button>
+          <IconButton label={m.reload} onClick={onReload}>
             <Icon name="refresh" />
           </IconButton>
-          {onOpenSchema && <Button onClick={onOpenSchema}>Open schema diagram</Button>}
+          {onOpenSchema && <Button onClick={onOpenSchema}>{m.openSchema}</Button>}
         </div>
 
         <div className={styles.zoom} onPointerDown={(event) => event.stopPropagation()}>
-          <IconButton label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
+          <IconButton label={m.zoomOut} onClick={() => zoomBy(1 / 1.2)}>
             <Icon name="minus" />
           </IconButton>
           <span className={styles.percent}>{Math.round(view.scale * 100)}%</span>
-          <IconButton label="Zoom in" onClick={() => zoomBy(1.2)}>
+          <IconButton label={m.zoomIn} onClick={() => zoomBy(1.2)}>
             <Icon name="plus" />
           </IconButton>
-          <Button onClick={fit}>Fit</Button>
+          <Button onClick={fit}>{m.fit}</Button>
         </div>
       </div>
     </div>

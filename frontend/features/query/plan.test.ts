@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { formatMs, parsePlan } from './plan'
+import { messages } from './messages'
+import { formatMs, parsePlan as parse } from './plan'
+
+/** Reads a plan with the English texts. */
+const parsePlan = (json: unknown) => parse(json, messages.en)
 
 // Shaped like PostgreSQL's EXPLAIN (ANALYZE, FORMAT JSON) output.
 const analyzed = [
@@ -85,6 +89,14 @@ describe('parsePlan', () => {
       'Reads 50,000 rows only to discard them; an index on the filter may help.',
     ])
     expect(plan.nodes[0].warnings).toEqual([])
+  })
+
+  it('writes its warnings and details in the language it is given', () => {
+    const spanish = parse(analyzed, messages.es)
+    expect(spanish.nodes[1].warnings[0]).toBe(
+      'Se estimaron 10 filas pero hubo 480; las estadísticas pueden estar desactualizadas.',
+    )
+    expect(spanish.nodes[2].detail).toBe('customers · usando customers_pkey · Sort Key: a, b')
   })
 
   it('keeps every scalar and list field for the detail pane', () => {

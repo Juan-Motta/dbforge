@@ -1,4 +1,5 @@
 import type { TableStructure } from './api'
+import { messages } from './messages'
 
 export type KeyKind = 'PK' | 'FK' | 'UNI' | 'IDX'
 
@@ -44,12 +45,12 @@ export function formatBytes(bytes: number): string {
   return `${text} ${UNITS[unit]}`
 }
 
-/** "~48,213 rows · 9.4 MB data · 3.1 MB indexes"; views have no size. */
-export function summary(structure: TableStructure): string {
+/** "~48,213 rows · 9.4 MB data · 3.1 MB indexes", in the language of `m`; views have no size. */
+export function summary(structure: TableStructure, m: typeof messages.en = messages.en): string {
   const parts = []
-  if (structure.rowEstimate !== null) parts.push(`~${structure.rowEstimate.toLocaleString('en-US')} rows`)
+  if (structure.rowEstimate !== null) parts.push(m.rowEstimate(structure.rowEstimate.toLocaleString('en-US')))
   if (structure.kind === 'table') {
-    parts.push(`${formatBytes(structure.dataBytes)} data`, `${formatBytes(structure.indexBytes)} indexes`)
+    parts.push(m.dataSize(formatBytes(structure.dataBytes)), m.indexSize(formatBytes(structure.indexBytes)))
   }
   return parts.join(' · ')
 }
