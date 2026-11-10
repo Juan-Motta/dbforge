@@ -30,10 +30,19 @@ export function kindOf(origin: Origin): Exclude<Kind, 'all'> {
  * events that arrive meanwhile may overlap. Oldest first, at most `capacity`.
  */
 export function merge(entries: StatementEntry[], incoming: StatementEntry[], capacity = CAPACITY) {
-  const known = new Set(entries.map((entry) => entry.id))
-  const added = incoming.filter((entry) => !known.has(entry.id))
-  if (added.length === 0) return entries
-  const all = [...entries, ...added].sort((a, b) => a.id - b.id)
+  const last = entries.at(-1)?.id ?? -Infinity
+  // The usual case: newer statements, in order, which go at the end as they are.
+  const inOrder = incoming.every((entry, i) => entry.id > (incoming[i - 1]?.id ?? last))
+  let all: StatementEntry[]
+  if (inOrder) {
+    if (incoming.length === 0) return entries
+    all = [...entries, ...incoming]
+  } else {
+    const known = new Set(entries.map((entry) => entry.id))
+    const added = incoming.filter((entry) => !known.has(entry.id) && known.add(entry.id))
+    if (added.length === 0) return entries
+    all = [...entries, ...added].sort((a, b) => a.id - b.id)
+  }
   return all.length > capacity ? all.slice(all.length - capacity) : all
 }
 

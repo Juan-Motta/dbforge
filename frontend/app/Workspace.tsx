@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { IconButton } from '../components/Button'
 import { hasDiagram, sqlDialectOf, type Connection } from '../domain/connection'
 import { Icon } from '../components/Icon'
@@ -18,6 +18,15 @@ import { confirmingTag } from '../features/tags/tags'
 import { useTags } from '../features/tags/useTags'
 import styles from './App.module.css'
 
+/** What a tab's content asks of the workspace: other tabs to open, its own view to keep. */
+export interface TabActions {
+  /** Opens a query from the history in a new console. */
+  openQuery: (entry: HistoryEntry) => void
+  openDiagram: (connectionId: string, database: string, schema: string) => void
+  openTable: (connectionId: string, table: TableRef, filter: RowFilter) => void
+  setTableView: (tabId: string, view: TableTabView) => void
+}
+
 interface WorkspaceProps {
   tabs: Tab[]
   activeId: string | null
@@ -25,12 +34,9 @@ interface WorkspaceProps {
   onClose: (id: string) => void
   /** Undefined when there is no connection to query. */
   onNewQuery?: () => void
-  connectionOf: (connectionId: string) => Connection | undefined
-  /** Opens a query from the history in a new console. */
-  onOpenQuery: (entry: HistoryEntry) => void
-  onOpenDiagram: (connectionId: string, database: string, schema: string) => void
-  onOpenTable: (connectionId: string, table: TableRef, filter: RowFilter) => void
-  onTableView: (tabId: string, view: TableTabView) => void
+  connections: Connection[]
+  /** The same object between renders (see `TabContent`). */
+  actions: TabActions
 }
 
 const TAB_ICONS = { query: 'code', table: 'table', diagram: 'diagram', keyspace: 'database' } as const
@@ -42,15 +48,11 @@ export function Workspace({
   onSelect,
   onClose,
   onNewQuery,
-  connectionOf,
-  onOpenQuery,
-  onOpenDiagram,
-  onOpenTable,
-  onTableView,
+  connections,
+  actions,
 }: WorkspaceProps) {
   const [exporting, setExporting] = useState<ExportSource | null>(null)
   const m = useMessages(messages)
-  const { tags, loaded } = useTags()
 
   if (tabs.length === 0) {
     return (
@@ -78,53 +80,7 @@ export function Workspace({
       {/* Inactive tabs stay mounted so their editor text and results survive switching. */}
       {tabs.map((tab) => (
         <div key={tab.id} className={styles.tabContent} hidden={tab.id !== activeId}>
-          {tab.kind === 'query' ? (
-            <QueryConsole
-              sessionId={tab.id}
-              connectionId={tab.connectionId}
-              database={tab.database}
-              container={tab.container}
-              initialSql={tab.initialSql}
-              onOpenQuery={onOpenQuery}
-              canOpen={(entry) => connectionOf(entry.connectionId) !== undefined}
-              dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
-              onExportResult={(result) =>
-                setExporting({
-                  kind: 'rows',
-                  name: 'query_result',
-                  columns: result.columns,
-                  rows: result.rows,
-                })
-              }
-            />
-          ) : tab.kind === 'diagram' ? (
-            <DiagramView connectionId={tab.connectionId} database={tab.database} schema={tab.schema} />
-          ) : tab.kind === 'keyspace' ? (
-            <KeyBrowser
-              tabId={tab.id}
-              connectionId={tab.connectionId}
-              database={tab.database}
-              address={addressOf(connectionOf(tab.connectionId))}
-            />
-          ) : (
-            <TablePage
-              connectionId={tab.connectionId}
-              table={tab.table}
-              confirmTag={confirmingTag(tags, connectionOf(tab.connectionId)?.environment ?? null, loaded)}
-              dialect={sqlDialectOf(connectionOf(tab.connectionId)?.engine)}
-              diagram={hasDiagram(connectionOf(tab.connectionId)?.engine ?? 'redis')}
-              onOpenSchemaDiagram={() =>
-                onOpenDiagram(tab.connectionId, tab.table.database, tab.table.schema)
-              }
-              initialFilter={tab.filter}
-              view={tab.view ?? 'data'}
-              onViewChange={(view) => onTableView(tab.id, view)}
-              onOpenTable={(table, filter) => onOpenTable(tab.connectionId, table, filter)}
-              onExport={(filter) =>
-                setExporting({ kind: 'table', connectionId: tab.connectionId, table: tab.table, filter })
-              }
-            />
-          )}
+          <TabContent tab={tab} connections={connections} actions={actions} onExport={setExporting} />
         </div>
       ))}
 
@@ -132,6 +88,72 @@ export function Workspace({
     </div>
   )
 }
+
+interface TabContentProps {
+  tab: Tab
+  connections: Connection[]
+  actions: TabActions
+  onExport: (source: ExportSource) => void
+}
+
+/**
+ * What one tab shows. Every tab stays mounted, so this is drawn again only
+ * when its own tab, the connections or the tags change: what happens elsewhere
+ * in the app (another tab, the explorer, a notice) leaves an open table as it is.
+ */
+const TabContent = memo(function TabContent({ tab, connections, actions, onExport }: TabContentProps) {
+  const { tags, loaded } = useTags()
+  const connection = connections.find((c) => c.id === tab.connectionId)
+  switch (tab.kind) {
+    case 'query':
+      return (
+        <QueryConsole
+          sessionId={tab.id}
+          connectionId={tab.connectionId}
+          database={tab.database}
+          container={tab.container}
+          initialSql={tab.initialSql}
+          onOpenQuery={actions.openQuery}
+          canOpen={(entry) => connections.some((c) => c.id === entry.connectionId)}
+          dialect={sqlDialectOf(connection?.engine)}
+          onExportResult={(result) =>
+            onExport({ kind: 'rows', name: 'query_result', columns: result.columns, rows: result.rows })
+          }
+        />
+      )
+    case 'diagram':
+      return <DiagramView connectionId={tab.connectionId} database={tab.database} schema={tab.schema} />
+    case 'keyspace':
+      return (
+        <KeyBrowser
+          tabId={tab.id}
+          connectionId={tab.connectionId}
+          database={tab.database}
+          address={addressOf(connection)}
+        />
+      )
+    case 'table':
+      return (
+        <TablePage
+          connectionId={tab.connectionId}
+          table={tab.table}
+          confirmTag={confirmingTag(tags, connection?.environment ?? null, loaded)}
+          dialect={sqlDialectOf(connection?.engine)}
+          diagram={hasDiagram(connection?.engine ?? 'redis')}
+          onOpenSchemaDiagram={() =>
+            actions.openDiagram(tab.connectionId, tab.table.database, tab.table.schema)
+          }
+          initialFilter={tab.filter}
+          view={tab.view ?? 'data'}
+          onViewChange={(view) => actions.setTableView(tab.id, view)}
+          onOpenTable={(table, filter) => actions.openTable(tab.connectionId, table, filter)}
+          onExport={(filter) =>
+            onExport({ kind: 'table', connectionId: tab.connectionId, table: tab.table, filter })
+          }
+        />
+      )
+  }
+})
 
 /** `host:port`, or the URL's host for a connection given as a URL. */
 function addressOf(connection: Connection | undefined): string {

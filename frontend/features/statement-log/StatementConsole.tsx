@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Badge, type Tone } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
 import { Icon } from '../../components/Icon'
@@ -7,6 +7,7 @@ import { usePanelSize } from '../../components/usePanelSize'
 import type { Engine } from '../../domain/connection'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import type { Origin, StatementEntry } from './api'
+import { useStatementLog } from './useStatementLog'
 import { messages } from './messages'
 import { clockTime, duration, KINDS, kindOf, type Kind, runnable, script, visible } from './statementLog'
 import styles from './StatementConsole.module.css'
@@ -33,10 +34,9 @@ const ORIGIN_LABELS: Record<Origin, `origin${Capitalize<Origin>}`> = {
 }
 
 interface StatementConsoleProps {
-  entries: StatementEntry[]
   connectionOf: (id: string) => { name: string; engine: Engine } | undefined
+  /** The same function between renders, so the rows aren't drawn again for it. */
   onCopy: (text: string) => void
-  onClear: () => void
   onClose: () => void
 }
 
@@ -45,20 +45,24 @@ interface StatementConsoleProps {
  * island under the workspace: each one as it could be run again, with where
  * it ran, what it was for, how long it took and what came back.
  */
-export function StatementConsole({ entries, connectionOf, onCopy, onClear, onClose }: StatementConsoleProps) {
+export function StatementConsole({ connectionOf, onCopy, onClose }: StatementConsoleProps) {
   const m = useMessages(messages)
+  const { entries, clear } = useStatementLog()
   const [height, setHeight, resetHeight] = usePanelSize('dbforge.statementsHeight', 220, 120, 640)
   const [kind, setKind] = useState<Kind>('all')
   const [expanded, setExpanded] = useState<number | null>(null)
+  const toggle = useCallback((id: number) => setExpanded((open) => (open === id ? null : id)), [])
   const list = useRef<HTMLDivElement>(null)
   // Follows new statements while scrolled to the bottom; stays put once scrolled up.
   const following = useRef(true)
   const shown = visible(entries, kind)
   const engineOf = (id: string) => connectionOf(id)?.engine
 
+  // By the last statement, not by how many there are: a full log drops one for each it takes.
+  const newest = shown.at(-1)?.id
   useLayoutEffect(() => {
     if (following.current && list.current) list.current.scrollTop = list.current.scrollHeight
-  }, [shown.length, kind])
+  }, [newest, kind])
 
   return (
     <section className={`island ${styles.console}`} style={{ height }} aria-label={m.title}>
@@ -84,7 +88,7 @@ export function StatementConsole({ entries, connectionOf, onCopy, onClear, onClo
           <Icon name="duplicate" />
           {m.copyAll}
         </Button>
-        <Button variant="ghost" disabled={entries.length === 0} onClick={onClear}>
+        <Button variant="ghost" disabled={entries.length === 0} onClick={clear}>
           <Icon name="trash" />
           {m.clear}
         </Button>
@@ -104,49 +108,72 @@ export function StatementConsole({ entries, connectionOf, onCopy, onClear, onClo
         {shown.length === 0 ? (
           <p className={styles.empty}>{entries.length === 0 ? m.empty : m.emptyFiltered}</p>
         ) : (
-          shown.map((entry) => {
-            const connection = connectionOf(entry.connectionId)
-            const open = expanded === entry.id
-            const where = [connection?.name ?? m.unknownConnection, entry.database]
-              .filter(Boolean)
-              .join(' · ')
-            return (
-              <div key={entry.id} className={styles.row} data-error={entry.error !== null || undefined}>
-                <span className={styles.time} title={where}>
-                  {clockTime(entry.at)}
-                </span>
-                <span className={styles.origin}>
-                  <Badge tone={KIND_TONES[kindOf(entry.origin)]}>{m[ORIGIN_LABELS[entry.origin]]}</Badge>
-                </span>
-                <span className={styles.where} title={entry.database ?? undefined}>
-                  {connection?.name ?? m.unknownConnection}
-                  {entry.database && <span className={styles.database}> · {entry.database}</span>}
-                </span>
-                <button
-                  type="button"
-                  className={open ? `${styles.text} ${styles.open}` : styles.text}
-                  aria-expanded={open}
-                  onClick={() => setExpanded(open ? null : entry.id)}
-                >
-                  {entry.text}
-                </button>
-                <span className={styles.meta}>
-                  {duration(entry.elapsedMs)}
-                  {entry.error === null && entry.rows !== null && <> · {m.rows(entry.rows)}</>}
-                </span>
-                <IconButton
-                  label={m.copy}
-                  className={styles.copy}
-                  onClick={() => onCopy(runnable(entry, connection?.engine))}
-                >
-                  <Icon name="duplicate" />
-                </IconButton>
-                {entry.error !== null && <p className={styles.error}>{entry.error}</p>}
-              </div>
-            )
-          })
+          shown.map((entry) => (
+            <StatementRow
+              key={entry.id}
+              entry={entry}
+              connection={connectionOf(entry.connectionId)}
+              open={expanded === entry.id}
+              onToggle={toggle}
+              onCopy={onCopy}
+            />
+          ))
         )}
       </div>
     </section>
   )
 }
+
+interface StatementRowProps {
+  entry: StatementEntry
+  connection: { name: string; engine: Engine } | undefined
+  open: boolean
+  onToggle: (id: number) => void
+  onCopy: (text: string) => void
+}
+
+/** One statement. Drawn again only when it changes: a new statement leaves the others as they are. */
+const StatementRow = memo(function StatementRow({
+  entry,
+  connection,
+  open,
+  onToggle,
+  onCopy,
+}: StatementRowProps) {
+  const m = useMessages(messages)
+  const where = [connection?.name ?? m.unknownConnection, entry.database].filter(Boolean).join(' · ')
+  return (
+    <div className={styles.row} data-error={entry.error !== null || undefined}>
+      <span className={styles.time} title={where}>
+        {clockTime(entry.at)}
+      </span>
+      <span className={styles.origin}>
+        <Badge tone={KIND_TONES[kindOf(entry.origin)]}>{m[ORIGIN_LABELS[entry.origin]]}</Badge>
+      </span>
+      <span className={styles.where} title={entry.database ?? undefined}>
+        {connection?.name ?? m.unknownConnection}
+        {entry.database && <span className={styles.database}> · {entry.database}</span>}
+      </span>
+      <button
+        type="button"
+        className={open ? `${styles.text} ${styles.open}` : styles.text}
+        aria-expanded={open}
+        onClick={() => onToggle(entry.id)}
+      >
+        {entry.text}
+      </button>
+      <span className={styles.meta}>
+        {duration(entry.elapsedMs)}
+        {entry.error === null && entry.rows !== null && <> · {m.rows(entry.rows)}</>}
+      </span>
+      <IconButton
+        label={m.copy}
+        className={styles.copy}
+        onClick={() => onCopy(runnable(entry, connection?.engine))}
+      >
+        <Icon name="duplicate" />
+      </IconButton>
+      {entry.error !== null && <p className={styles.error}>{entry.error}</p>}
+    </div>
+  )
+})

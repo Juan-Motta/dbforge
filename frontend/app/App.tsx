@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   defaultDatabase,
   defaultSchema,
@@ -23,7 +23,6 @@ import { SettingsDialog } from '../features/settings/SettingsDialog'
 import { StatementConsole } from '../features/statement-log/StatementConsole'
 import { ApprovalDialog } from '../features/mcp/ApprovalDialog'
 import { useApprovals } from '../features/mcp/useApprovals'
-import { useStatementLog } from '../features/statement-log/useStatementLog'
 import { useStoredFlag } from '../components/useStoredFlag'
 import { useTheme } from '../features/settings/useTheme'
 import { TitleBar } from '../features/shell/TitleBar'
@@ -40,7 +39,7 @@ import {
 import { useMessages } from '../lib/i18n/useLanguage'
 import { messages } from './messages'
 import { explorerMenu, type MenuActions } from './explorerMenu'
-import { Workspace } from './Workspace'
+import { Workspace, type TabActions } from './Workspace'
 import { confirmingTag } from '../features/tags/tags'
 import { useTagList } from '../features/tags/useTagList'
 import { TagsContext } from '../features/tags/useTags'
@@ -63,7 +62,7 @@ interface Selection {
 export function App() {
   const { connections, loadError, save, remove, duplicate, reload } = useConnections()
   // Deleting a tag also clears it from connections, so they are read again.
-  const tagsState = useTagList(() => void reload())
+  const tagsState = useTagList(reload)
   // Hidden with ⌘B for more room; it stays mounted so its expanded nodes survive.
   const [explorerOpen, setExplorerOpen] = useState(true)
   const [explorerWidth, setExplorerWidth, resetExplorerWidth] = usePanelSize(
@@ -90,8 +89,6 @@ export function App() {
   const [deleting, setDeleting] = useState<Connection | null>(null)
   const [tabs, setTabs] = useState(NO_TABS)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // Recorded from the start, so opening the console shows what already ran.
-  const statements = useStatementLog()
   // Changes agents ask to make on connections whose tag asks first.
   const approvals = useApprovals()
   const [statementsOpen, setStatementsOpen] = useStoredFlag('dbforge.statementsOpen', false)
@@ -110,8 +107,19 @@ export function App() {
     return () => clearTimeout(timer)
   }, [notice])
 
-  const notify = (text: string, tone: NoticeState['tone'] = 'info') =>
-    setNotice((current) => ({ id: (current?.id ?? 0) + 1, text, tone }))
+  const notify = useCallback(
+    (text: string, tone: NoticeState['tone'] = 'info') =>
+      setNotice((current) => ({ id: (current?.id ?? 0) + 1, text, tone })),
+    [],
+  )
+  const copyStatement = useCallback(
+    (text: string) =>
+      void copyText(text).then(
+        () => notify(m.copied),
+        (error) => notify(errorMessage(error), 'error'),
+      ),
+    [notify, m],
+  )
 
   const activeConnection = connections.find((c) => c.id === selection?.connectionId)
   const activePath = activeConnection ? (selection?.path ?? []) : []
@@ -228,6 +236,30 @@ export function App() {
     return explorerMenu(node, connection, actions, m, adminM)
   }
 
+  // What a tab's content asks of the workspace. The same object between renders,
+  // so a tab is drawn again only when it changes itself.
+  const tabActions = useMemo<TabActions>(
+    () => ({
+      openTable: (connectionId, table, filter) =>
+        setTabs((state) => openTableTab(state, connectionId, table, filter)),
+      openDiagram: (connectionId, database, schema) =>
+        setTabs((state) => openDiagramTab(state, m, connectionId, database, schema)),
+      setTableView: (id, view) => setTabs((state) => setTableView(state, id, view)),
+      openQuery: (entry) =>
+        setTabs((state) =>
+          newQueryTab(
+            state,
+            m,
+            entry.connectionId,
+            entry.database ?? undefined,
+            entry.sql,
+            entry.container ?? undefined,
+          ),
+        ),
+    }),
+    [m],
+  )
+
   const removeConnection = async (id: string) => {
     await remove(id)
     setTabs((state) => closeConnectionTabs(state, id))
@@ -284,40 +316,15 @@ export function App() {
                   onSelect={(id) => setTabs((state) => ({ ...state, activeId: id }))}
                   onClose={(id) => setTabs((state) => closeTab(state, id))}
                   onNewQuery={newQuery}
-                  connectionOf={(id) => connections.find((c) => c.id === id)}
-                  onOpenTable={(connectionId, table, filter) =>
-                    setTabs((state) => openTableTab(state, connectionId, table, filter))
-                  }
-                  onOpenDiagram={(connectionId, database, schema) =>
-                    setTabs((state) => openDiagramTab(state, m, connectionId, database, schema))
-                  }
-                  onTableView={(id, view) => setTabs((state) => setTableView(state, id, view))}
-                  onOpenQuery={(entry) =>
-                    setTabs((state) =>
-                      newQueryTab(
-                        state,
-                        m,
-                        entry.connectionId,
-                        entry.database ?? undefined,
-                        entry.sql,
-                        entry.container ?? undefined,
-                      ),
-                    )
-                  }
+                  connections={connections}
+                  actions={tabActions}
                 />
               )}
             </main>
             {statementsOpen && (
               <StatementConsole
-                entries={statements.entries}
                 connectionOf={(id) => connections.find((c) => c.id === id)}
-                onCopy={(text) =>
-                  void copyText(text).then(
-                    () => notify(m.copied),
-                    (error) => notify(errorMessage(error), 'error'),
-                  )
-                }
-                onClear={statements.clear}
+                onCopy={copyStatement}
                 onClose={() => setStatementsOpen(false)}
               />
             )}
