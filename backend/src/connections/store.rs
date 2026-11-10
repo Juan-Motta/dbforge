@@ -52,6 +52,25 @@ impl ConnectionStore {
         self.persist(&connections)
     }
 
+    /// A copy of connection `id` named `name`, with a new id and the same
+    /// saved password.
+    pub fn duplicate(&self, id: &str, name: &str) -> Result<Connection> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Invalid("Name is required".into()));
+        }
+        let original = self.get(id)?;
+        let copy = Connection { id: uuid::Uuid::new_v4().to_string(), name: name.to_string(), ..original };
+        if let Some(password) = self.credentials.get(id)? {
+            self.credentials.set(&copy.id, &password)?;
+        }
+        if let Err(error) = self.upsert(copy.clone()) {
+            let _ = self.credentials.delete(&copy.id);
+            return Err(error);
+        }
+        Ok(copy)
+    }
+
     pub fn remove(&self, id: &str) -> Result<()> {
         let mut connections = self.lock();
         let before = connections.len();
@@ -110,6 +129,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("connections.json");
         (dir, path)
+    }
+
+    #[test]
+    fn duplicates_a_connection_with_its_password() {
+        let (_dir, path) = temp_store();
+        let store = load(path.clone());
+        store.upsert(connection("a", "first")).unwrap();
+        // A new install keeps passwords in the encrypted file next to the store.
+        store.credentials().set("a", "secret").unwrap();
+
+        let copy = store.duplicate("a", " first (copy) ").unwrap();
+        assert_ne!(copy.id, "a");
+        assert_eq!(copy.name, "first (copy)");
+        assert_eq!(Connection { id: "a".into(), name: "first".into(), ..copy.clone() }, connection("a", "first"));
+        assert_eq!(store.password(&copy.id).unwrap().as_deref(), Some("secret"));
+        assert_eq!(load(path).list().len(), 2);
+
+        assert!(matches!(store.duplicate("a", "  "), Err(AppError::Invalid(_))));
+        assert!(matches!(store.duplicate("missing", "x"), Err(AppError::NotFound(_))));
     }
 
     #[test]

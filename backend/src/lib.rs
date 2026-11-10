@@ -36,6 +36,7 @@ pub fn run() {
             commands::list_connections,
             commands::save_connection,
             commands::delete_connection,
+            commands::duplicate_connection,
             commands::test_connection,
             commands::credential_storage,
             commands::set_credential_storage,

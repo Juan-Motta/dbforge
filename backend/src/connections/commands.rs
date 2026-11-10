@@ -21,6 +21,12 @@ pub fn save_connection(store: State<'_, ConnectionStore>, input: ConnectionInput
     Ok(connection)
 }
 
+/// Saves a copy of a connection, password included, under `name`.
+#[tauri::command]
+pub fn duplicate_connection(store: State<'_, ConnectionStore>, id: String, name: String) -> Result<Connection> {
+    store.duplicate(&id, &name)
+}
+
 #[tauri::command]
 pub fn delete_connection(store: State<'_, ConnectionStore>, id: String) -> Result<()> {
     store.remove(&id)?;
