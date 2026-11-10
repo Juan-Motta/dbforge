@@ -4,7 +4,7 @@ use either::Either;
 use futures_util::TryStreamExt;
 use futures_util::stream::BoxStream;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgQueryResult, PgRow};
-use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo, ValueRef};
+use sqlx::{AssertSqlSafe, Connection as _, Row, ValueRef};
 
 mod admin;
 mod diagram;
@@ -321,37 +321,6 @@ impl Session {
     }
 }
 
-/// Reads what the simple query protocol returns, one result per statement.
-/// All rows are read so every statement completes, but only the first
-/// `row_limit` of each result are kept.
-async fn read_results(
-    mut stream: BoxStream<'_, sqlx::Result<Either<PgQueryResult, PgRow>>>,
-    row_limit: usize,
-) -> Result<Vec<StatementResult>> {
-    let mut results = Vec::new();
-    let mut current = StatementResult::default();
-    while let Some(item) = stream.try_next().await? {
-        match item {
-            Either::Right(row) => {
-                if current.columns.is_empty() {
-                    current.columns = columns_of(&row);
-                }
-                if current.rows.len() < row_limit {
-                    current.rows.push(text_values(&row)?);
-                } else {
-                    current.truncated = true;
-                }
-            }
-            // Marks the end of one statement.
-            Either::Left(done) => {
-                current.rows_affected = done.rows_affected();
-                results.push(std::mem::take(&mut current));
-            }
-        }
-    }
-    Ok(results)
-}
-
 /// The server's plan for one statement, as `EXPLAIN (FORMAT JSON)` returns it.
 ///
 /// With `analyze` the statement really runs, so it runs on its own connection
@@ -391,19 +360,6 @@ pub async fn cancel(connection: &Connection, password: Option<&str>, database: O
     Ok(())
 }
 
-fn columns_of(row: &PgRow) -> Vec<Column> {
-    row.columns()
-        .iter()
-        .map(|c| Column {
-            name: c.name().to_string(),
-            data_type: c.type_info().name().to_lowercase(),
-            primary_key: false,
-            generated: false,
-            default: None,
-        })
-        .collect()
-}
-
 fn text_values(row: &PgRow) -> Result<Vec<Option<String>>> {
     (0..row.len())
         .map(|i| {
@@ -415,6 +371,14 @@ fn text_values(row: &PgRow) -> Result<Vec<Option<String>>> {
             Ok(Some(text.to_string()))
         })
         .collect()
+}
+
+/// What a script returns, with values read as this engine writes them as text.
+async fn read_results(
+    stream: BoxStream<'_, sqlx::Result<Either<PgQueryResult, PgRow>>>,
+    row_limit: usize,
+) -> Result<Vec<StatementResult>> {
+    super::sqlx_results::read_results::<sqlx::Postgres>(stream, row_limit, text_values).await
 }
 
 /// Quotes an identifier so any table or column name is safe inside SQL.

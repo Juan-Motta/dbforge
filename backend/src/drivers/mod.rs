@@ -13,6 +13,7 @@ pub mod redis;
 mod sqlite;
 mod sqlserver;
 mod sqlx_edits;
+mod sqlx_results;
 
 use std::collections::BTreeMap;
 use std::future::Future;

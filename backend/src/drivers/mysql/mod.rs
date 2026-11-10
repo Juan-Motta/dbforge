@@ -298,61 +298,12 @@ impl Session {
     }
 }
 
-/// Reads what the text protocol returns, one result per statement. All rows
-/// are read so every statement completes, but only the first `row_limit` of
-/// each result are kept.
-async fn read_results(
-    mut stream: BoxStream<'_, sqlx::Result<Either<MySqlQueryResult, MySqlRow>>>,
-    row_limit: usize,
-) -> Result<Vec<StatementResult>> {
-    let mut results = Vec::new();
-    let mut current = StatementResult::default();
-    // Rows the current statement returned, kept or not.
-    let mut returned = 0u64;
-    while let Some(item) = stream.try_next().await? {
-        match item {
-            Either::Right(row) => {
-                returned += 1;
-                if current.columns.is_empty() {
-                    current.columns = columns_of(&row);
-                }
-                if current.rows.len() < row_limit {
-                    current.rows.push(text_values(&row));
-                } else {
-                    current.truncated = true;
-                }
-            }
-            // Marks the end of one statement.
-            Either::Left(done) => {
-                // A SELECT reports no affected rows; count what it returned instead.
-                current.rows_affected = if current.columns.is_empty() { done.rows_affected() } else { returned };
-                results.push(std::mem::take(&mut current));
-                returned = 0;
-            }
-        }
-    }
-    Ok(results)
-}
-
 /// Stops what connection `id` is running; the connection itself stays open.
 pub async fn cancel(connection: &Connection, password: Option<&str>, id: u64) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;
     sqlx::raw_sql(AssertSqlSafe(format!("KILL QUERY {id}"))).execute(&mut conn).await?;
     conn.close().await?;
     Ok(())
-}
-
-fn columns_of(row: &MySqlRow) -> Vec<Column> {
-    row.columns()
-        .iter()
-        .map(|c| Column {
-            name: c.name().to_string(),
-            data_type: c.type_info().name().to_lowercase(),
-            primary_key: false,
-            generated: false,
-            default: None,
-        })
-        .collect()
 }
 
 /// Values in their text form. The text protocol sends every value as text, so
@@ -371,6 +322,14 @@ fn text_values(row: &MySqlRow) -> Vec<Option<String>> {
             })
         })
         .collect()
+}
+
+/// What a script returns, with values read as this engine writes them as text.
+async fn read_results(
+    stream: BoxStream<'_, sqlx::Result<Either<MySqlQueryResult, MySqlRow>>>,
+    row_limit: usize,
+) -> Result<Vec<StatementResult>> {
+    super::sqlx_results::read_results::<sqlx::MySql>(stream, row_limit, |row| Ok(text_values(row))).await
 }
 
 /// Quotes an identifier so any table or column name is safe inside SQL.

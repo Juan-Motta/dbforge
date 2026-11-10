@@ -19,7 +19,7 @@ use futures_util::TryStreamExt;
 use futures_util::stream::BoxStream;
 use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteQueryResult, SqliteRow};
-use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
+use sqlx::{AssertSqlSafe, Connection as _, Row};
 
 use super::logged::Logged;
 use super::row_filter::{RowFilter, sql_clauses};
@@ -199,38 +199,6 @@ impl Session {
     }
 }
 
-/// Reads the result of every statement of a script; all rows are read, the
-/// first `row_limit` of each result are kept.
-async fn read_results(
-    mut stream: BoxStream<'_, sqlx::Result<Either<SqliteQueryResult, SqliteRow>>>,
-    row_limit: usize,
-) -> Result<Vec<StatementResult>> {
-    let mut results = Vec::new();
-    let mut current = StatementResult::default();
-    let mut returned = 0u64;
-    while let Some(item) = stream.try_next().await? {
-        match item {
-            Either::Right(row) => {
-                returned += 1;
-                if current.columns.is_empty() {
-                    current.columns = columns_of(&row);
-                }
-                if current.rows.len() < row_limit {
-                    current.rows.push(text_values(&row));
-                } else {
-                    current.truncated = true;
-                }
-            }
-            Either::Left(done) => {
-                current.rows_affected = if current.columns.is_empty() { done.rows_affected() } else { returned };
-                results.push(std::mem::take(&mut current));
-                returned = 0;
-            }
-        }
-    }
-    Ok(results)
-}
-
 /// `EXPLAIN QUERY PLAN` as a tree: SQLite reports how it reads each table, with
 /// no costs or row counts, and can't measure a run (no Analyze).
 pub async fn explain(connection: &Connection, sql: &str, analyze: bool) -> Result<Value> {
@@ -316,19 +284,6 @@ fn has_several_statements(sql: &str) -> bool {
     false
 }
 
-fn columns_of(row: &SqliteRow) -> Vec<Column> {
-    row.columns()
-        .iter()
-        .map(|c| Column {
-            name: c.name().to_string(),
-            data_type: c.type_info().name().to_lowercase(),
-            primary_key: false,
-            generated: false,
-            default: None,
-        })
-        .collect()
-}
-
 /// Values as text. SQLite turns numbers into their text form when asked for
 /// bytes; binary data that isn't UTF-8 is shown lossily.
 fn text_values(row: &SqliteRow) -> Vec<Option<String>> {
@@ -340,6 +295,14 @@ fn text_values(row: &SqliteRow) -> Vec<Option<String>> {
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         })
         .collect()
+}
+
+/// What a script returns, with values read as this engine writes them as text.
+async fn read_results(
+    stream: BoxStream<'_, sqlx::Result<Either<SqliteQueryResult, SqliteRow>>>,
+    row_limit: usize,
+) -> Result<Vec<StatementResult>> {
+    super::sqlx_results::read_results::<sqlx::Sqlite>(stream, row_limit, |row| Ok(text_values(row))).await
 }
 
 fn quote_ident(name: &str) -> String {
