@@ -161,3 +161,29 @@ function fromHex(hex: string): Uint8Array | null {
   if (hex.length % 2 !== 0 || /[^0-9a-f]/i.test(hex)) return null
   return Uint8Array.from({ length: hex.length / 2 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16))
 }
+
+/** An argument as redis-cli reads it: bare when it can be, else in double quotes with `\` and `"` escaped. */
+export function cliArg(text: string): string {
+  return /^[^\s"'\\]+$/.test(text) ? text : `"${text.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+}
+
+/** The redis-cli command that reads a whole key of `kind`. */
+export function readCommand(name: string, kind: string): string {
+  const key = cliArg(name)
+  switch (kind) {
+    case 'string':
+      return `GET ${key}`
+    case 'hash':
+      return `HGETALL ${key}`
+    case 'list':
+      return `LRANGE ${key} 0 -1`
+    case 'set':
+      return `SMEMBERS ${key}`
+    case 'zset':
+      return `ZRANGE ${key} 0 -1 WITHSCORES`
+    case 'stream':
+      return `XRANGE ${key} - +`
+    default:
+      return `TYPE ${key}`
+  }
+}

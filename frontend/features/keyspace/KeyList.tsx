@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { Button, IconButton } from '../../components/Button'
+import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { keyspaceApi, type KeyInfo } from './api'
-import { formatTtl, keyTree, kindLabel, visibleKeyRows } from './keyspace'
+import { formatTtl, keyTree, kindLabel, readCommand, visibleKeyRows } from './keyspace'
 import { kindClass } from './kindClass'
 import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
@@ -20,11 +21,30 @@ interface KeyListProps {
   onAddKey: () => void
   /** Changes when keys were added, renamed or deleted, to scan again. */
   reloadToken: number
+  /** Opens the key with one of its dialogs: rename, TTL or delete. */
+  onKeyAction: (key: KeyInfo, action: KeyAction) => void
 }
 
+/** What a key's menu opens in its detail. */
+export type KeyAction = 'rename' | 'ttl' | 'delete'
+
 /** The keys of a database found with SCAN, as a `:` tree or a flat list. */
-export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reloadToken }: KeyListProps) {
+export function KeyList({
+  connectionId,
+  db,
+  selected,
+  onSelect,
+  onAddKey,
+  reloadToken,
+  onKeyAction,
+}: KeyListProps) {
   const m = useMessages(messages)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const write = (text: string) => void navigator.clipboard.writeText(text)
+  const openMenu = (event: MouseEvent, items: MenuItem[]) => {
+    event.preventDefault()
+    setMenu({ x: event.clientX, y: event.clientY, items })
+  }
   const [draft, setDraft] = useState('')
   const [pattern, setPattern] = useState('')
   const [kind, setKind] = useState('')
@@ -123,6 +143,7 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
         </div>
       </div>
 
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       <div className={styles.keyRows} role="tree" aria-label={m.keys}>
         {state.error && <p className={styles.error}>{state.error}</p>}
         {!state.error && !state.loading && keys.length === 0 && (
@@ -138,6 +159,19 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
               className={styles.folder}
               style={{ paddingLeft: 8 + depth * 14 }}
               onClick={() => toggle(node.prefix)}
+              onContextMenu={(event) =>
+                openMenu(event, [
+                  { label: m.copyPattern, icon: 'duplicate', onSelect: () => write(`${node.prefix}*`) },
+                  {
+                    label: m.showOnlyThese,
+                    icon: 'search',
+                    onSelect: () => {
+                      setDraft(`${node.prefix}*`)
+                      setPattern(`${node.prefix}*`)
+                    },
+                  },
+                ])
+              }
             >
               <Icon name={expanded.has(node.prefix) ? 'chevronDown' : 'chevronRight'} size={12} />
               <span className={styles.ellipsis}>
@@ -154,6 +188,29 @@ export function KeyList({ connectionId, db, selected, onSelect, onAddKey, reload
               className={styles.key}
               style={{ paddingLeft: 8 + depth * 14 }}
               onClick={() => onSelect(node.key)}
+              onContextMenu={(event) => {
+                onSelect(node.key)
+                openMenu(event, [
+                  {
+                    label: m.copyMenu,
+                    icon: 'duplicate',
+                    items: [
+                      { label: m.copyKeyName, onSelect: () => write(node.key.name) },
+                      {
+                        label: m.copyReadCommand,
+                        onSelect: () => write(readCommand(node.key.name, node.key.kind)),
+                      },
+                    ],
+                  },
+                  { label: `${m.renameKey}…`, icon: 'edit', onSelect: () => onKeyAction(node.key, 'rename') },
+                  { label: `${m.setTtl}…`, onSelect: () => onKeyAction(node.key, 'ttl') },
+                  {
+                    label: `${m.deleteKey}…`,
+                    icon: 'trash',
+                    onSelect: () => onKeyAction(node.key, 'delete'),
+                  },
+                ])
+              }}
             >
               <span className={`${styles.kind} ${kindClass(node.key.kind)}`}>{kindLabel(node.key.kind)}</span>
               <span className={styles.ellipsis}>

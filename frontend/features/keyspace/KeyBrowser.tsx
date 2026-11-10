@@ -8,7 +8,7 @@ import { CliPanel } from './CliPanel'
 import { FormDialog } from './FormDialog'
 import { KeyDetail } from './KeyDetail'
 import { formatBytes, hitRate, parseScore } from './keyspace'
-import { KeyList } from './KeyList'
+import { KeyList, type KeyAction } from './KeyList'
 import { messages } from './messages'
 import styles from './KeyBrowser.module.css'
 
@@ -27,6 +27,8 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
   const m = useMessages(messages)
   const db = Number(database.replace(/^db/, '')) || 0
   const [selected, setSelected] = useState<string | null>(null)
+  // A key's menu opens one of its detail's dialogs; `n` mounts the detail again for each request.
+  const [request, setRequest] = useState<{ action: KeyAction; n: number } | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
   const [overviewError, setOverviewError] = useState<string | null>(null)
   const [keysToken, setKeysToken] = useState(0)
@@ -69,6 +71,10 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
         onSelect={(key) => setSelected(key.name)}
         onAddKey={() => setAdding(true)}
         reloadToken={keysToken}
+        onKeyAction={(key, action) => {
+          setSelected(key.name)
+          setRequest((current) => ({ action, n: (current?.n ?? 0) + 1 }))
+        }}
       />
 
       <div className={styles.side}>
@@ -101,7 +107,8 @@ export function KeyBrowser({ tabId, connectionId, database, address }: KeyBrowse
           {selected ? (
             <KeyDetail
               // A new key starts with its first element picked.
-              key={selected}
+              key={`${selected}#${request?.n ?? 0}`}
+              initialDialog={request?.action}
               connectionId={connectionId}
               db={db}
               name={selected}

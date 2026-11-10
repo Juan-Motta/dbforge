@@ -10,6 +10,7 @@ import {
   keyTree,
   parseScore,
   visibleKeyRows,
+  readCommand,
 } from './keyspace'
 import { messages } from './messages'
 import type { KeyInfo } from './api'
@@ -107,5 +108,16 @@ describe('asMsgpack', () => {
   it('refuses anything that is not one whole MessagePack value', () => {
     expect(asMsgpack({ text: 'hello', binary: false })).toBeNull()
     expect(asMsgpack({ text: 'ff01', binary: true })).toBeNull()
+  })
+})
+
+describe('readCommand', () => {
+  it('reads each kind of key with its command, quoting names redis-cli would split', () => {
+    expect(readCommand('user:1', 'hash')).toBe('HGETALL user:1')
+    expect(readCommand('my list', 'list')).toBe('LRANGE "my list" 0 -1')
+    expect(readCommand('say "hi"\\', 'string')).toBe('GET "say \\"hi\\"\\\\"')
+    expect(readCommand('board', 'zset')).toBe('ZRANGE board 0 -1 WITHSCORES')
+    expect(readCommand('events', 'stream')).toBe('XRANGE events - +')
+    expect(readCommand('x', 'ReJSON-RL')).toBe('TYPE x')
   })
 })

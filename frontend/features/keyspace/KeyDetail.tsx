@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
+import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { Icon } from '../../components/Icon'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
@@ -46,17 +47,36 @@ interface KeyDetailProps {
   reloadToken: number
   /** Keys were added, renamed or removed: the list scans again. */
   onKeysChanged: (selected: string | null) => void
+  /** A dialog to open at once, asked for from the key list's menu. */
+  initialDialog?: 'rename' | 'ttl' | 'delete'
 }
 
 /** One key: its type, TTL and size, its value a page at a time, and its edits. */
-export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }: KeyDetailProps) {
+export function KeyDetail({
+  connectionId,
+  db,
+  name,
+  reloadToken,
+  onKeysChanged,
+  initialDialog,
+}: KeyDetailProps) {
   const m = useMessages(messages)
   const [value, setValue] = useState<KeyValue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [loadingMore, setLoadingMore] = useState(false)
   const [picked, setPicked] = useState(0)
-  const [dialog, setDialog] = useState<Dialog>(null)
+  const [dialog, setDialog] = useState<Dialog>(initialDialog ?? null)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+
+  /** Removes one field, item, member or stream entry of the key. */
+  const removeEntry = (kind: string, entry: Entry) => {
+    if (kind === 'hash') return edit({ kind: 'removeField', field: entry.key!.text })
+    if (kind === 'list')
+      return edit({ kind: 'removeItem', index: Number(entry.key!.text), old: entry.value.text })
+    if (kind === 'stream') return edit({ kind: 'removeEntry', id: entry.key!.text })
+    return edit({ kind: 'removeMember', member: entry.value.text })
+  }
 
   const load = async () => {
     try {
@@ -100,6 +120,7 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
 
   return (
     <section className={styles.detail} aria-label={m.keyRegion(name)}>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       <header className={styles.detailHeader}>
         <span className={`${styles.kind} ${styles.kindLarge} ${kindClass(value.kind)}`}>
           {kindLabel(value.kind)}
@@ -182,6 +203,29 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
                   aria-selected={index === picked}
                   className={styles.entryRow}
                   onClick={() => setPicked(index)}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    setPicked(index)
+                    const write = (text: string) => void navigator.clipboard.writeText(text)
+                    setMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      items: [
+                        ...(item.key
+                          ? [{ label: m.copyFieldOf(shape.key!), onSelect: () => write(item.key!.text) }]
+                          : []),
+                        { label: m.copyFieldOf(shape.value), onSelect: () => write(item.value.text) },
+                        ...(value.kind === 'zset' && item.score !== null && item.score !== undefined
+                          ? [{ label: m.copyFieldOf(m.score), onSelect: () => write(String(item.score)) }]
+                          : []),
+                        {
+                          label: m.remove,
+                          icon: 'trash' as const,
+                          onSelect: () => void removeEntry(value.kind, item),
+                        },
+                      ],
+                    })
+                  }}
                 >
                   <span className={styles.muted}>{index + 1}</span>
                   {shape.key && (
@@ -227,14 +271,7 @@ export function KeyDetail({ connectionId, db, name, reloadToken, onKeysChanged }
                   }
                   return edit({ kind: 'addMember', member: entry.value.text, score: parseScore(text, m) })
                 }}
-                onRemove={() => {
-                  if (value.kind === 'hash') return edit({ kind: 'removeField', field: entry.key!.text })
-                  if (value.kind === 'list') {
-                    return edit({ kind: 'removeItem', index: Number(entry.key!.text), old: entry.value.text })
-                  }
-                  if (value.kind === 'stream') return edit({ kind: 'removeEntry', id: entry.key!.text })
-                  return edit({ kind: 'removeMember', member: entry.value.text })
-                }}
+                onRemove={() => removeEntry(value.kind, entry)}
               />
             )}
           </div>
