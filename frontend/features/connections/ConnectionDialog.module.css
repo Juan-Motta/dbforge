@@ -189,10 +189,3 @@
   -webkit-user-select: text;
   user-select: text;
 }
-
-.danger,
-.danger:hover {
-  border-color: var(--err);
-  background: color-mix(in srgb, var(--err) 16%, transparent);
-  color: var(--err);
-}

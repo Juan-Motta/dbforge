@@ -270,12 +270,7 @@ export function App() {
       </div>
 
       {dialog && (
-        <ConnectionDialog
-          connection={dialog.connection}
-          onSave={save}
-          onDelete={removeConnection}
-          onClose={() => setDialog(null)}
-        />
+        <ConnectionDialog connection={dialog.connection} onSave={save} onClose={() => setDialog(null)} />
       )}
 
       {creating && (

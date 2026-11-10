@@ -45,7 +45,6 @@ interface ConnectionDialogProps {
   /** The connection to edit; omit to create a new one. */
   connection?: Connection
   onSave: (input: ConnectionInput) => Promise<unknown>
-  onDelete: (id: string) => Promise<void>
   onClose: () => void
 }
 
@@ -55,7 +54,7 @@ const HOST_HINTS: Partial<Record<Engine, string>> = {
   redis: 'localhost, or paste a redis:// URL',
 }
 
-export function ConnectionDialog({ connection, onSave, onDelete, onClose }: ConnectionDialogProps) {
+export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDialogProps) {
   const [form, setForm] = useState<ConnectionForm>(() =>
     connection ? formFromConnection(connection) : emptyForm(),
   )
@@ -63,7 +62,6 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
   const [test, setTest] = useState<TestState>({ status: 'idle' })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
   /** What a pasted URL held that the form can't, or `null` when nothing was pasted. */
   const [fromUrl, setFromUrl] = useState<string[] | null>(null)
 
@@ -114,16 +112,6 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
     } catch (error) {
       setSaveError(errorMessage(error))
       setSaving(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!connection) return
-    try {
-      await onDelete(connection.id)
-      onClose()
-    } catch (error) {
-      setSaveError(errorMessage(error))
     }
   }
 
@@ -348,16 +336,6 @@ export function ConnectionDialog({ connection, onSave, onDelete, onClose }: Conn
           {saveError && <span className={styles.error}>{saveError}</span>}
         </span>
 
-        {connection &&
-          (confirmingDelete ? (
-            <Button className={styles.danger} onClick={remove}>
-              Confirm delete
-            </Button>
-          ) : (
-            <Button variant="ghost" onClick={() => setConfirmingDelete(true)}>
-              Delete
-            </Button>
-          ))}
         <Button variant="ghost" onClick={onClose}>
           Cancel
         </Button>
