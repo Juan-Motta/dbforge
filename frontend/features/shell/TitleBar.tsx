@@ -39,7 +39,7 @@ export function TitleBar({
     <header
       className={styles.titleBar}
       data-tauri-drag-region
-      style={{ paddingLeft: hasOverlayTitleBar ? 84 : 14 }}
+      style={{ paddingLeft: hasOverlayTitleBar ? 92 : 14 }}
     >
       <span className={styles.brand} data-tauri-drag-region>
         <span className={styles.brandMark}>
