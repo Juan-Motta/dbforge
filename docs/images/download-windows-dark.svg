@@ -13,8 +13,8 @@
     <rect x="8" y="4" width="304" height="64" rx="32" fill="url(#h)"/>
     <rect x="8.5" y="4.5" width="303" height="63" rx="31.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.35"/>
   </g>
-  <g transform="translate(30 23) scale(1.0833)" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>
+  <g transform="translate(32 24) scale(1)" fill="#FFFFFF">
+    <path d="M0,0H11.377V11.372H0ZM12.623,0H24V11.372H12.623ZM0,12.623H11.377V24H0Zm12.623,0H24V24H12.623"/>
   </g>
   <g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" fill="#FFFFFF">
     <text x="70" y="34" font-size="19" font-weight="600">Download for Windows</text>
