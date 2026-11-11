@@ -1,6 +1,6 @@
 # Releasing DBForge
 
-How a version is built for macOS and Linux, signed, notarized and published, and how installed copies
+How a version is built for macOS, Linux and Windows, signed, notarized and published, and how installed copies
 update themselves.
 
 ## A DMG on your Mac
@@ -36,6 +36,14 @@ signs both for the updater, which installs the kind of package that is running. 
 publishing, run the `Release` workflow by hand (Actions › Release › Run workflow): it builds and keeps the
 packages as the run's artifacts, and builds the DMG too only when asked.
 
+## Windows installer
+
+Tauri builds for Windows only on Windows, so it is made in CI (or on a Windows machine, from Git Bash) with
+`scripts/make-windows.sh`. It writes `release/DBForge-<version>-x64-setup.exe`, an NSIS installer for the
+current user (no administrator needed), and with `TAURI_SIGNING_PRIVATE_KEY` signs it for the updater, which
+runs it to update. It isn't code-signed: SmartScreen warns before the first run, until a code-signing
+certificate (or Azure Trusted Signing) is added to the build.
+
 ## Publishing a version
 
 1. Set the version in `backend/tauri.conf.json` (and `package.json` and `backend/Cargo.toml` to match) and commit it.
@@ -46,8 +54,9 @@ packages as the run's artifacts, and builds the DMG too only when asked.
    ```
 
 The `Release` workflow then tests, builds a signed and notarized universal DMG with `scripts/make-dmg.sh` and
-the Linux packages with `scripts/make-linux.sh` at the same time, and publishes them as one GitHub Release with
-notes made from the commits since the last release (`scripts/release-notes.sh`). If either build fails,
+the Linux packages with `scripts/make-linux.sh` and the Windows installer with `scripts/make-windows.sh` at the
+same time, and publishes them as one GitHub Release with
+notes made from the commits since the last release (`scripts/release-notes.sh`). If any build fails,
 nothing is published.
 A tag that doesn't match the version in `tauri.conf.json` fails before building.
 
@@ -66,13 +75,14 @@ It needs these repository secrets, the same as ColiUI's:
 
 DBForge looks for a new version once a day (Settings › About can turn that off) and from
 DBForge › Check for Updates…, reading `latest.json` from the latest GitHub Release. Each release
-carries that manifest, `DBForge-<version>.app.tar.gz` (the notarized Mac app), the AppImage and the .deb,
+carries that manifest, `DBForge-<version>.app.tar.gz` (the notarized Mac app), the AppImage, the .deb and
+the Windows installer,
 each signed with the updater's own key (`scripts/sign-update.sh`); `scripts/make-update-manifest.sh` lists
-them per platform (`darwin-*`, `linux-x86_64-appimage`, `linux-x86_64-deb`). A .deb update runs `dpkg -i`,
+them per platform (`darwin-*`, `linux-x86_64-appimage`, `linux-x86_64-deb`, `windows-x86_64-nsis`). A .deb update runs `dpkg -i`,
 so Linux asks for an administrator's password to install it. The app checks that signature against the public key in `backend/tauri.conf.json`,
 and that it was made for the version the manifest announces, before installing anything.
 
 The private key was made with `pnpm tauri signer generate -w ~/.tauri/dbforge.key` and has no
 password. Keep a copy somewhere safe: without it, no installed copy of DBForge can be updated again,
-and a new key means people reinstall by hand once. `scripts/make-dmg.sh` and `scripts/make-linux.sh` sign the
+and a new key means people reinstall by hand once. `scripts/make-dmg.sh`, `scripts/make-linux.sh` and `scripts/make-windows.sh` sign the
 update when `TAURI_SIGNING_PRIVATE_KEY` holds the key's text or path.

@@ -23,8 +23,14 @@
       <img src="docs/images/download-linux-light.svg" width="320" height="80" alt="Download DBForge for Linux">
     </picture>
   </a>
+  <a href="https://github.com/Juan-Motta/dbforge/releases/latest">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/download-windows-dark.svg">
+      <img src="docs/images/download-windows-light.svg" width="320" height="80" alt="Download DBForge for Windows">
+    </picture>
+  </a>
   <br>
-  <sub>macOS and Linux · updates itself</sub>
+  <sub>macOS, Linux and Windows · updates itself</sub>
 </p>
 
 <p align="center">
@@ -38,6 +44,8 @@
 **macOS:** download `DBForge-x.y.z.dmg` from the [latest release](https://github.com/Juan-Motta/dbforge/releases/latest), open it and drag **DBForge** to **Applications**. It runs on Apple silicon and Intel Macs with **macOS 10.13** or later, signed and notarized by Apple.
 
 **Linux (x86_64):** download `DBForge-x.y.z-amd64.AppImage`, make it executable (`chmod +x`) and open it. On Debian or Ubuntu you can install `DBForge-x.y.z-amd64.deb` instead (`sudo apt install ./DBForge-x.y.z-amd64.deb`). Both update themselves.
+
+**Windows (x64):** download `DBForge-x.y.z-x64-setup.exe` and run it; it installs for your user and updates itself. It isn't code-signed yet, so Windows SmartScreen may warn the first time: choose **More info › Run anyway**.
 
 ## Works with your databases
 
@@ -143,7 +151,7 @@ frontend/
   features/     One folder per feature, with its components, logic and styles
   styles/       Design tokens (theme.css) and global base styles
 backend/        Rust backend (Tauri): one driver per engine, and the commands the UI calls
-scripts/        Release tooling: the DMG, the Linux packages, release notes and the update manifest
+scripts/        Release tooling: the DMG, the Linux and Windows packages, release notes and the update manifest
 ```
 
 Conventions:

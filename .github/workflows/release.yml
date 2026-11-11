@@ -1,7 +1,8 @@
 # Each pushed version tag (v1.2.3) builds a signed, notarized universal DMG
 # (Apple silicon and Intel) with the installer window of scripts/make-dmg.sh,
-# and the Linux AppImage and .deb of scripts/make-linux.sh, then publishes them
-# as one GitHub Release with the updater's latest.json for both. The tag must
+# the Linux AppImage and .deb of scripts/make-linux.sh, and the Windows
+# installer of scripts/make-windows.sh, then publishes them as one GitHub
+# Release with the updater's latest.json for every platform. The tag must
 # match the version in backend/tauri.conf.json.
 name: Release
 
@@ -217,9 +218,67 @@ jobs:
             release/DBForge-${{ env.VERSION }}-amd64.deb.sig
           if-no-files-found: error
 
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app's version
+        run: |
+          VERSION="$(jq -r .version backend/tauri.conf.json)"
+          if [[ "$GITHUB_REF_TYPE" == tag && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in backend/tauri.conf.json" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Check the updater key
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: '[[ -n "$UPDATER_KEY" ]] || { echo "The secret for UPDATER_KEY is missing" >&2; exit 1; }'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: cargo test --manifest-path backend/Cargo.toml --lib
+
+      - name: Build the installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/make-windows.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            release/DBForge-${{ env.VERSION }}-x64-setup.exe
+            release/DBForge-${{ env.VERSION }}-x64-setup.exe.sig
+          if-no-files-found: error
+
   publish:
     if: github.event_name == 'push'
-    needs: [macos, linux]
+    needs: [macos, linux, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -240,13 +299,15 @@ jobs:
           MAC="DBForge-$VERSION.app.tar.gz"
           APPIMAGE="DBForge-$VERSION-amd64.AppImage"
           DEB="DBForge-$VERSION-amd64.deb"
+          SETUP="DBForge-$VERSION-x64-setup.exe"
           scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
           # The app reads releases/latest/download/latest.json, so each release carries its own.
           scripts/make-update-manifest.sh "$VERSION" "$RUNNER_TEMP/notes.md" \
             darwin-aarch64,darwin-x86_64 "$DOWNLOAD/$MAC" "release/$MAC.sig" \
             linux-x86_64,linux-x86_64-appimage "$DOWNLOAD/$APPIMAGE" "release/$APPIMAGE.sig" \
-            linux-x86_64-deb "$DOWNLOAD/$DEB" "release/$DEB.sig" > release/latest.json
+            linux-x86_64-deb "$DOWNLOAD/$DEB" "release/$DEB.sig" \
+            windows-x86_64,windows-x86_64-nsis "$DOWNLOAD/$SETUP" "release/$SETUP.sig" > release/latest.json
           gh release create "$GITHUB_REF_NAME" \
             "release/DBForge-$VERSION.dmg" "release/$MAC" \
-            "release/$APPIMAGE" "release/$DEB" release/latest.json \
+            "release/$APPIMAGE" "release/$DEB" "release/$SETUP" release/latest.json \
             --title "DBForge $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag

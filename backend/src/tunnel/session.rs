@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use russh::client::{self, AuthResult, Handle};
 use russh::keys::agent::AgentIdentity;
-use russh::keys::agent::client::AgentClient;
+use russh::keys::agent::client::{AgentClient, AgentStream};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
 use russh::{ChannelStream, Disconnect};
 
@@ -90,9 +90,7 @@ impl Session {
 
 /// Tries each key the system's SSH agent holds until the server takes one.
 async fn sign_in_with_agent(handle: &mut Handle<Checker>, user: &str) -> Result<AuthResult> {
-    let mut agent = AgentClient::connect_env()
-        .await
-        .map_err(|error| AppError::Invalid(format!("Could not reach the SSH agent (SSH_AUTH_SOCK): {error}")))?;
+    let mut agent = connect_agent().await?;
     let identities = agent.request_identities().await.map_err(|error| AppError::Invalid(error.to_string()))?;
     let keys: Vec<PublicKey> = identities
         .into_iter()
@@ -117,6 +115,34 @@ async fn sign_in_with_agent(handle: &mut Handle<Checker>, user: &str) -> Result<
         refused = result;
     }
     Ok(refused)
+}
+
+/// The system's SSH agent, wherever it listens.
+type Agent = AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>>;
+
+/// The agent at `SSH_AUTH_SOCK`, a Unix socket.
+#[cfg(unix)]
+async fn connect_agent() -> Result<Agent> {
+    let agent = AgentClient::connect_env()
+        .await
+        .map_err(|error| AppError::Invalid(format!("Could not reach the SSH agent (SSH_AUTH_SOCK): {error}")))?;
+    Ok(agent.dynamic())
+}
+
+/// Windows' OpenSSH agent, on the named pipe `SSH_AUTH_SOCK` names or its
+/// default one, or else Pageant (PuTTY's agent).
+#[cfg(windows)]
+async fn connect_agent() -> Result<Agent> {
+    let pipe = std::env::var("SSH_AUTH_SOCK").unwrap_or_else(|_| r"\\.\pipe\openssh-ssh-agent".into());
+    if let Ok(agent) = AgentClient::connect_named_pipe(&pipe).await {
+        return Ok(agent.dynamic());
+    }
+    let agent = AgentClient::connect_pageant().await.map_err(|error| {
+        AppError::Invalid(format!(
+            "Could not reach an SSH agent: start the OpenSSH Authentication Agent service, or Pageant ({error})"
+        ))
+    })?;
+    Ok(agent.dynamic())
 }
 
 fn unreachable(ssh: &SshTunnel, cause: &str) -> AppError {

@@ -1,7 +1,7 @@
 //! PostgreSQL's own client tools, as installed on the computer, and running
 //! them. A Mac app opened from the Finder doesn't get the terminal's PATH, so
-//! the places Homebrew, Postgres.app and Linux packages install them are
-//! searched too, and the newest copy wins: pg_dump can only dump servers no
+//! the places Homebrew, Postgres.app, Linux packages and PostgreSQL's Windows
+//! installer put them are searched too, and the newest copy wins: pg_dump can only dump servers no
 //! newer than itself.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,8 @@ use crate::error::{AppError, Result};
 use crate::jobs::cancelled;
 
 /// Where client tools live besides PATH. `*` stands for any version.
-const PLACES: [&str; 10] = [
+#[cfg(not(windows))]
+const PLACES: &[&str] = &[
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/opt/homebrew/opt/libpq/bin",
@@ -27,6 +28,10 @@ const PLACES: [&str; 10] = [
     "/usr/lib/postgresql/*/bin",
     "/usr/bin",
 ];
+
+/// Where the PostgreSQL installers for Windows put the client tools.
+#[cfg(windows)]
+const PLACES: &[&str] = &["C:/Program Files/PostgreSQL/*/bin", "C:/Program Files (x86)/PostgreSQL/*/bin"];
 
 /// Lines of a failed run's error output shown in its message.
 const ERROR_LINES: usize = 6;
@@ -84,7 +89,7 @@ pub async fn find(name: &str) -> Result<Tool> {
     newest.ok_or_else(|| {
         AppError::Invalid(format!(
             "{name} isn't installed. Install PostgreSQL's client tools: `brew install libpq` on a Mac, \
-             or the postgresql-client package on Linux."
+             the postgresql-client package on Linux, or PostgreSQL's installer on Windows."
         ))
     })
 }
@@ -93,13 +98,14 @@ pub async fn find(name: &str) -> Result<Tool> {
 fn candidates(name: &str) -> Vec<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let mut directories: Vec<PathBuf> = std::env::split_paths(&path).collect();
-    for place in PLACES {
+    for place in PLACES.iter().copied() {
         directories.extend(expand(Path::new(place)));
     }
     let mut found = Vec::new();
     // A relative entry (`.`, or an empty one) would run whatever sits in the current directory.
     for directory in directories.into_iter().filter(|directory| directory.is_absolute()) {
-        let tool = directory.join(name);
+        // `pg_dump.exe` on Windows.
+        let tool = directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         if tool.is_file() && !found.contains(&tool) {
             found.push(tool);
         }
