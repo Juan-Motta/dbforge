@@ -5,15 +5,16 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
 } from 'react'
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { isNumericType, isUuidType, shortTypeName } from '../../components/data-grid/columns'
+import { GutterGap, RowSheet } from '../../components/data-grid/RowGutter'
 import { Icon } from '../../components/Icon'
 import { drawnRows, useWindowedRows } from '../../components/useWindowedRows'
 import { keepCursor } from '../../lib/cursor'
+import { useStableHandlers } from '../../lib/useStableHandlers'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { isRelationalDialect, type SqlDialect } from '../../domain/connection'
 import type { TableRef } from '../../domain/table'
@@ -30,16 +31,18 @@ import {
   type Selection,
   type SelectMode,
 } from './selection'
-import { ChoiceEditor } from './ChoiceEditor'
 import { choicesOf } from './choices'
 import { formatTemporal, temporalKindOf, temporalOf } from './temporal'
-import { TemporalEditor } from './TemporalEditor'
+import {
+  GridRow,
+  RowNumber,
+  type CellState,
+  type Editing,
+  type GridRowActions,
+  type GridShape,
+  type Value,
+} from './GridRow'
 import styles from './EditableGrid.module.css'
-
-type Value = string | null
-
-/** A cell being typed into: of a loaded row (by index) or of a new row (by id). */
-type Editing = { row: number } | { newRow: number }
 
 interface EditableGridProps {
   columns: Column[]
@@ -86,11 +89,9 @@ interface EditableGridProps {
   onDeleteRow?: (row: number) => void
 }
 
-type CellState = { edited?: boolean; unset?: boolean; locked?: boolean }
-
 const MIN_WIDTH = 48
 const NO_WIDTHS: Record<string, number> = {}
-/** A row's height in the style sheet: only the rows in sight are drawn. */
+/** A row's height in the style sheet: a very large page draws only the rows in sight. */
 const ROW_HEIGHT = 26
 const MOVES: Record<string, [number, number]> = {
   ArrowUp: [-1, 0],
@@ -107,7 +108,13 @@ export function EditableGrid(props: EditableGridProps) {
   const table = useRef<HTMLTableElement>(null)
   // New rows first, then the loaded ones: the rows by position, of which those in sight are drawn.
   const rowCount = edits.inserts.length + rows.length
-  const { ref: scroller, onScroll, viewHeight, start, end } = useWindowedRows(rowCount, ROW_HEIGHT)
+  const {
+    ref: scroller,
+    onScroll,
+    viewHeight,
+    start,
+    end,
+  } = useWindowedRows(rowCount, ROW_HEIGHT, columns.length + 1)
   // A grid closed while it had focus gives the pointer back to the usual rules.
   useEffect(() => () => keepCursor(false), [])
   /** Closes the editor and gives the keys back to the grid, so ⌘C still copies. */
@@ -154,10 +161,10 @@ export function EditableGrid(props: EditableGridProps) {
     })
   }
 
-  const numeric = columns.map((c) => isNumericType(c.dataType))
   // Widths the user dragged a column to; the others keep the one that fit the
-  // rows in sight when the page loaded. Only those rows are drawn, so a column
-  // fitted to them as they come and go would change width while scrolling.
+  // rows drawn when the page loaded. A very large page draws only the rows in
+  // sight, so a column fitted to them as they come and go would change width
+  // while scrolling.
   const [widths, setWidths] = useState<Record<string, number>>({})
   const [fit, setFit] = useState<{ rows: Value[][]; widths: Record<string, number> }>({ rows, widths: {} })
   const fitted = fit.rows === rows ? fit.widths : NO_WIDTHS
@@ -175,12 +182,16 @@ export function EditableGrid(props: EditableGridProps) {
     // eslint-disable-next-line react/set-state-in-effect
     if (Object.keys(measured).length > 0) setFit({ rows, widths: { ...fitted, ...measured } })
   }, [viewHeight, rows, columns, fitted, widths])
-  const sized = columns.map((c): CSSProperties | undefined => {
-    const width = widths[c.name] ?? fitted[c.name]
-    return width === undefined
-      ? undefined
-      : { width, minWidth: width, maxWidth: width, boxSizing: 'border-box' }
-  })
+  const sized = useMemo(
+    () =>
+      columns.map((c): CSSProperties | undefined => {
+        const width = widths[c.name] ?? fitted[c.name]
+        return width === undefined
+          ? undefined
+          : { width, minWidth: width, maxWidth: width, boxSizing: 'border-box' }
+      }),
+    [columns, widths, fitted],
+  )
 
   /** Dragging a header's right edge sets that column's width. */
   const startResize = (name: string) => (event: PointerEvent<HTMLElement>) => {
@@ -235,24 +246,35 @@ export function EditableGrid(props: EditableGridProps) {
   )
   /** The selection's key of a cell's row: its primary key, or `new:<id>`. */
   const rowIdOf = (at: Editing) => ('row' in at ? rowIds[at.row] : `new:${at.newRow}`)
-  /** The same key, from the row a `Cell` names: `row:<index>` or `new:<id>`. */
+  /** The key a `Cell` names a row with: `row:<index>` or `new:<id>`. */
+  const cellIdOf = (at: Editing) => ('row' in at ? `row:${at.row}` : `new:${at.newRow}`)
+  /** The selection's key, from the row a `Cell` names. */
   const selectionRow = (row: string) => (row.startsWith('new:') ? row : rowIds[Number(row.slice(4))])
 
-  // The rows as shown, by selection key and by the key cellAt reads them with.
-  const shownRows = [
-    ...edits.inserts.map((row) => ({ select: `new:${row.id}`, cell: `new:${row.id}` })),
-    ...rowIds.map((id, r) => ({ select: id, cell: `row:${r}` })),
-  ]
-  const order = shownRows.map((row) => row.select)
-  const cellRow = new Map(shownRows.map((row) => [row.select, row.cell]))
-  const selectedRowSet = new Set(rowsOfSelection(selection, order))
+  // The rows as shown, by selection key, and the key cellAt reads each with.
+  const { order, cellRow } = useMemo(() => {
+    const shown = [
+      ...edits.inserts.map((row) => ({ select: `new:${row.id}`, cell: `new:${row.id}` })),
+      ...rowIds.map((id, r) => ({ select: id, cell: `row:${r}` })),
+    ]
+    return {
+      order: shown.map((row) => row.select),
+      cellRow: new Map(shown.map((row) => [row.select, row.cell])),
+    }
+  }, [edits.inserts, rowIds])
+  const selectedRowSet = useMemo(() => new Set(rowsOfSelection(selection, order)), [selection, order])
   // The rows whose every cell is selected, as their number picks them: drawn selected as a whole.
-  const wholeRows = new Set(
-    selection.cells.size < columns.length
-      ? []
-      : order.filter((id) => columns.every((_, column) => selection.cells.has(cellKey({ row: id, column })))),
+  const wholeRows = useMemo(
+    () =>
+      new Set(
+        selection.cells.size < columns.length
+          ? []
+          : order.filter((id) =>
+              columns.every((_, column) => selection.cells.has(cellKey({ row: id, column }))),
+            ),
+      ),
+    [selection, order, columns],
   )
-  const wholeRowSelected = (id: string) => wholeRows.has(id)
   const valueAt = (cell: CellRef) =>
     cellAt(edits, rows, columns, { row: cellRow.get(cell.row) ?? '', column: cell.column })?.value ?? null
 
@@ -272,15 +294,6 @@ export function EditableGrid(props: EditableGridProps) {
     window.addEventListener('pointerup', stop)
     return () => window.removeEventListener('pointerup', stop)
   }, [])
-  const rowNumberProps = (id: string) => ({
-    onPointerDown: (event: PointerEvent) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      dragging.current = true
-      onSelect({ row: id, column: 0 }, modeOf(event), true)
-    },
-    onPointerEnter: () => dragging.current && onSelect({ row: id, column: 0 }, 'range', true),
-  })
 
   /** A cell's text for the clipboard: its value, or NULL or DEFAULT spelled out. */
   const cellText = (cell: Cell) => {
@@ -477,165 +490,133 @@ export function EditableGrid(props: EditableGridProps) {
     ]
   }
 
-  const cell = (at: Editing, column: number, value: Value, state: CellState) => {
-    const isEditing =
-      editing?.column === column &&
-      ('row' in at
-        ? 'row' in editing.at && editing.at.row === at.row
-        : 'newRow' in editing.at && editing.at.newRow === at.newRow)
-    const id = 'row' in at ? `row:${at.row}` : `new:${at.newRow}`
-    const isActive = active?.row === id && active.column === column
-    const selectable = editable || !('row' in at)
-    const isSelected =
-      selection.cells.size > 1 &&
-      selection.cells.has(cellKey({ row: rowIdOf(at), column })) &&
-      !wholeRowSelected(rowIdOf(at))
-    // Edited or new values may not exist yet in the referenced table: only loaded ones link.
-    const link = 'row' in at && !state.edited ? (props.linkOf?.(at.row, column) ?? null) : null
-    const classes = [
-      numeric[column] && styles.numeric,
-      value === null && !state.unset && styles.null,
-      state.unset && styles.unset,
-      state.edited && styles.edited,
-    ]
-    const content = link ? (
-      <span className={styles.linked}>
-        <span className={styles.linkedText}>{value}</span>
-        <button
-          type="button"
-          className={styles.link}
-          aria-label={m.openPointedRow(value)}
-          title={m.openReferencedRow}
-          onClick={(event) => {
-            event.stopPropagation()
-            link()
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          <Icon name="external" size={12} />
-        </button>
-      </span>
-    ) : state.unset ? (
-      'DEFAULT'
-    ) : (
-      (value ?? 'NULL')
-    )
-    const { temporalKind, choices } = editors[column]
-    if (isEditing) {
-      // The editor lies over the cell, which keeps its content (unseen) and so its size.
+  const numeric = useMemo(() => columns.map((c) => isNumericType(c.dataType)), [columns])
+  const linkOf = props.linkOf
+  const shape = useMemo<GridShape>(
+    () => ({ columns, sized, numeric, editors, columnInfo, editable, linkOf }),
+    [columns, sized, numeric, editors, columnInfo, editable, linkOf],
+  )
+  const actions: GridRowActions = useStableHandlers({
+    pressCell: (at: Editing, column: number, event: PointerEvent) => {
+      // Cells of tables without a key can't be told apart once edited, so they aren't selected.
+      if (event.button !== 0 || modeOf(event) !== 'single' || !(editable || 'newRow' in at)) return
+      cellDrag.current = { start: { row: rowIdOf(at), column }, moved: false }
+    },
+    enterCell: (at: Editing, column: number) => {
+      const drag = cellDrag.current
+      if (!drag) return
+      const here = { row: rowIdOf(at), column }
+      if (!drag.moved && cellKey(here) === cellKey(drag.start)) return
+      if (!drag.moved) {
+        drag.moved = true
+        onSelect(drag.start, 'start')
+        // Text selection would otherwise follow the pointer across the cells.
+        window.getSelection()?.removeAllRanges()
+      }
+      onSelect(here, 'range')
+    },
+    clickCell: (at: Editing, column: number, event: MouseEvent) =>
+      pick({ row: cellIdOf(at), column }, modeOf(event)),
+    editCell: (at: Editing, column: number) => setEditing({ at, column }),
+    openMenu: (at: Editing, column: number, state: CellState, event: MouseEvent) => {
+      event.preventDefault()
+      pick({ row: cellIdOf(at), column })
+      setMenu({ x: event.clientX, y: event.clientY, at, column, state })
+    },
+    pressRowNumber: (rowId: string, event: PointerEvent) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      dragging.current = true
+      onSelect({ row: rowId, column: 0 }, modeOf(event), true)
+    },
+    enterRowNumber: (rowId: string) => {
+      if (dragging.current) onSelect({ row: rowId, column: 0 }, 'range', true)
+    },
+    commit,
+    cancelEdit: stopEditing,
+  })
+
+  /** How the selection, the editor and the menu reach the row drawn at `at`. */
+  const marksOf = (at: Editing) => {
+    const rowId = rowIdOf(at)
+    const whole = wholeRows.has(rowId)
+    const cellId = cellIdOf(at)
+    const here = (place: { at: Editing } | null) => place !== null && cellIdOf(place.at) === cellId
+    return {
+      whole,
+      activeColumn: active?.row === cellId ? active.column : null,
+      selectedColumns:
+        selection.cells.size > 1 && !whole
+          ? columns
+              .flatMap((_, column) => (selection.cells.has(cellKey({ row: rowId, column })) ? [column] : []))
+              .join(',')
+          : '',
+      editingColumn: editing && here(editing) ? editing.column : null,
+      menuColumn: menu && here(menu) ? menu.column : null,
+    }
+  }
+
+  /** The number beside the row drawn at `index`, in the gutter. */
+  const drawNumber = (index: number) => {
+    if (index < edits.inserts.length) {
+      const rowId = `new:${edits.inserts[index].id}`
       return (
-        <td
-          key={column}
-          className={[...classes, styles.editingCell].filter(Boolean).join(' ')}
-          style={sized[column]}
-        >
-          <span className={styles.hidden} aria-hidden="true">
-            {content}
-          </span>
-          {choices ? (
-            <ChoiceEditor
-              initial={value}
-              choices={choices}
-              nullable={props.columnInfo?.[columns[column].name]?.nullable ?? true}
-              onCommit={commit}
-              onCancel={stopEditing}
-            />
-          ) : temporalKind ? (
-            <TemporalEditor
-              initial={value}
-              kind={temporalKind}
-              offsetSpace={/datetimeoffset/i.test(columns[column].dataType)}
-              nullable={props.columnInfo?.[columns[column].name]?.nullable ?? true}
-              onCommit={commit}
-              onCancel={stopEditing}
-            />
-          ) : (
-            <CellEditor initial={value} onCommit={commit} onCancel={stopEditing} />
-          )}
-        </td>
+        <RowNumber
+          key={rowId}
+          rowId={rowId}
+          label="+"
+          state="inserted"
+          whole={wholeRows.has(rowId)}
+          picks
+          actions={actions}
+        />
       )
     }
+    const r = index - edits.inserts.length
+    const rowId = rowIds[r]
+    const deleted = edits.deletes.has(rowId)
     return (
-      <td
-        key={column}
-        className={classes.filter(Boolean).join(' ') || undefined}
-        style={sized[column]}
-        title={value ?? undefined}
-        // Holding the button on a cell and moving over others selects the block between them.
-        onPointerDown={(event: PointerEvent) => {
-          if (event.button !== 0 || modeOf(event) !== 'single' || !selectable) return
-          cellDrag.current = { start: { row: rowIdOf(at), column }, moved: false }
-        }}
-        onPointerEnter={() => {
-          const drag = cellDrag.current
-          if (!drag) return
-          const here = { row: rowIdOf(at), column }
-          if (!drag.moved && cellKey(here) === cellKey(drag.start)) return
-          if (!drag.moved) {
-            drag.moved = true
-            onSelect(drag.start, 'start')
-            // Text selection would otherwise follow the pointer across the cells.
-            window.getSelection()?.removeAllRanges()
-          }
-          onSelect(here, 'range')
-        }}
-        // A click picks the cell; Shift and ⌘/Ctrl grow or change the selection.
-        onClick={(event) => pick({ row: id, column }, modeOf(event))}
-        onDoubleClick={editable && !state.locked ? () => setEditing({ at, column }) : undefined}
-        onContextMenu={(event: MouseEvent) => {
-          event.preventDefault()
-          pick({ row: id, column })
-          setMenu({ x: event.clientX, y: event.clientY, at, column, state })
-        }}
-        data-menu-open={(menu && sameCell(menu, at, column)) || undefined}
-        data-active={isActive || undefined}
-        data-selected={isSelected || undefined}
-      >
-        {content}
-      </td>
+      <RowNumber
+        key={rowId + r}
+        rowId={rowId}
+        label={deleted ? '−' : firstRowNumber + r}
+        state={deleted ? 'deleted' : 'loaded'}
+        whole={wholeRows.has(rowId)}
+        picks={editable}
+        actions={actions}
+      />
     )
   }
 
-  const lastNumber = String(firstRowNumber + rows.length)
-
-  const insertedRow = (row: Edits['inserts'][number]) => {
-    const id = `new:${row.id}`
-    return (
-      <tr key={id} className={styles.inserted} aria-selected={wholeRowSelected(id)}>
-        <td className={styles.rowNumber} {...rowNumberProps(id)}>
-          +
-        </td>
-        {columns.map((column, c) =>
-          cell({ newRow: row.id }, c, row.values[column.name] ?? null, {
-            edited: column.name in row.values,
-            unset: !(column.name in row.values),
-            locked: column.generated,
-          }),
-        )}
-      </tr>
-    )
-  }
-
-  const loadedRow = (r: number) => {
-    const row = rows[r]
+  const drawRow = (index: number) => {
+    if (index < edits.inserts.length) {
+      const insert = edits.inserts[index]
+      const at = { newRow: insert.id }
+      return (
+        <GridRow
+          key={`new:${insert.id}`}
+          kind="inserted"
+          insert={insert}
+          {...marksOf(at)}
+          shape={shape}
+          actions={actions}
+        />
+      )
+    }
+    const r = index - edits.inserts.length
     const id = rowIds[r]
-    const deleted = edits.deletes.has(id)
-    const changed = edits.updates.get(id)?.values ?? {}
     return (
-      <tr key={id + r} className={deleted ? styles.deleted : undefined} aria-selected={wholeRowSelected(id)}>
-        <td className={styles.rowNumber} {...(editable ? rowNumberProps(id) : {})}>
-          {deleted ? '−' : firstRowNumber + r}
-        </td>
-        {columns.map((column, c) =>
-          deleted
-            ? cell({ row: r }, c, row[c], { locked: true })
-            : cell({ row: r }, c, column.name in changed ? textOf(changed[column.name]) : row[c], {
-                edited: column.name in changed,
-                unset: column.name in changed && isDefault(changed[column.name]),
-                locked: column.generated,
-              }),
-        )}
-      </tr>
+      <GridRow
+        key={id + r}
+        kind="loaded"
+        index={r}
+        values={rows[r]}
+        changed={edits.updates.get(id)?.values}
+        deleted={edits.deletes.has(id)}
+        {...marksOf({ row: r })}
+        shape={shape}
+        actions={actions}
+      />
     )
   }
 
@@ -646,104 +627,120 @@ export function EditableGrid(props: EditableGridProps) {
       ? edits.inserts.length + editing.at.row
       : edits.inserts.findIndex((row) => 'newRow' in editing.at && row.id === editing.at.newRow)
 
+  const parts = drawnRows(start, end, editingRow, rowCount)
+
   return (
     <>
       <div ref={scroller} onScroll={onScroll} className={styles.scroller}>
-        <table
-          ref={table}
-          className={styles.grid}
-          // Focusable, so ⌘C copies the picked cell.
-          tabIndex={-1}
-          // While the grid has the keys, moving with the arrows keeps the pointer in sight.
-          onFocus={(event) => event.target === event.currentTarget && keepCursor(true)}
-          onBlur={(event) => event.target === event.currentTarget && keepCursor(false)}
-          onKeyDown={(event) => {
-            // Keys typed into the cell editor are its own.
-            if (event.target instanceof HTMLInputElement) return
-            const text = active && cellText(active)
-            const command = event.metaKey || event.ctrlKey
-            if (command && event.key === 'c' && selection.cells.size > 1) {
-              // Several cells selected: they go to the clipboard as a spreadsheet's block.
-              event.preventDefault()
-              void navigator.clipboard.writeText(cellsAsTsv(selection, order, valueAt))
-            } else if (command && event.key === 'c' && text !== null) {
-              event.preventDefault()
-              void navigator.clipboard.writeText(text)
-            } else if (command && event.key === 'v' && active && pasteable(active)) {
-              event.preventDefault()
-              const [kind, index] = active.row.split(':')
-              paste(kind === 'new' ? { newRow: Number(index) } : { row: Number(index) }, active.column)
-            } else if (event.key === 'Enter' && event.shiftKey && props.onInspect) {
-              event.preventDefault()
-              props.onInspect()
-            } else if (event.key === 'Escape') onActivate(null)
-            else if (active && event.key in MOVES) {
-              event.preventDefault()
-              move(MOVES[event.key], event.shiftKey)
-            }
-          }}
+        <RowSheet
+          lastNumber={firstRowNumber + rows.length - 1}
+          numbers={parts.map((part) =>
+            'gap' in part ? (
+              <GutterGap key={`gap:${part.from}`} rows={part.gap} rowHeight={ROW_HEIGHT} />
+            ) : (
+              drawNumber(part.index)
+            ),
+          )}
         >
-          <thead>
-            <tr>
-              {/* As wide as the page's last number, which may not be drawn yet. */}
-              <th className={styles.rowNumber} style={{ minWidth: `calc(${lastNumber.length}ch + 21px)` }}>
-                #
-              </th>
-              {columns.map((column, c) => {
-                const sorted = props.sortOf?.(column.name) ?? null
-                return (
-                  <th
-                    key={column.name}
-                    data-column={column.name}
-                    style={sized[c]}
-                    title={column.generated ? `${column.dataType} · ${m.computed}` : column.dataType}
-                    aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}
-                  >
-                    <button
-                      type="button"
-                      className={styles.header}
-                      disabled={!props.onSort}
-                      onClick={() => props.onSort?.(column.name)}
+          <table
+            ref={table}
+            className={styles.grid}
+            // Focusable, so ⌘C copies the picked cell.
+            tabIndex={-1}
+            // While the grid has the keys, moving with the arrows keeps the pointer in sight.
+            onFocus={(event) => event.target === event.currentTarget && keepCursor(true)}
+            onBlur={(event) => event.target === event.currentTarget && keepCursor(false)}
+            onKeyDown={(event) => {
+              // Keys typed into the cell editor are its own.
+              if (event.target instanceof HTMLInputElement) return
+              const text = active && cellText(active)
+              const command = event.metaKey || event.ctrlKey
+              if (command && event.key === 'c' && selection.cells.size > 1) {
+                // Several cells selected: they go to the clipboard as a spreadsheet's block.
+                event.preventDefault()
+                void navigator.clipboard.writeText(cellsAsTsv(selection, order, valueAt))
+              } else if (command && event.key === 'c' && text !== null) {
+                event.preventDefault()
+                void navigator.clipboard.writeText(text)
+              } else if (command && event.key === 'v' && active && pasteable(active)) {
+                event.preventDefault()
+                const [kind, index] = active.row.split(':')
+                paste(kind === 'new' ? { newRow: Number(index) } : { row: Number(index) }, active.column)
+              } else if (event.key === 'Enter' && event.shiftKey && props.onInspect) {
+                event.preventDefault()
+                props.onInspect()
+              } else if (event.key === 'Escape') onActivate(null)
+              else if (active && event.key in MOVES) {
+                event.preventDefault()
+                move(MOVES[event.key], event.shiftKey)
+              }
+            }}
+          >
+            <thead>
+              <tr>
+                {columns.map((column, c) => {
+                  const sorted = props.sortOf?.(column.name) ?? null
+                  return (
+                    <th
+                      key={column.name}
+                      data-column={column.name}
+                      style={sized[c]}
+                      title={column.generated ? `${column.dataType} · ${m.computed}` : column.dataType}
+                      aria-sort={
+                        sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined
+                      }
                     >
-                      {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
-                      <span className={styles.name}>{column.name}</span>
-                      {column.generated && <span className={styles.computed}>{m.computedBadge}</span>}
-                      <span className={styles.type}>{shortTypeName(column.dataType)}</span>
-                      {/* A click sorts ascending, then descending, then not at all. The mark stays
+                      <button
+                        type="button"
+                        className={styles.header}
+                        disabled={!props.onSort}
+                        onClick={() => props.onSort?.(column.name)}
+                      >
+                        {column.primaryKey && <Icon name="key" size={13} className={styles.key} />}
+                        <span className={styles.name}>{column.name}</span>
+                        {column.generated && <span className={styles.computed}>{m.computedBadge}</span>}
+                        <span className={styles.type}>{shortTypeName(column.dataType)}</span>
+                        {/* A click sorts ascending, then descending, then not at all. The mark stays
                         while sorting is off, so the column keeps its width. */}
-                      <Icon
-                        name={sorted === 'asc' ? 'chevronUp' : sorted === 'desc' ? 'chevronDown' : 'sortable'}
-                        size={12}
-                        className={sorted ? styles.sorted : styles.sortable}
+                        <Icon
+                          name={
+                            sorted === 'asc' ? 'chevronUp' : sorted === 'desc' ? 'chevronDown' : 'sortable'
+                          }
+                          size={12}
+                          className={sorted ? styles.sorted : styles.sortable}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <span
+                        className={styles.resize}
                         aria-hidden="true"
+                        onPointerDown={startResize(column.name)}
+                        onDoubleClick={() => resetWidth(column.name)}
                       />
-                    </button>
-                    <span
-                      className={styles.resize}
-                      aria-hidden="true"
-                      onPointerDown={startResize(column.name)}
-                      onDoubleClick={() => resetWidth(column.name)}
+                    </th>
+                  )
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {parts.map((part) =>
+                'gap' in part ? (
+                  // Stands in for the rows out of sight.
+                  <tr key={`gap:${part.from}`} className={styles.gap} aria-hidden="true">
+                    <td
+                      colSpan={columns.length}
+                      style={
+                        { height: part.gap * ROW_HEIGHT, '--row-height': `${ROW_HEIGHT}px` } as CSSProperties
+                      }
                     />
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {drawnRows(start, end, editingRow, rowCount).map((part) =>
-              'gap' in part ? (
-                // Stands in for the rows out of sight.
-                <tr key={`gap:${part.from}`} className={styles.gap} aria-hidden="true">
-                  <td colSpan={columns.length + 1} style={{ height: part.gap * ROW_HEIGHT }} />
-                </tr>
-              ) : part.index < edits.inserts.length ? (
-                insertedRow(edits.inserts[part.index])
-              ) : (
-                loadedRow(part.index - edits.inserts.length)
-              ),
-            )}
-          </tbody>
-        </table>
+                  </tr>
+                ) : (
+                  drawRow(part.index)
+                ),
+              )}
+            </tbody>
+          </table>
+        </RowSheet>
       </div>
       {menu && (
         <ContextMenu
@@ -754,64 +751,5 @@ export function EditableGrid(props: EditableGridProps) {
         />
       )}
     </>
-  )
-}
-
-/** A DEFAULT shows as an empty cell marked DEFAULT; other values as they are. */
-function textOf(value: CellValue): Value {
-  return isDefault(value) ? null : value
-}
-
-function sameCell(menu: { at: Editing; column: number }, at: Editing, column: number): boolean {
-  if (menu.column !== column) return false
-  return 'row' in at
-    ? 'row' in menu.at && menu.at.row === at.row
-    : 'newRow' in menu.at && menu.at.newRow === at.newRow
-}
-
-/** Enter or leaving the field keeps the text; Escape cancels. NULL is set from the cell's menu. */
-function CellEditor({
-  initial,
-  onCommit,
-  onCancel,
-}: {
-  initial: Value
-  onCommit: (value: Value) => void
-  onCancel: () => void
-}) {
-  const [text, setText] = useState(initial ?? '')
-  // Closing gives the focus back to the grid, which blurs this field while it is
-  // still drawn: the editor closes once, so that blur can't keep a cancelled text.
-  const closed = useRef(false)
-  const close = (how: () => void) => {
-    if (closed.current) return
-    closed.current = true
-    how()
-  }
-  // Untouched text is no change: just opening a NULL or DEFAULT cell must not store ''.
-  const finish = () => close(() => (text === (initial ?? '') ? onCancel() : onCommit(text)))
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Enter') finish()
-    else if (event.key === 'Escape') close(onCancel)
-    else if ((event.metaKey || event.ctrlKey) && event.key === 's') {
-      // Save this cell first; applying now would leave the text being typed out.
-      // A second ⌘S applies everything.
-      event.preventDefault()
-      event.stopPropagation()
-      finish()
-    }
-  }
-  return (
-    <span className={styles.editor}>
-      <input
-        autoFocus
-        // Selected, so typing replaces the value and arrow keys still allow small fixes.
-        onFocus={(event) => event.target.select()}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        onBlur={finish}
-      />
-    </span>
   )
 }

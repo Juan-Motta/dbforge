@@ -133,22 +133,6 @@
   color: var(--text3);
 }
 
-.rowNumber {
-  /* Dragging over the numbers selects rows, not their text. */
-  -webkit-user-select: none;
-  user-select: none;
-  position: sticky;
-  left: 0;
-  min-width: 48px;
-  text-align: right !important;
-  background: var(--panel);
-  color: var(--text3);
-}
-
-.grid th.rowNumber {
-  z-index: 2;
-}
-
 .numeric {
   text-align: right !important;
 }
@@ -159,12 +143,9 @@
 }
 
 /* Editing states, on top of the read-only grid's look. */
-.grid tbody tr[aria-selected='true'] td {
+.grid tbody tr[aria-selected='true'] td,
+.wholeRow {
   background: var(--accent-soft);
-}
-
-.grid .rowNumber {
-  cursor: default;
 }
 
 .edited {
@@ -175,7 +156,8 @@
   background: color-mix(in srgb, var(--ok) 8%, transparent);
 }
 
-.inserted .rowNumber {
+.insertedNumber {
+  background: color-mix(in srgb, var(--ok) 8%, var(--panel));
   color: var(--ok);
   font-weight: 700;
 }
@@ -186,10 +168,10 @@
   background: color-mix(in srgb, var(--err) 7%, transparent);
 }
 
-.deleted .rowNumber {
+.deletedNumber {
+  background: color-mix(in srgb, var(--err) 7%, var(--panel));
   color: var(--err);
   font-weight: 700;
-  text-decoration: none;
 }
 
 .unset {
@@ -363,9 +345,14 @@ td[data-menu-open] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-/* Stands in for the rows out of sight: only its height. */
+/* Stands in for the rows out of sight, with their lines, so a scroll that
+   outruns the drawing shows empty rows rather than no table. */
 .grid tbody tr.gap td {
   padding: 0;
   border: 0;
-  background: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 calc(var(--row-height) - 1px),
+    var(--border) calc(var(--row-height) - 1px) var(--row-height)
+  );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drawnRows, rowWindow } from './useWindowedRows'
+import { drawnRows, drawsWhole, rowWindow, windowReach } from './useWindowedRows'
 
 describe('rowWindow', () => {
   it('takes the rows in sight and some around them, and stands in for the rest', () => {
@@ -40,5 +40,28 @@ describe('drawnRows', () => {
     // In the window already, or not a row: nothing more to draw.
     expect(drawnRows(0, 2, 1, 2)).toEqual([{ index: 0 }, { index: 1 }])
     expect(drawnRows(0, 1, -1, 1)).toEqual([{ index: 0 }])
+  })
+})
+
+describe('windowReach', () => {
+  it('draws two views past each side and moves every half view', () => {
+    // 520 px of 26 px rows: 20 in sight.
+    expect(windowReach(520, 26)).toEqual({ overscan: 40, step: 10 })
+  })
+
+  it('keeps a floor of rows before the list is measured', () => {
+    expect(windowReach(0, 26)).toEqual({ overscan: 12, step: 1 })
+  })
+})
+
+describe('drawsWhole', () => {
+  it('draws a page of the largest size whole, so a fast scroll never outruns it', () => {
+    // 1000 rows of 24 columns, with the row number.
+    expect(drawsWhole(1000, 25)).toBe(true)
+  })
+
+  it('draws only the rows in sight past the size that would cost more than a gap', () => {
+    expect(drawsWhole(1000, 26)).toBe(false)
+    expect(drawsWhole(30_000, 1)).toBe(false)
   })
 })

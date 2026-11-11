@@ -1,4 +1,5 @@
 import { useCallback, useState, type UIEvent } from 'react'
+import { flushSync } from 'react-dom'
 
 export interface RowWindow {
   /** The first row to draw, and the one after the last. */
@@ -48,19 +49,44 @@ export function drawnRows(start: number, end: number, kept: number | null, count
   return parts
 }
 
-/** Rows drawn beyond the ones in sight, on each side. */
-const OVERSCAN = 12
-/** The window moves in steps of this many rows, so most scroll events draw nothing. */
-const STEP = 4
+/** The fewest rows drawn beyond the ones in sight, on each side, while the list has no height yet. */
+const MIN_OVERSCAN = 12
 
 /**
- * Draws only the rows in sight of a long list whose rows share one height.
+ * How far the window reaches past the rows in sight, and how far a scroll
+ * must go before it moves, in rows, for a view `viewHeight` pixels tall.
+ * The page scrolls on its own thread and a fast scroll runs a few frames
+ * ahead of the code that draws, so two views are drawn on each side; moving
+ * every half view keeps at least a view and a half ahead, and draws rarely.
+ */
+export function windowReach(viewHeight: number, rowHeight: number) {
+  const inSight = Math.ceil(viewHeight / rowHeight)
+  return { overscan: Math.max(MIN_OVERSCAN, 2 * inSight), step: Math.max(1, Math.floor(inSight / 2)) }
+}
+
+/**
+ * Lists of up to this many cells are drawn whole. A fast scroll can cross a
+ * thousand rows before any code runs, so only a whole list never shows a gap;
+ * past this size, drawing it all would cost more than the gap.
+ */
+const DRAW_WHOLE_CELLS = 25_000
+
+/** Whether a list of `count` rows of `cellsPerRow` cells is drawn whole. */
+export function drawsWhole(count: number, cellsPerRow: number): boolean {
+  return count * cellsPerRow <= DRAW_WHOLE_CELLS
+}
+
+/**
+ * Draws a list whose rows share one height: whole when it has up to
+ * `DRAW_WHOLE_CELLS` cells, otherwise only the rows in sight.
  * `ref` and `onScroll` go on the scrolling element; the rows from `start` to
  * `end` go between two spacers of `before` and `after` pixels. `viewHeight`
  * is 0 until that element is shown and measured.
  */
-export function useWindowedRows(count: number, rowHeight: number) {
+export function useWindowedRows(count: number, rowHeight: number, cellsPerRow = 1) {
   const [view, setView] = useState({ top: 0, height: 0 })
+  const whole = drawsWhole(count, cellsPerRow)
+  const { overscan, step } = windowReach(view.height, rowHeight)
 
   const ref = useCallback((element: HTMLElement | null) => {
     if (!element) return
@@ -77,14 +103,20 @@ export function useWindowedRows(count: number, rowHeight: number) {
 
   const onScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
-      const step = rowHeight * STEP
-      const top = Math.floor(event.currentTarget.scrollTop / step) * step
-      setView((current) => (current.top === top ? current : { ...current, top }))
+      if (whole) return
+      const stride = rowHeight * step
+      const top = Math.floor(event.currentTarget.scrollTop / stride) * stride
+      if (top === view.top) return
+      // Drawn before the next paint: React would otherwise leave a scroll
+      // update for a later frame, and the spacer would show for one.
+      flushSync(() => setView((current) => ({ ...current, top })))
     },
-    [rowHeight],
+    [whole, rowHeight, step, view.top],
   )
 
-  // A step of rows more below, since `top` is rounded down to a step.
-  const rows = rowWindow(view.top, view.height + rowHeight * STEP, rowHeight, count, OVERSCAN)
+  const rows = whole
+    ? { start: 0, end: count, before: 0, after: 0 }
+    : // A step of rows more below, since `top` is rounded down to a step.
+      rowWindow(view.top, view.height + rowHeight * step, rowHeight, count, overscan)
   return { ref, onScroll, viewHeight: view.height, ...rows }
 }

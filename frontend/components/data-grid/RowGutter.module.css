@@ -1,0 +1,66 @@
+/* The row numbers beside a grid's table, both inside one scroller: the
+   numbers scroll down with the rows and stay at the left edge across. One
+   sticky column, not a sticky cell per row: WebKit gives each sticky element
+   a layer of its own, and a thousand of them stall painting while scrolling. */
+.sheet {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
+}
+
+.sheet > table {
+  flex: 1 0 auto;
+}
+
+.gutter {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: none;
+  min-width: 48px;
+  background: var(--panel);
+  color: var(--text3);
+  font: 12px var(--font-mono);
+  text-align: right;
+  /* Dragging over the numbers selects rows, not their text. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.head,
+.number {
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* As tall as the table's header, and stays on top while the rows scroll. */
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 30px;
+  line-height: 29px;
+  background: var(--panel);
+  font: 600 11.5px var(--font-sans);
+}
+
+/* As tall as a table row: 26px with its bottom border. */
+.number {
+  height: 26px;
+  line-height: 25px;
+  cursor: default;
+}
+
+/* Stands in for the rows out of sight, with their lines. */
+.gap {
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 calc(var(--row-height) - 1px),
+    var(--border) calc(var(--row-height) - 1px) var(--row-height)
+  );
+}

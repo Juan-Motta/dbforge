@@ -51,19 +51,6 @@
   color: var(--text3);
 }
 
-.rowNumber {
-  position: sticky;
-  left: 0;
-  min-width: 48px;
-  text-align: right !important;
-  background: var(--panel);
-  color: var(--text3);
-}
-
-.grid th.rowNumber {
-  z-index: 2;
-}
-
 .numeric {
   text-align: right !important;
 }
