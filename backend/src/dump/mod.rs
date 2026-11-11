@@ -30,6 +30,7 @@ use crate::error::{AppError, Result};
 use crate::files::partial_path;
 use crate::jobs::{Every, Jobs, cancelled};
 use crate::statement_log::{Origin, StatementLog};
+use crate::tunnel::Route;
 
 /// What a dump holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -86,7 +87,8 @@ pub async fn export(
     let partial = partial_path(path);
     let session = session_name();
     let mut command = Command::new(&tool.path);
-    connect_with(&mut command, connection, password, database, &session);
+    let route = crate::tunnel::route(connection).await?;
+    connect_with(&mut command, connection, &route, password, database, &session);
     command.args(["--format=plain", "--encoding=UTF8", "--verbose", "--no-password", "--file"]).arg(&partial);
     match options.content {
         Content::All => {}
@@ -146,7 +148,8 @@ pub async fn import(
     }
     let session = session_name();
     let mut command = Command::new(&tool.path);
-    connect_with(&mut command, connection, password, database, &session);
+    let route = crate::tunnel::route(connection).await?;
+    connect_with(&mut command, connection, &route, password, database, &session);
     command
         .args(["--no-psqlrc", "--no-password", "--set", "ON_ERROR_STOP=1", "--single-transaction", "--file"])
         .arg(path);
@@ -183,17 +186,25 @@ fn postgres_only(connection: &Connection) -> Result<()> {
     }
 }
 
-/// The connection for libpq, in the environment. Inherited `PG…` settings
-/// (a service file, another host) are left out so they can't redirect it.
-fn connect_with(command: &mut Command, connection: &Connection, password: Option<&str>, database: &str, session: &str) {
+/// The connection for libpq, in the environment, to `route` (the server or its
+/// tunnel). Inherited `PG…` settings (a service file, another host) are left
+/// out so they can't redirect it.
+fn connect_with(
+    command: &mut Command,
+    connection: &Connection,
+    route: &Route,
+    password: Option<&str>,
+    database: &str,
+    session: &str,
+) {
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("PG") {
             command.env_remove(name);
         }
     }
     command
-        .env("PGHOST", &connection.host)
-        .env("PGPORT", connection.port.to_string())
+        .env("PGHOST", &route.host)
+        .env("PGPORT", route.port.to_string())
         .env("PGDATABASE", database)
         .env("PGAPPNAME", session)
         .env("PGCONNECT_TIMEOUT", "10");
@@ -394,7 +405,7 @@ pub fn clear_export_folder(folder: String) -> Result<exports::ExportFiles> {
 /// Runs against the local server and the client tools installed. Start the server and run
 /// `cargo test -- --ignored`; see `drivers::postgres::tests` for the container.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use sqlx::{Connection as _, PgConnection};
 
     #[test]
@@ -455,6 +466,17 @@ mod tests {
         assert!(error.contains("127.0.0.1"), "the name is checked: {error}");
         dump(certuser(as_certuser(SslMode::VerifyFull), "localhost")).await.unwrap();
         assert!(file.exists());
+    }
+
+    /// Exports `database` of `connection` to `file`, everything included.
+    pub(crate) async fn export_to(
+        connection: &Connection,
+        password: Option<&str>,
+        database: &str,
+        file: &Path,
+    ) -> Result<Exported> {
+        let run = Run { tool: &pg_dump().await, cancel: &CancellationToken::new() };
+        export(connection, password, database, file, &ALL, run, |_| {}).await
     }
 
     async fn pg_dump() -> Tool {

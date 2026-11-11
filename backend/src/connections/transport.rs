@@ -65,7 +65,7 @@ pub struct Ssl {
 }
 
 /// How the SSH tunnel signs in to its server.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SshAuth {
     /// The SSH secret is the account's password.
@@ -79,7 +79,7 @@ pub enum SshAuth {
 
 /// A tunnel through an SSH server that can reach the database, as bastions
 /// give. The password or passphrase is kept with the saved passwords.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshTunnel {
     pub enabled: bool,

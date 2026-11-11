@@ -17,6 +17,7 @@ mod keyspace;
 mod mcp;
 mod query;
 mod statement_log;
+mod tunnel;
 
 use tauri::menu::{Menu, MenuItem, MenuItemKind};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -41,6 +42,11 @@ pub fn run() {
             let config = app.path().app_config_dir()?;
             let credentials = credentials::Credentials::load(config.clone())?;
             app.manage(ConnectionStore::load(config.join("connections.json"), credentials)?);
+            let handle = app.handle().clone();
+            tunnel::init(
+                config.join("known_hosts"),
+                Box::new(move |id| handle.state::<ConnectionStore>().credentials().get(id)),
+            );
             app.manage(connections::tags::TagStore::load(config.join("tags.json"))?);
             app.manage(dump::ToolPaths::load(config.join("tools.json"))?);
             app.manage(query::QuerySessions::default());

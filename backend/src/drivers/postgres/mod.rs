@@ -45,8 +45,9 @@ async fn connect_with(
     database: Option<&str>,
     adjust: impl FnOnce(PgConnectOptions) -> PgConnectOptions,
 ) -> Result<Conn> {
+    let route = crate::tunnel::route(connection).await?;
     let mut options = with_ssl(
-        PgConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username),
+        PgConnectOptions::new().host(&route.host).port(route.port).username(&connection.username),
         &connection.ssl,
     );
     let database = database.unwrap_or(&connection.database);

@@ -50,12 +50,14 @@ pub(crate) async fn connect(
     }
     let mut info: ConnectionInfo = if url {
         connection.host.as_str().into_connection_info()?
-    } else if connection.ssl.mode.encrypts() {
-        let (host, port) = (connection.host.clone(), connection.port);
-        ConnectionAddr::TcpTls { host, port, insecure: !connection.ssl.mode.verifies(), tls_params: None }
-            .into_connection_info()?
     } else {
-        ConnectionAddr::Tcp(connection.host.clone(), connection.port).into_connection_info()?
+        let crate::tunnel::Route { host, port } = crate::tunnel::route(connection).await?;
+        if connection.ssl.mode.encrypts() {
+            ConnectionAddr::TcpTls { host, port, insecure: !connection.ssl.mode.verifies(), tls_params: None }
+                .into_connection_info()?
+        } else {
+            ConnectionAddr::Tcp(host, port).into_connection_info()?
+        }
     };
     let mut settings: RedisConnectionInfo = info.redis_settings().clone();
     if !connection.username.is_empty() {
@@ -231,6 +233,21 @@ pub(super) mod tests {
     use crate::connections::transport::{Ssl, SslMode};
 
     pub const PASSWORD: Option<&str> = Some("dbforge");
+
+    #[tokio::test]
+    #[ignore = "needs the SSH bastion on port 52222 and Redis on 56379"]
+    async fn goes_through_an_ssh_tunnel() {
+        use crate::connections::transport::SshAuth;
+        use crate::tunnel::tests::{bastion, setup};
+        setup();
+        let tunnelled = Connection {
+            id: "password".into(),
+            host: "host.docker.internal".into(),
+            ssh: bastion(SshAuth::Password, ""),
+            ..local()
+        };
+        assert!(server_version(&tunnelled, PASSWORD).await.unwrap().starts_with("Redis"));
+    }
 
     pub fn local() -> Connection {
         Connection {

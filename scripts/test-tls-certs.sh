@@ -2,7 +2,8 @@
 # Makes what the TLS container tests use, in the folder given (default
 # ~/.cache/dbforge-test-certs, a folder Docker Desktop can mount; the tests read
 # it from DBFORGE_TEST_CERTS): a test authority, a server certificate for
-# "localhost" (not 127.0.0.1, so tests can tell a name check from a CA check),
+# "localhost" and "host.docker.internal" (not 127.0.0.1, so tests can tell a
+# name check from a CA check),
 # a client certificate for the user "certuser", and the init scripts that create
 # that user. Then start the containers the tests name:
 #
@@ -29,6 +30,15 @@
 #     'mkdir -p /tls /var/opt/mssql && cp /certs/server.* /tls/ &&
 #      printf "[network]\ntlscert = /tls/server.crt\ntlskey = /tls/server.key\nforceencryption = 0\n" > /var/opt/mssql/mssql.conf &&
 #      exec /opt/mssql/bin/permissions_check.sh /opt/mssql/bin/sqlservr'
+#
+# The SSH tunnel tests sign in to a bastion that reaches those containers at
+# host.docker.internal, as ops with the password "dbforge" or either key:
+#
+#   docker run -d --name dbforge-test-ssh -p 52222:22 -v $C:/keys:ro alpine:3 sh -c \
+#     'apk add --no-cache openssh && ssh-keygen -A && (id ops || adduser -D ops) && echo ops:dbforge | chpasswd &&
+#      mkdir -p /home/ops/.ssh && cat /keys/id_ed25519*.pub > /home/ops/.ssh/authorized_keys &&
+#      chown -R ops /home/ops/.ssh && chmod 700 /home/ops/.ssh &&
+#      exec /usr/sbin/sshd -D -e -o PasswordAuthentication=yes -o AllowTcpForwarding=yes'
 set -euo pipefail
 
 dir="${1:-$HOME/.cache/dbforge-test-certs}"
@@ -46,7 +56,8 @@ sign() { # name, subject, extensions
   rm "$1.csr" "$1.ext"
 }
 
-sign server "/CN=localhost" "subjectAltName=DNS:localhost
+# host.docker.internal is how the SSH bastion reaches the containers.
+sign server "/CN=localhost" "subjectAltName=DNS:localhost,DNS:host.docker.internal
 extendedKeyUsage=serverAuth"
 sign client "/CN=certuser" "extendedKeyUsage=clientAuth"
 
@@ -56,6 +67,11 @@ cat client.crt client.key > client.pem
 # The containers copy what they need as root; libpq refuses a client key others can read.
 chmod 644 ./*.crt ./*.pem server.key
 chmod 600 client.key ca.key
+
+# SSH keys for the tunnel tests: one plain, one with the passphrase "dbforge".
+rm -f id_ed25519 id_ed25519.pub id_ed25519_passphrase id_ed25519_passphrase.pub
+ssh-keygen -q -t ed25519 -N "" -C dbforge-test -f id_ed25519
+ssh-keygen -q -t ed25519 -N dbforge -C dbforge-test-passphrase -f id_ed25519_passphrase
 
 # certuser signs in with its certificate only.
 mkdir -p pg-init mysql-init

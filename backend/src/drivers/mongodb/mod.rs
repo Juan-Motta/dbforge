@@ -63,7 +63,8 @@ async fn options(connection: &Connection, password: Option<&str>) -> Result<Clie
         ClientOptions::parse(format!("mongodb+srv://{}/", connection.host)).await?
     } else {
         let mut options = ClientOptions::default();
-        options.hosts = vec![ServerAddress::Tcp { host: connection.host.clone(), port: Some(connection.port) }];
+        let route = crate::tunnel::route(connection).await?;
+        options.hosts = vec![ServerAddress::Tcp { host: route.host, port: Some(route.port) }];
         // Talk to this server even when it belongs to a replica set whose
         // members advertise names only reachable from inside their network.
         options.direct_connection = Some(true);
@@ -450,6 +451,21 @@ pub(super) mod tests {
     use crate::connections::model::Engine;
 
     pub const PASSWORD: Option<&str> = Some("dbforge");
+
+    #[tokio::test]
+    #[ignore = "needs the SSH bastion on port 52222 and MongoDB on 57017"]
+    async fn goes_through_an_ssh_tunnel() {
+        use crate::connections::transport::SshAuth;
+        use crate::tunnel::tests::{bastion, setup};
+        setup();
+        let tunnelled = Connection {
+            id: "password".into(),
+            host: "host.docker.internal".into(),
+            ssh: bastion(SshAuth::Password, ""),
+            ..local()
+        };
+        assert!(server_version(&tunnelled, PASSWORD).await.unwrap().starts_with(""));
+    }
 
     pub fn local() -> Connection {
         Connection {

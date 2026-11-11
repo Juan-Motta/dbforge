@@ -43,8 +43,9 @@ pub(super) type Conn = Logged<MySqlConnection>;
 const SYSTEM_DATABASES: &str = "('mysql', 'information_schema', 'performance_schema', 'sys')";
 
 async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Conn> {
+    let route = crate::tunnel::route(connection).await?;
     let mut options = with_ssl(
-        MySqlConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username),
+        MySqlConnectOptions::new().host(&route.host).port(route.port).username(&connection.username),
         &connection.ssl,
     );
     let database = database.unwrap_or(&connection.database);
@@ -437,6 +438,21 @@ mod tests {
         let certuser = |ssl: Ssl| Connection { username: "certuser".into(), ..server(ssl, "localhost") };
         assert!(server_version(&certuser(trusting(VerifyFull)), None).await.is_err());
         assert!(server_version(&certuser(as_certuser(VerifyFull)), None).await.is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the SSH bastion on port 52222 and MySQL on 53306"]
+    async fn goes_through_an_ssh_tunnel() {
+        use crate::connections::transport::SshAuth;
+        use crate::tunnel::tests::{bastion, setup};
+        setup();
+        let tunnelled = Connection {
+            id: "password".into(),
+            host: "host.docker.internal".into(),
+            ssh: bastion(SshAuth::Password, ""),
+            ..local()
+        };
+        assert!(server_version(&tunnelled, PASSWORD).await.unwrap().contains("8."));
     }
 
     pub(super) fn local() -> Connection {

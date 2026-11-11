@@ -15,9 +15,12 @@ pub fn list_connections(store: State<'_, ConnectionStore>) -> Vec<Connection> {
 
 // Commands that reach the keychain or the disk run off the main thread: the
 // keychain may stop to ask the user, and the window must keep drawing meanwhile.
-#[tauri::command(async)]
-pub fn save_connection(store: State<'_, ConnectionStore>, input: ConnectionInput) -> Result<Connection> {
-    store.save(input.into_parts()?)
+#[tauri::command]
+pub async fn save_connection(store: State<'_, ConnectionStore>, input: ConnectionInput) -> Result<Connection> {
+    let connection = store.save(input.into_parts()?)?;
+    // A tunnel opened with the old settings or secret is not reused.
+    crate::tunnel::close(&connection.id).await;
+    Ok(connection)
 }
 
 /// Saves a copy of a connection, its secrets included, under `name`.
@@ -26,9 +29,11 @@ pub fn duplicate_connection(store: State<'_, ConnectionStore>, id: String, name:
     store.duplicate(&id, &name)
 }
 
-#[tauri::command(async)]
-pub fn delete_connection(store: State<'_, ConnectionStore>, id: String) -> Result<()> {
-    store.delete(&id)
+#[tauri::command]
+pub async fn delete_connection(store: State<'_, ConnectionStore>, id: String) -> Result<()> {
+    store.delete(&id)?;
+    crate::tunnel::close(&id).await;
+    Ok(())
 }
 
 /// Tests the values currently in the form, which may not be saved yet.
@@ -40,19 +45,33 @@ pub async fn test_connection(
     input: ConnectionInput,
 ) -> Result<String> {
     let existing_id = input.id.clone();
-    let ConnectionParts { connection, password, .. } = input.for_test().into_parts()?;
-    let password = match (password, existing_id) {
-        (Some(password), _) => Some(password),
-        (None, Some(id)) => store.password(&id)?,
-        (None, None) => None,
+    let ConnectionParts { connection, password, ssh_secret } = input.for_test().into_parts()?;
+    let saved = |read: fn(&ConnectionStore, &str) -> Result<Option<String>>| match &existing_id {
+        Some(id) => read(&store, id),
+        None => Ok(None),
     };
-    statement_log::scoped(
+    let password = match password {
+        Some(password) => Some(password),
+        None => saved(ConnectionStore::password)?,
+    };
+    let ssh_secret = match ssh_secret {
+        Some(secret) => Some(secret),
+        None => saved(ConnectionStore::ssh_secret)?,
+    };
+    // Tested on a tunnel of its own, with the secret typed: the saved
+    // connection's tunnel keeps its settings meanwhile.
+    let log_id = connection.id.clone();
+    let connection = Connection { id: format!("test-{}", uuid::Uuid::new_v4()), ..connection };
+    let _lent = crate::tunnel::lend_secret(&connection.id, ssh_secret)?;
+    let version = statement_log::scoped(
         &log,
-        &connection.id,
+        &log_id,
         Origin::Connect,
         drivers::server_version(&connection, password.as_deref()),
     )
-    .await
+    .await;
+    crate::tunnel::close(&connection.id).await;
+    version
 }
 
 /// Where passwords are saved, as the settings show it.

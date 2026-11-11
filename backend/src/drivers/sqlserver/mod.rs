@@ -45,9 +45,10 @@ type Client = LoggedClient;
 /// Opens a connection, to `database` when given, else the configured one, else
 /// the login's default database.
 async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Client> {
+    let route = crate::tunnel::route(connection).await?;
     let mut config = Config::new();
-    config.host(&connection.host);
-    config.port(connection.port);
+    config.host(&route.host);
+    config.port(route.port);
     config.application_name("DBForge");
     let database = database.unwrap_or(&connection.database);
     if !database.is_empty() {
@@ -635,6 +636,29 @@ pub(super) mod tests {
         assert!(ok(Ssl { mode: VerifyFull, ..Ssl::default() }, "localhost").await.is_err(), "unknown authority");
         assert!(ok(trusting(VerifyFull), "127.0.0.1").await.is_err(), "the certificate names localhost");
         assert!(ok(trusting(VerifyFull), "localhost").await.is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the SSH bastion on port 52222 and the SQL Server on 51434 with the test certificate"]
+    async fn checks_the_server_name_through_an_ssh_tunnel() {
+        use crate::connections::transport::{SshAuth, SslMode};
+        use crate::drivers::test_certs::trusting;
+        use crate::tunnel::tests::{bastion, setup};
+        setup();
+        // The bastion reaches the server as host.docker.internal, which the certificate names.
+        let tunnelled = |host: &str| Connection {
+            id: "password".into(),
+            host: host.into(),
+            port: 51434,
+            ssl: trusting(SslMode::VerifyFull),
+            ssh: bastion(SshAuth::Password, ""),
+            ..local()
+        };
+        assert!(server_version(&tunnelled("host.docker.internal"), PASSWORD).await.is_ok());
+        // The same server by its address, which the certificate doesn't name. Docker
+        // Desktop's address for the host: `docker exec dbforge-test-ssh getent hosts host.docker.internal`.
+        let error = server_version(&tunnelled("192.168.5.2"), PASSWORD).await.unwrap_err().to_string();
+        assert!(error.contains("certificate"), "{error}");
     }
 
     pub fn local() -> Connection {
