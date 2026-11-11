@@ -28,6 +28,7 @@ export interface MenuActions {
   openTable: (connection: Connection, table: TableRef, view: TableTabView) => void
   openDiagram: (connection: Connection, database: string, schema: string) => void
   exportTable: (connection: Connection, table: TableRef) => void
+  importRows: (connection: Connection, table: TableRef) => void
   dump: (mode: 'export' | 'import', connection: Connection, database: string) => void
   /** Puts the text on the clipboard and says so; call it from the click itself. */
   copy: (text: string | Promise<string>) => void
@@ -186,6 +187,16 @@ function tableMenu(node: TreeNode, connection: Connection, actions: MenuActions,
         ),
     },
     { label: m.exportMenu, icon: 'download', onSelect: () => actions.exportTable(connection, table) },
+    // A view can't be imported into.
+    ...(node.kind === 'view'
+      ? []
+      : [
+          {
+            label: m.importMenu,
+            icon: 'upload' as const,
+            onSelect: () => actions.importRows(connection, table),
+          },
+        ]),
     { label: m.copyMenu, items: copy },
   ]
 }

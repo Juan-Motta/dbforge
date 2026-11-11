@@ -390,8 +390,46 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       return null
     case 'keep_cursor':
       return null
-    case 'plugin:dialog|open':
-      return delay('/Users/demo/Downloads/shop.sql')
+    case 'plugin:dialog|open': {
+      // A data file when the dialog asks for one, else a dump.
+      const filters = (payload.options as { filters?: { extensions: string[] }[] }).filters ?? []
+      const data = filters.some((filter) => filter.extensions.includes('csv'))
+      return delay(data ? '/Users/demo/Downloads/customers.csv' : '/Users/demo/Downloads/shop.sql')
+    }
+    case 'preview_import': {
+      if (payload.format === 'json') {
+        return delay({
+          fields: ['id', 'name', 'email', 'tags'],
+          rows: [
+            ['9001', 'Ada', 'ada@example.com', '["vip"]'],
+            ['9002', 'Bo', null, null],
+          ],
+        })
+      }
+      const header = (payload.options as { header: boolean }).header
+      const rows = [
+        ['9001', 'Ada Lovelace', 'ada@example.com', '120.50'],
+        ['9002', 'Bo Diddley', null, '7.00'],
+        ['9003', 'Cy Twombly', 'cy@example.com', '0'],
+      ]
+      return delay({
+        fields: header
+          ? ['id', 'Name', 'email', 'lifetime_value']
+          : ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
+        rows: header ? rows : [['id', 'Name', 'email', 'lifetime_value'], ...rows],
+      })
+    }
+    case 'import_table': {
+      // 12,480 rows in eight steps, a cancel ending it between two.
+      const { jobId } = payload.request as { jobId: string }
+      const total = 12480
+      for (let step = 1; step <= 8; step++) {
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        if (cancelled.delete(jobId)) throw 'Cancelled.'
+        await emit('import-progress', { jobId, rows: Math.round((total * step) / 8) })
+      }
+      return total
+    }
     case 'export_database': {
       const { jobId, database } = payload.request as { jobId: string; database: string }
       await toolRun(jobId, [

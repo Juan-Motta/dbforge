@@ -21,6 +21,8 @@ interface SelectProps<T extends string> {
   /** Explains the field in a tooltip next to its label. */
   info?: string
   autoFocus?: boolean
+  /** The label is only read by screen readers, for a field whose row already says what it is. */
+  hideLabel?: boolean
 }
 
 /** Where the list opens, in viewport pixels: below the button, or above it when there is no room. */
@@ -41,6 +43,7 @@ export function Select<T extends string>({
   onChange,
   info,
   autoFocus,
+  hideLabel = false,
 }: SelectProps<T>) {
   const id = useId()
   const button = useRef<HTMLButtonElement>(null)
@@ -112,7 +115,7 @@ export function Select<T extends string>({
 
   return (
     <div className={styles.field}>
-      <span className={styles.label} id={`${id}-label`}>
+      <span className={hideLabel ? styles.hiddenLabel : styles.label} id={`${id}-label`}>
         {label}
         {info && <InfoTip text={info} />}
       </span>

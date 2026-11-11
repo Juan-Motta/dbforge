@@ -28,6 +28,7 @@ const ORIGIN_LABELS: Record<Origin, `origin${Capitalize<Origin>}`> = {
   metadata: 'originMetadata',
   admin: 'originAdmin',
   export: 'originExport',
+  import: 'originImport',
   dump: 'originDump',
   connect: 'originConnect',
   agent: 'originAgent',

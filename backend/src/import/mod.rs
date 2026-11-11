@@ -148,6 +148,73 @@ mod tests {
         assert!(mapping(&fields, &[None]).is_err());
     }
 
+    /// A SQLite file holding `sql`, as a saved connection.
+    async fn sqlite(dir: &Path, sql: &str) -> crate::connections::model::Connection {
+        use sqlx::{AssertSqlSafe, ConnectOptions};
+        let path = dir.join("test.db");
+        let mut conn =
+            sqlx::sqlite::SqliteConnectOptions::new().filename(&path).create_if_missing(true).connect().await.unwrap();
+        sqlx::raw_sql(AssertSqlSafe(sql)).execute(&mut conn).await.unwrap();
+        crate::connections::model::Connection {
+            id: "import".into(),
+            name: "import".into(),
+            engine: crate::connections::model::Engine::Sqlite,
+            environment: None,
+            host: String::new(),
+            port: 0,
+            database: path.to_string_lossy().into_owned(),
+            username: String::new(),
+            tls: false,
+            allow_self_signed: false,
+            srv: false,
+            agent_access: Default::default(),
+        }
+    }
+
+    /// What `import_table` does, without the app around it.
+    async fn import_file(connection: &crate::connections::model::Connection, request: ImportRequest) -> Result<u64> {
+        let (picks, columns) = mapping(&request.fields, &request.columns)?;
+        let input = open(&request.path)?;
+        let table = request.table.clone();
+        let mut batches = read_in_batches(request, input, picks);
+        drivers::import_rows(connection, None, &table, &columns, &mut batches, &mut |_| {}).await
+    }
+
+    #[tokio::test]
+    async fn an_exported_file_imports_back_and_a_bad_row_adds_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let connection = sqlite(dir.path(), "CREATE TABLE people (id INTEGER, name TEXT, note TEXT);").await;
+        let table = TableRef { database: "main".into(), schema: "main".into(), name: "people".into() };
+        // As export writes CSV: quoted where needed, NULL left empty.
+        let mut text = String::from("id,name,note\n");
+        for n in 0..2500 {
+            text.push_str(&format!("{n},\"Name, {n}\",\n"));
+        }
+        let path = dir.path().join("people.csv");
+        std::fs::write(&path, &text).unwrap();
+        let request = |path: &Path| ImportRequest {
+            job_id: "j".into(),
+            connection_id: "c".into(),
+            table: table.clone(),
+            path: path.to_path_buf(),
+            format: ImportFormat::Csv,
+            options: None,
+            fields: vec!["id".into(), "name".into(), "note".into()],
+            columns: vec![Some("id".into()), Some("name".into()), Some("note".into())],
+        };
+        assert_eq!(import_file(&connection, request(&path)).await.unwrap(), 2500);
+
+        // A row of the wrong width near the end: the rows read before it don't stay.
+        text.push_str("1,2\n");
+        let bad = dir.path().join("bad.csv");
+        std::fs::write(&bad, &text).unwrap();
+        let error = import_file(&connection, request(&bad)).await.unwrap_err();
+        assert_eq!(error.to_string(), "Row 2502 has 2 values, but the file has 3 columns.");
+
+        let rows = drivers::fetch_rows(&connection, None, &table, &Default::default(), 2499, 10).await.unwrap();
+        assert_eq!(rows.rows, [vec![Some("2499".into()), Some("Name, 2499".into()), None]]);
+    }
+
     #[tokio::test]
     async fn a_file_is_read_in_batches_and_a_read_error_comes_last() {
         let dir = tempfile::tempdir().unwrap();

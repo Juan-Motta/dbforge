@@ -42,6 +42,7 @@ function actions(): MenuActions {
     openTable: vi.fn(),
     openDiagram: vi.fn(),
     exportTable: vi.fn(),
+    importRows: vi.fn(),
     dump: vi.fn(),
     copy: vi.fn(),
     structure: vi.fn(async () => ({
@@ -92,8 +93,11 @@ describe('explorerMenu', () => {
       'View structure',
       'New query',
       'Export…',
+      'Import rows…',
       ['Copy', ['Name', 'SELECT statement', 'INSERT statement', 'CREATE statement']],
     ])
+    // Rows can't be imported into a view.
+    expect(labels(menu(node('view', ['shop', 'public', 'v']), a))).not.toContain('Import rows…')
     expect(labels(menu(node('view', ['shop', 'public', 'v']), a)).at(-1)).toEqual([
       'Copy',
       ['Name', 'SELECT statement', 'INSERT statement', 'Definition'],

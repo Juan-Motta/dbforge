@@ -7,7 +7,7 @@ import {
   type Connection,
   type NewObjectKind,
 } from '../domain/connection'
-import { tableRefFromPath } from '../domain/table'
+import { tableRefFromPath, type TableRef } from '../domain/table'
 import { NewObjectDialog } from '../features/admin/NewObjectDialog'
 import { messages as adminMessages } from '../features/admin/messages'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
@@ -47,6 +47,7 @@ import { useTagList } from '../features/tags/useTagList'
 import { TagsContext } from '../features/tags/useTags'
 import { Notice, type NoticeState } from '../components/Notice'
 import { ExportDialog, type ExportSource } from '../features/export/ExportDialog'
+import { ImportDialog } from '../features/import/ImportDialog'
 import { NO_FILTER } from '../features/table-data/rowFilter'
 import { structureApi } from '../features/table-structure/api'
 import { copyText } from '../lib/clipboard'
@@ -100,6 +101,7 @@ export function App() {
   const adminM = useMessages(adminMessages)
   // A table being exported from the explorer's menu.
   const [exporting, setExporting] = useState<ExportSource | null>(null)
+  const [importing, setImporting] = useState<{ connection: Connection; table: TableRef } | null>(null)
   const [notice, setNotice] = useState<NoticeState | null>(null)
 
   // A notice goes away by itself; a newer one restarts the wait.
@@ -226,6 +228,7 @@ export function App() {
         setTabs((state) => openDiagramTab(state, m, c.id, database, schema)),
       exportTable: (c, table) =>
         setExporting({ kind: 'table', connectionId: c.id, table, filter: NO_FILTER }),
+      importRows: (connection, table) => setImporting({ connection, table }),
       dump: (mode, c, database) => setDump({ mode, connection: c, database, refresh }),
       copy: (text) =>
         void copyText(text).then(
@@ -356,6 +359,17 @@ export function App() {
         )}
 
         {exporting && <ExportDialog source={exporting} onClose={() => setExporting(null)} />}
+        {importing && (
+          <ImportDialog
+            connectionId={importing.connection.id}
+            table={importing.table}
+            transactional={ENGINES[importing.connection.engine].family === 'relational'}
+            confirmTag={confirmingTag(tagsState.tags, importing.connection.environment, tagsState.loaded)}
+            onClose={() => setImporting(null)}
+            // An open tab of the table shows the new rows on its next refresh.
+            onImported={() => {}}
+          />
+        )}
         {notice && <Notice notice={notice} />}
 
         {dump?.mode === 'export' && (

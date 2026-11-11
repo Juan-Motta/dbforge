@@ -80,6 +80,8 @@ interface TableViewProps {
   columnInfo?: ColumnInfo[]
   /** Opens a table filtered to the rows a foreign key points to. */
   onOpenTable: (table: TableRef, filter: RowFilter) => void
+  /** Changes when the table's rows changed elsewhere, e.g. an import added some; the page is read again. */
+  revision?: number
 }
 
 /** How the changes run: one transaction that applies all or nothing, except where noted. */
@@ -109,6 +111,7 @@ export function TableView({
   foreignKeys,
   columnInfo,
   onOpenTable,
+  revision,
 }: TableViewProps) {
   const m = useMessages(messages)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
@@ -117,6 +120,7 @@ export function TableView({
     table,
     filter,
     pageSize,
+    revision,
   )
   const [edits, setEdits] = useState<Edits>(NO_EDITS)
   // Selected cells; the rows they are in count as selected for row actions.

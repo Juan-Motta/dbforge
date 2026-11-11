@@ -1,0 +1,229 @@
+/* Laid out like the export and dump dialogs: titled sections, then a status box and the footer. */
+.dialog {
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 18px 20px 8px;
+  overflow: auto;
+}
+
+.source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* The file chosen: bordered like the dump dialog's folder row. */
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text2);
+}
+
+.fileRow > svg {
+  flex: none;
+  color: var(--text3);
+}
+
+/* A long path keeps its end, the file's name, in sight. */
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 12px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.formats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.format {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.format:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.format[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The same icon tile the option lists draw. */
+.formatIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text2);
+}
+
+.format[aria-checked='true'] .formatIcon {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+
+.formatText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.formatName {
+  font-weight: 500;
+}
+
+.description {
+  color: var(--text3);
+  font-size: 11.5px;
+}
+
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* One row of the same height for every format, so the dialog keeps its size. */
+.options,
+.optionsThree {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 54px;
+}
+
+.optionsThree {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.options > .note {
+  grid-column: 1 / -1;
+  align-self: center;
+}
+
+.note {
+  margin: 0;
+  color: var(--text3);
+  font-size: 12.5px;
+}
+
+.preview {
+  max-height: 172px;
+  overflow: auto;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.empty {
+  display: flex;
+  align-items: center;
+  min-height: 60px;
+  margin: 0;
+  padding: 0 12px;
+  color: var(--text3);
+  font-size: 12.5px;
+}
+
+.preview > .error {
+  min-height: 60px;
+  padding: 10px 12px;
+}
+
+.mapping {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+/* A field, an arrow, and the column it goes into. */
+.mappingRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--text3);
+}
+
+.field {
+  overflow: hidden;
+  color: var(--text);
+  font: 12.5px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error {
+  margin: 0;
+  color: var(--err);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}

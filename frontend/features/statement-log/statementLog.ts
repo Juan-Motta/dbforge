@@ -14,6 +14,7 @@ const KIND_OF: Record<Origin, Exclude<Kind, 'all'>> = {
   edit: 'changes',
   admin: 'changes',
   dump: 'changes',
+  import: 'changes',
   browse: 'reads',
   export: 'reads',
   metadata: 'metadata',

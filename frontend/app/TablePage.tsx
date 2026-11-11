@@ -2,9 +2,10 @@ import { useState } from 'react'
 import type { TableTabView } from './tabs'
 import { IconButton } from '../components/Button'
 import { Icon } from '../components/Icon'
-import type { SqlDialect } from '../domain/connection'
 import type { TableRef } from '../domain/table'
+import { isRelationalDialect, type SqlDialect } from '../domain/connection'
 import { DiagramView } from '../features/diagram/DiagramView'
+import { ImportDialog } from '../features/import/ImportDialog'
 import { NO_FILTER, type RowFilter } from '../features/table-data/rowFilter'
 import { TableView } from '../features/table-data/TableView'
 import { StructureSection } from '../features/table-structure/StructureSection'
@@ -57,6 +58,9 @@ export function TablePage({
   const [actionsSlot, setActionsSlot] = useState<HTMLSpanElement | null>(null)
   // Loaded up front: the section counts and the size summary come from it.
   const { structure, error, loading, reload } = useTableStructure(connectionId, table)
+  const [importing, setImporting] = useState(false)
+  // Bumped when an import adds rows, so the data view reads its page again.
+  const [revision, setRevision] = useState(0)
 
   return (
     <section className={styles.page}>
@@ -66,6 +70,11 @@ export function TablePage({
         <IconButton label={m.exportRows} onClick={() => onExport(filter)}>
           <Icon name="download" />
         </IconButton>
+        {structure?.kind !== 'view' && (
+          <IconButton label={m.importRows} onClick={() => setImporting(true)}>
+            <Icon name="upload" />
+          </IconButton>
+        )}
         {view !== 'data' && view !== 'diagram' && (
           <IconButton label={m.reloadStructure} disabled={loading} onClick={reload}>
             <Icon name="refresh" />
@@ -104,6 +113,7 @@ export function TablePage({
           foreignKeys={structure?.foreignKeys ?? []}
           columnInfo={structure?.columns}
           onOpenTable={onOpenTable}
+          revision={revision}
         />
       </div>
       {view === 'diagram' && (
@@ -127,6 +137,16 @@ export function TablePage({
             <p className={styles.loading}>{m.loading}</p>
           )}
         </div>
+      )}
+      {importing && (
+        <ImportDialog
+          connectionId={connectionId}
+          table={table}
+          transactional={isRelationalDialect(dialect)}
+          confirmTag={confirmTag}
+          onClose={() => setImporting(false)}
+          onImported={() => setRevision((current) => current + 1)}
+        />
       )}
     </section>
   )

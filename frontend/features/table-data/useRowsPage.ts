@@ -10,8 +10,18 @@ export const DEFAULT_PAGE_SIZE = 200
 
 type Result = { key: string } & ({ page: RowsPage } | { error: string })
 
-/** Loads one page of rows at a time; a new filter or page size starts again at the first page. */
-export function useRowsPage(connectionId: string, table: TableRef, filter: RowFilter, pageSize: number) {
+/**
+ * Loads one page of rows at a time; a new filter or page size starts again at
+ * the first page. A new `revision` reads the page again: the rows changed
+ * elsewhere, e.g. an import added some.
+ */
+export function useRowsPage(
+  connectionId: string,
+  table: TableRef,
+  filter: RowFilter,
+  pageSize: number,
+  revision = 0,
+) {
   const filterKey = JSON.stringify([filter, pageSize])
   const [paging, setPaging] = useState({ filterKey, offset: 0 })
   const offset = paging.filterKey === filterKey ? paging.offset : 0
@@ -20,7 +30,7 @@ export function useRowsPage(connectionId: string, table: TableRef, filter: RowFi
   const [result, setResult] = useState<Result | null>(null)
 
   // Identifies the request; a result for any other key is stale.
-  const key = JSON.stringify([connectionId, table, filter, pageSize, offset, reloads])
+  const key = JSON.stringify([connectionId, table, filter, pageSize, offset, reloads, revision])
 
   useEffect(() => {
     // Ignore the response if the request changed before it arrived.
