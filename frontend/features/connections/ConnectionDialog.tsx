@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { open } from '@tauri-apps/plugin-dialog'
+import { useEffect, useId, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
@@ -8,7 +7,14 @@ import { InfoTip } from '../../components/InfoTip'
 import { Modal } from '../../components/Modal'
 import { Select, type SelectOption } from '../../components/Select'
 import { TextField } from '../../components/TextField'
-import { ENGINE_LIST, ENGINES, isFileEngine, type Connection, type Engine } from '../../domain/connection'
+import {
+  encrypts,
+  ENGINE_LIST,
+  ENGINES,
+  isFileEngine,
+  type Connection,
+  type Engine,
+} from '../../domain/connection'
 import { copyText } from '../../lib/clipboard'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
@@ -26,9 +32,17 @@ import {
   withEngine,
   type ConnectionForm,
 } from './form'
+import { CheckOption } from './CheckOption'
+import { FileField } from './FileField'
 import { messages, type ConnectionMessages } from './messages'
+import { panelId, tabId } from './sectionIds'
+import { SectionTabs, type SectionTab } from './SectionTabs'
+import { SshSection } from './SshSection'
+import { SslSection } from './SslSection'
 import { connectionUrl } from './url'
 import styles from './ConnectionDialog.module.css'
+
+type Section = 'general' | 'ssl' | 'ssh'
 
 type TestState = { status: 'idle' } | { status: 'testing' } | { status: 'ok' | 'error'; message: string }
 
@@ -70,6 +84,8 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
   const [saveError, setSaveError] = useState<string | null>(null)
   /** What a pasted URL held that the form can't, or `null` when nothing was pasted. */
   const [fromUrl, setFromUrl] = useState<string[] | null>(null)
+  const [chosenSection, setSection] = useState<Section>('general')
+  const ids = useId()
 
   const update = (changes: Partial<ConnectionForm>) => {
     setForm((current) => ({ ...current, ...changes }))
@@ -84,19 +100,6 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
     setTest({ status: 'idle' })
     setFromUrl(parsed.ignored)
     return true
-  }
-
-  /** Picks the SQLite file with the native dialog; cancelling keeps the current path. */
-  const browse = async () => {
-    const path = await open({
-      multiple: false,
-      directory: false,
-      filters: [
-        { name: m.sqliteFiles, extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
-        { name: m.allFiles, extensions: ['*'] },
-      ],
-    })
-    if (typeof path === 'string') update({ database: path })
   }
 
   const runTest = async () => {
@@ -143,6 +146,16 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
   ]
   const srv = form.engine === 'mongodb' && form.srv
   const database = databaseField(form.engine, m)
+  const sections = sectionsOf(form, m)
+  // An engine without the chosen section shows General.
+  const section = sections.some((tab) => tab.id === chosenSection) ? chosenSection : 'general'
+  const panel = (id: Section) => ({
+    role: 'tabpanel',
+    id: panelId(ids, id),
+    'aria-labelledby': tabId(ids, id),
+    hidden: section !== id,
+    className: styles.panel,
+  })
 
   return (
     <Modal
@@ -150,6 +163,13 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
       onClose={onClose}
       className={styles.dialog}
     >
+      <SectionTabs
+        label={m.sections}
+        idPrefix={ids}
+        tabs={sections}
+        selected={section}
+        onSelect={setSection}
+      />
       <form
         id="connection-form"
         className={styles.form}
@@ -158,185 +178,203 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
           if (canSubmit(form)) void save()
         }}
       >
-        <div className={styles.pair}>
-          <Select
-            label={m.engine}
-            info={m.engineInfo}
-            value={form.engine}
-            options={engineOptions}
-            onChange={(engine) => {
-              setForm((current) => withEngine(current, engine))
-              setTest({ status: 'idle' })
-              setFromUrl(null)
-            }}
-          />
-          <Select
-            label={m.environment}
-            info={m.tagInfo}
-            value={form.environment ?? ''}
-            options={tagOptions}
-            onChange={(id) => update({ environment: id || null })}
-          />
-        </div>
+        <div {...panel('general')}>
+          <div className={styles.pair}>
+            <Select
+              label={m.engine}
+              info={m.engineInfo}
+              value={form.engine}
+              options={engineOptions}
+              onChange={(engine) => {
+                setForm((current) => withEngine(current, engine))
+                setTest({ status: 'idle' })
+                setFromUrl(null)
+              }}
+            />
+            <Select
+              label={m.environment}
+              info={m.tagInfo}
+              value={form.environment ?? ''}
+              options={tagOptions}
+              onChange={(id) => update({ environment: id || null })}
+            />
+          </div>
 
-        <TextField
-          label={m.name}
-          help={m.nameHelp}
-          data-autofocus
-          required
-          value={form.name}
-          onChange={(e) => update({ name: e.target.value })}
-        />
+          <TextField
+            label={m.name}
+            help={m.nameHelp}
+            data-autofocus
+            required
+            value={form.name}
+            onChange={(e) => update({ name: e.target.value })}
+          />
 
-        {isFileEngine(form.engine) ? (
-          <div className={styles.fileRow}>
-            <TextField
+          {isFileEngine(form.engine) ? (
+            <FileField
               label={m.databaseFile}
               info={m.fileInfo}
               help={m.fileHint}
-              mono
               placeholder={m.databaseFilePlaceholder}
+              browseLabel={m.browse}
+              filters={[
+                { name: m.sqliteFiles, extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
+                { name: m.allFiles, extensions: ['*'] },
+              ]}
               value={form.database}
-              onChange={(e) => update({ database: e.target.value })}
+              onChange={(database) => update({ database })}
             />
-            <Button onClick={browse}>{m.browse}</Button>
-          </div>
-        ) : (
-          <>
-            {account ? (
-              <TextField
-                label={m.accountUri}
-                info={m.uriInfo}
-                mono
-                placeholder={m.uriPlaceholder}
-                aria-invalid={form.host.trim() !== '' && !canTest(form)}
-                value={form.host}
-                onChange={(e) => update({ host: e.target.value })}
-                // A connection string fills the URI and the key.
-                onPaste={(e) => {
-                  if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
-                }}
-                onBlur={() => fillFromUrl(form.host)}
-              />
-            ) : (
-              <div className={styles.hostRow}>
+          ) : (
+            <>
+              {account ? (
                 <TextField
-                  label={m.host}
-                  info={hostInfoOf(form.engine, m)}
+                  label={m.accountUri}
+                  info={m.uriInfo}
                   mono
-                  placeholder={hostHintOf(form.engine, m)}
+                  placeholder={m.uriPlaceholder}
+                  aria-invalid={form.host.trim() !== '' && !canTest(form)}
                   value={form.host}
                   onChange={(e) => update({ host: e.target.value })}
-                  // A connection URL, pasted or typed, fills the fields instead of staying in Host.
+                  // A connection string fills the URI and the key.
                   onPaste={(e) => {
                     if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
                   }}
                   onBlur={() => fillFromUrl(form.host)}
                 />
-                <TextField
-                  label={m.port}
-                  info={m.portInfo(ENGINES[form.engine].defaultPort)}
-                  mono
-                  inputMode="numeric"
-                  disabled={srv}
-                  aria-invalid={!srv && !isValidPort(form.port)}
-                  value={srv ? '' : form.port}
-                  placeholder={srv ? m.portFromDns : undefined}
-                  onChange={(e) => update({ port: e.target.value })}
-                />
-              </div>
-            )}
-            {fromUrl && (
-              <p className={styles.hint} role="status">
-                {account ? m.filledFromConnectionString : m.filledFromUrl}
-                {fromUrl.length > 0 && (
-                  <span className={styles.ignored}>{m.notCarriedOver(fromUrl.join(', '))}</span>
-                )}
-              </p>
-            )}
+              ) : (
+                <div className={styles.hostRow}>
+                  <TextField
+                    label={m.host}
+                    info={hostInfoOf(form.engine, m)}
+                    mono
+                    placeholder={hostHintOf(form.engine, m)}
+                    value={form.host}
+                    onChange={(e) => update({ host: e.target.value })}
+                    // A connection URL, pasted or typed, fills the fields instead of staying in Host.
+                    onPaste={(e) => {
+                      if (fillFromUrl(e.clipboardData.getData('text'))) e.preventDefault()
+                    }}
+                    onBlur={() => fillFromUrl(form.host)}
+                  />
+                  <TextField
+                    label={m.port}
+                    info={m.portInfo(ENGINES[form.engine].defaultPort)}
+                    mono
+                    inputMode="numeric"
+                    disabled={srv}
+                    aria-invalid={!srv && !isValidPort(form.port)}
+                    value={srv ? '' : form.port}
+                    placeholder={srv ? m.portFromDns : undefined}
+                    onChange={(e) => update({ port: e.target.value })}
+                  />
+                </div>
+              )}
+              {fromUrl && (
+                <p className={styles.hint} role="status">
+                  {account ? m.filledFromConnectionString : m.filledFromUrl}
+                  {fromUrl.length > 0 && (
+                    <span className={styles.ignored}>{m.notCarriedOver(fromUrl.join(', '))}</span>
+                  )}
+                </p>
+              )}
 
-            {database && (
-              <TextField
-                label={database.label}
-                help={database.help}
-                mono
-                value={form.database}
-                onChange={(e) => update({ database: e.target.value })}
-              />
-            )}
-
-            <div className={account ? undefined : styles.pair}>
-              {!account && (
+              {database && (
                 <TextField
-                  // Redis 6+ has ACL users; without ACLs the password alone is enough.
-                  label={form.engine === 'redis' ? m.redisUser : m.user}
-                  info={userInfoOf(form.engine, m)}
-                  placeholder={form.engine === 'redis' ? 'default' : undefined}
+                  label={database.label}
+                  help={database.help}
                   mono
-                  autoComplete="off"
-                  value={form.username}
-                  onChange={(e) => update({ username: e.target.value })}
+                  value={form.database}
+                  onChange={(e) => update({ database: e.target.value })}
                 />
               )}
-              <TextField
-                label={account ? m.key : m.password}
-                info={account ? m.keyInfo : m.passwordInfo}
-                mono
-                type="password"
-                autoComplete="new-password"
-                placeholder={connection ? m.unchanged : account ? m.keyPlaceholder : ''}
-                value={form.password}
-                onChange={(e) => update({ password: e.target.value })}
-              />
-            </div>
-            {/* The line is kept while the storage loads, so the form never moves. */}
-            <p className={styles.hint}>{storageNote(storage, account, m)}</p>
 
-            {ENGINES[form.engine].tls && (
-              <fieldset className={styles.options}>
-                <legend className={styles.legend}>{m.security}</legend>
-                {form.engine === 'mongodb' && (
-                  <Option
-                    label={m.srv}
-                    help={m.srvHelp}
-                    checked={form.srv}
-                    onChange={(checked) => update({ srv: checked, tls: form.tls || checked })}
-                  />
-                )}
+              <div className={account ? undefined : styles.pair}>
                 {!account && (
-                  <Option
-                    label={m.useTls}
-                    help={m.tlsHelp}
-                    checked={form.tls || srv}
-                    disabled={srv}
-                    onChange={(checked) => update({ tls: checked })}
+                  <TextField
+                    // Redis 6+ has ACL users; without ACLs the password alone is enough.
+                    label={form.engine === 'redis' ? m.redisUser : m.user}
+                    info={userInfoOf(form.engine, m)}
+                    placeholder={form.engine === 'redis' ? 'default' : undefined}
+                    mono
+                    autoComplete="off"
+                    value={form.username}
+                    onChange={(e) => update({ username: e.target.value })}
                   />
                 )}
-                <Option
-                  label={m.selfSigned}
-                  help={m.selfSignedHelp}
-                  checked={form.allowSelfSigned}
-                  disabled={account ? !/^https:/i.test(form.host.trim()) : !(form.tls || srv)}
-                  onChange={(checked) => update({ allowSelfSigned: checked })}
+                <TextField
+                  label={account ? m.key : m.password}
+                  info={account ? m.keyInfo : m.passwordInfo}
+                  mono
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={connection ? m.unchanged : account ? m.keyPlaceholder : ''}
+                  value={form.password}
+                  onChange={(e) => update({ password: e.target.value })}
                 />
-              </fieldset>
-            )}
+              </div>
+              {/* The line is kept while the storage loads, so the form never moves. */}
+              <p className={styles.hint}>{storageNote(storage, account, m)}</p>
 
-            <UrlPreview form={form} m={m} />
-          </>
+              {(form.engine === 'mongodb' || account) && (
+                <fieldset className={styles.options}>
+                  <legend className={styles.legend}>{m.security}</legend>
+                  {form.engine === 'mongodb' ? (
+                    <CheckOption
+                      label={m.srv}
+                      help={m.srvHelp}
+                      checked={form.srv}
+                      // A seed list is always reached over TLS.
+                      onChange={(checked) =>
+                        update({
+                          srv: checked,
+                          ssl:
+                            checked && !encrypts(form.ssl.mode)
+                              ? { ...form.ssl, mode: 'verify-full' }
+                              : form.ssl,
+                        })
+                      }
+                    />
+                  ) : (
+                    // An https URI encrypts; this picks whether its certificate is checked.
+                    <CheckOption
+                      label={m.selfSigned}
+                      help={m.selfSignedHelp}
+                      checked={form.ssl.mode === 'require'}
+                      disabled={!/^https:/i.test(form.host.trim())}
+                      onChange={(checked) =>
+                        update({ ssl: { ...form.ssl, mode: checked ? 'require' : 'verify-full' } })
+                      }
+                    />
+                  )}
+                </fieldset>
+              )}
+
+              <UrlPreview form={form} m={m} />
+            </>
+          )}
+
+          <Select
+            label={m.agentAccess}
+            info={m.agentAccessInfo}
+            value={form.agentAccess}
+            options={[
+              { value: 'none', label: m.agentNone },
+              { value: 'read', label: m.agentRead },
+              { value: 'write', label: m.agentWrite },
+            ]}
+            onChange={(agentAccess) => update({ agentAccess })}
+          />
+        </div>
+
+        {sections.some((tab) => tab.id === 'ssl') && (
+          <div {...panel('ssl')}>
+            <SslSection form={form} onChange={(ssl) => update({ ssl })} m={m} />
+          </div>
         )}
-
-        <Select
-          label={m.agentAccess}
-          info={m.agentAccessInfo}
-          value={form.agentAccess}
-          options={[
-            { value: 'none', label: m.agentNone },
-            { value: 'read', label: m.agentRead },
-            { value: 'write', label: m.agentWrite },
-          ]}
-          onChange={(agentAccess) => update({ agentAccess })}
-        />
+        {sections.some((tab) => tab.id === 'ssh') && (
+          <div {...panel('ssh')}>
+            <SshSection form={form} onChange={update} editing={connection !== undefined} m={m} />
+          </div>
+        )}
       </form>
 
       <footer className={styles.footer}>
@@ -380,6 +418,20 @@ function databaseField(engine: Engine, m: ConnectionMessages): { label: string; 
   }
 }
 
+/**
+ * The form's sections: SSL where the engine has more than one mode (an account's
+ * URI says it on General), SSH where its server can be tunneled to.
+ */
+function sectionsOf(form: ConnectionForm, m: ConnectionMessages): SectionTab<Section>[] {
+  const spec = ENGINES[form.engine]
+  const tabs: SectionTab<Section>[] = [{ id: 'general', label: m.general }]
+  if (spec.ssl.modes.length > 1 && spec.reach !== 'account') {
+    tabs.push({ id: 'ssl', label: m.sslSection, active: encrypts(form.ssl.mode), title: m.sslOn })
+  }
+  if (spec.tunnels) tabs.push({ id: 'ssh', label: m.sshSection, active: form.ssh.enabled, title: m.sshOn })
+  return tabs
+}
+
 function hostInfoOf(engine: Engine, m: ConnectionMessages): string {
   if (engine === 'mongodb') return m.hostPasteInfo('mongodb://')
   if (engine === 'redis') return m.hostPasteInfo('redis://')
@@ -390,36 +442,6 @@ function userInfoOf(engine: Engine, m: ConnectionMessages): string {
   if (engine === 'sqlserver') return m.sqlServerUserInfo
   if (engine === 'redis') return m.redisUserInfo
   return m.userInfo
-}
-
-/** A checkbox with what it does under its label. */
-function Option({
-  label,
-  help,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string
-  help: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <label className={styles.check}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span>
-        {label}
-        <span className={styles.optionHelp}>{help}</span>
-      </span>
-    </label>
-  )
 }
 
 /** Where the fields point, without the password, ready to copy. */

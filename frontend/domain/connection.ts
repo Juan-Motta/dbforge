@@ -14,14 +14,85 @@ export interface Connection {
   port: number
   database: string
   username: string
-  /** Encrypts the connection (Redis, MongoDB, and Cosmos DB unless it is the local emulator). */
-  tls: boolean
-  /** Accepts a certificate no authority signed, as development servers have. */
-  allowSelfSigned: boolean
+  /** How SSL/TLS is used and verified. */
+  ssl: Ssl
+  /** The SSH tunnel the server is reached through, when enabled. */
+  ssh: SshTunnel
   /** MongoDB: the host names a DNS seed list (`mongodb+srv://`). */
   srv: boolean
   /** What AI agents connected over MCP may do with it. */
   agentAccess: AgentAccess
+}
+
+/**
+ * How a connection uses SSL/TLS, from not at all to checking the server's
+ * certificate and its name. The names follow PostgreSQL's `sslmode`.
+ */
+export type SslMode = 'disable' | 'prefer' | 'require' | 'verify-ca' | 'verify-full'
+
+/** A connection's SSL/TLS settings. Files are PEM paths on this machine; empty when not used. */
+export interface Ssl {
+  mode: SslMode
+  /** Authorities to trust besides the system's. */
+  caFile: string
+  /** The client's certificate. For MongoDB it holds the key too. */
+  certFile: string
+  /** The client certificate's private key; empty for MongoDB. */
+  keyFile: string
+}
+
+/** How the SSH tunnel signs in: a password, a private key file, or the system's SSH agent. */
+export type SshAuth = 'password' | 'key' | 'agent'
+
+/** A tunnel through an SSH server that can reach the database. Its password or passphrase is never included. */
+export interface SshTunnel {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  auth: SshAuth
+  /** The private key, with `key` auth. */
+  keyFile: string
+}
+
+/** What an engine's driver can do with SSL/TLS. */
+export interface SslSupport {
+  /** The modes it can use, from least to most checking. */
+  modes: SslMode[]
+  /** It can trust an authority from a file. */
+  caFile: boolean
+  /** It can present a client certificate. */
+  clientCert: boolean
+  /** The certificate and its key are separate files (MongoDB reads one file with both). */
+  separateKey: boolean
+  /** It can check the server's name through an SSH tunnel, whose local end is all the driver sees. */
+  verifiesNameThroughSsh: boolean
+}
+
+/** An SSH tunnel that is off, as new connections and engines without a server have. */
+export const NO_SSH_TUNNEL: SshTunnel = {
+  enabled: false,
+  host: '',
+  port: 22,
+  username: '',
+  auth: 'password',
+  keyFile: '',
+}
+
+const NO_SSL: SslSupport = {
+  modes: ['disable'],
+  caFile: false,
+  clientCert: false,
+  separateKey: false,
+  verifiesNameThroughSsh: false,
+}
+
+const SQL_SSL: SslSupport = {
+  modes: ['disable', 'prefer', 'require', 'verify-ca', 'verify-full'],
+  caFile: true,
+  clientCert: true,
+  separateKey: true,
+  verifiesNameThroughSsh: false,
 }
 
 /** What an agent connected over MCP may do: nothing, read, or also change data. */
@@ -41,8 +112,10 @@ export interface EngineSpec {
   /** What a connection is: a server, a file (no host, port or user), or an account URI and key, as Azure gives them. */
   reach: 'server' | 'file' | 'account'
   defaultPort: number
-  /** Connections can turn TLS on in the form. */
-  tls: boolean
+  /** The SSL/TLS settings its driver can apply. */
+  ssl: SslSupport
+  /** Its server can be reached through an SSH tunnel: not a file, nor an account URL. */
+  tunnels: boolean
   /**
    * The schema to use when only a database is selected; `null` when databases
    * hold tables, collections or containers directly, with no schemas in between.
@@ -67,7 +140,8 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'relational',
     reach: 'server',
     defaultPort: 5432,
-    tls: false,
+    ssl: SQL_SSL,
+    tunnels: true,
     defaultSchema: 'public',
     dialect: 'postgres',
     dump: true,
@@ -79,7 +153,8 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'relational',
     reach: 'server',
     defaultPort: 3306,
-    tls: false,
+    ssl: SQL_SSL,
+    tunnels: true,
     defaultSchema: null,
     dialect: 'mysql',
     dump: false,
@@ -91,7 +166,8 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'relational',
     reach: 'server',
     defaultPort: 3306,
-    tls: false,
+    ssl: SQL_SSL,
+    tunnels: true,
     defaultSchema: null,
     dialect: 'mysql',
     dump: false,
@@ -103,7 +179,8 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'relational',
     reach: 'file',
     defaultPort: 0,
-    tls: false,
+    ssl: NO_SSL,
+    tunnels: false,
     // The schema of the opened file.
     defaultSchema: 'main',
     dialect: 'sqlite',
@@ -116,7 +193,15 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'relational',
     reach: 'server',
     defaultPort: 1433,
-    tls: false,
+    ssl: {
+      modes: ['disable', 'prefer', 'require', 'verify-full'],
+      caFile: true,
+      clientCert: true,
+      separateKey: true,
+      // Its driver checks the certificate's name apart from the address it connects to.
+      verifiesNameThroughSsh: true,
+    },
+    tunnels: true,
     defaultSchema: 'dbo',
     dialect: 'sqlserver',
     dump: false,
@@ -128,7 +213,14 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'document',
     reach: 'server',
     defaultPort: 27017,
-    tls: true,
+    ssl: {
+      modes: ['disable', 'require', 'verify-full'],
+      caFile: true,
+      clientCert: true,
+      separateKey: false,
+      verifiesNameThroughSsh: false,
+    },
+    tunnels: true,
     defaultSchema: null,
     dialect: 'mongodb',
     dump: false,
@@ -140,7 +232,8 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'document',
     reach: 'account',
     defaultPort: 443,
-    tls: true,
+    ssl: { ...NO_SSL, modes: ['disable', 'require', 'verify-full'] },
+    tunnels: false,
     defaultSchema: null,
     dialect: 'cosmosdb',
     dump: false,
@@ -152,7 +245,14 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     family: 'keyValue',
     reach: 'server',
     defaultPort: 6379,
-    tls: true,
+    ssl: {
+      modes: ['disable', 'require', 'verify-full'],
+      caFile: true,
+      clientCert: true,
+      separateKey: true,
+      verifiesNameThroughSsh: false,
+    },
+    tunnels: true,
     defaultSchema: null,
     // Not queried from a console; the dialect only colours the CLI's commands.
     dialect: 'postgres',
@@ -168,6 +268,24 @@ export const ENGINE_LIST = Object.keys(ENGINES) as Engine[]
 /** A SQLite connection is a database file: no host, port or user. */
 export function isFileEngine(engine: Engine): boolean {
   return ENGINES[engine].reach === 'file'
+}
+
+/** The SSL mode a new connection starts with: `prefer` where the engine has it, else no SSL. */
+export function defaultSslMode(engine: Engine): SslMode {
+  return ENGINES[engine].ssl.modes.includes('prefer') ? 'prefer' : 'disable'
+}
+
+/** The mode encrypts the connection, at least when the server allows it. */
+export function encrypts(mode: SslMode): boolean {
+  return mode !== 'disable'
+}
+
+/**
+ * Through an SSH tunnel the driver only sees the tunnel's local address, so
+ * only some can check the certificate names the server.
+ */
+export function sslModeWorksThroughSsh(engine: Engine, mode: SslMode): boolean {
+  return mode !== 'verify-full' || ENGINES[engine].ssl.verifiesNameThroughSsh
 }
 
 /** The database to use when none is selected; a SQLite file has only `main`. */

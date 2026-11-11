@@ -5,8 +5,10 @@ import type { Connection } from '../../domain/connection'
 /** Sent to the backend to create (no id), update or test a connection. */
 export interface ConnectionInput extends Omit<Connection, 'id'> {
   id?: string
-  /** Omit to keep the stored password. */
+  /** Omit to keep the stored password; empty clears it. */
   password?: string
+  /** The SSH password, or the private key's passphrase; omitted or empty as `password`. */
+  sshSecret?: string
 }
 
 /** Where connection passwords are kept. */

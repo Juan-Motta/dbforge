@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MenuItem } from '../components/ContextMenu'
-import type { Connection } from '../domain/connection'
+import { NO_SSH_TUNNEL, type Connection } from '../domain/connection'
 import { messages as adminMessages } from '../features/admin/messages'
 import type { TreeNode } from '../features/explorer/tree'
 import { explorerMenu, type MenuActions } from './explorerMenu'
@@ -15,8 +15,8 @@ const postgres: Connection = {
   port: 5432,
   database: 'shop',
   username: 'app',
-  tls: false,
-  allowSelfSigned: false,
+  ssl: { mode: 'prefer', caFile: '', certFile: '', keyFile: '' },
+  ssh: NO_SSH_TUNNEL,
   srv: false,
   agentAccess: 'none',
 }

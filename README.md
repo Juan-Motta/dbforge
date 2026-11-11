@@ -46,7 +46,7 @@ DBForge runs on Apple silicon and Intel Macs with **macOS 10.13** or later. It's
 | **Cosmos DB** | Containers as rows or as JSON items, and a SQL console per container |
 | **Redis** | A key browser by pattern and type, each type's editor, and a redis-cli console |
 
-Passwords stay in the macOS keychain, or in an encrypted file if you choose. Tag a connection as **PROD** and DBForge asks before anything changes it.
+Reach servers through an **SSH tunnel** — with a password, a private key or your SSH agent — and choose how **SSL** is used: from off to verifying the server's certificate and name, with your own CA and client certificates. Passwords stay in the macOS keychain, or in an encrypted file if you choose. Tag a connection as **PROD** and DBForge asks before anything changes it.
 
 ## Updates
 

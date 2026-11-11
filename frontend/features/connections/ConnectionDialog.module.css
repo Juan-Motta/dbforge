@@ -4,6 +4,58 @@
   height: min(640px, calc(100% - 32px));
 }
 
+/* The sections, under the title: always one row high, so no engine moves the form. */
+.tabs {
+  height: 36px;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 18px;
+  border-top: 1px solid var(--border);
+  flex: none;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+
+/* Shows the section's setting is on; it keeps its room when off. */
+.tabDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  visibility: hidden;
+}
+
+.tabDot[data-on] {
+  visibility: visible;
+}
+
 .form {
   flex: 1;
   min-height: 0;
@@ -15,6 +67,41 @@
   overflow: auto;
   /* Room for the scrollbar either way, so fields keep their width whatever the engine. */
   scrollbar-gutter: stable;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+/* The SSH fields, disabled together while the tunnel is off. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* A help line kept two lines high, so changing its text never moves what follows. */
+.note {
+  min-height: 32px;
+  margin: 5px 0 0;
+  color: var(--text3);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.warnNote,
+.warnText {
+  color: var(--warn);
 }
 
 .label {

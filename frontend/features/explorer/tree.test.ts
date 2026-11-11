@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Connection } from '../../domain/connection'
+import { NO_SSH_TUNNEL, type Connection } from '../../domain/connection'
 import type { DbObject } from './api'
 import { messages } from './messages'
 import {
@@ -25,8 +25,8 @@ const connection: Connection = {
   port: 5432,
   database: 'shop',
   username: 'app',
-  tls: false,
-  allowSelfSigned: false,
+  ssl: { mode: 'prefer', caFile: '', certFile: '', keyFile: '' },
+  ssh: NO_SSH_TUNNEL,
   srv: false,
   agentAccess: 'none',
 }

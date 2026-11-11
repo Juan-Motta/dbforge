@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Connection } from '../../domain/connection'
+import { NO_SSH_TUNNEL, type Connection } from '../../domain/connection'
 import { connectionFacts } from './connectionFacts'
 import { messages as shared } from '../../lib/messages'
 import { messages } from './messages'
@@ -13,8 +13,8 @@ const base: Connection = {
   port: 5432,
   database: 'shop',
   username: 'app',
-  tls: false,
-  allowSelfSigned: false,
+  ssl: { mode: 'prefer', caFile: '', certFile: '', keyFile: '' },
+  ssh: NO_SSH_TUNNEL,
   srv: false,
   agentAccess: 'none',
 }
@@ -25,26 +25,41 @@ describe('connectionFacts', () => {
       ['Server', 'PostgreSQL 16.2'],
       ['Address', 'app@db.internal:5432'],
       ['Database', 'shop'],
+      ['SSL', 'Prefer (when the server offers it)'],
     ])
   })
 
-  it('adds TLS where the connection can use it, and says when the server is still being asked', () => {
+  it('adds the SSH tunnel when it is on', () => {
+    const ssh = { ...NO_SSH_TUNNEL, enabled: true, host: 'bastion', port: 2222, username: 'ops' }
+    expect(connectionFacts({ ...base, ssh }, 'x', messages.en, shared.en)).toContainEqual([
+      'SSH',
+      'ops@bastion:2222',
+    ])
+    expect(
+      connectionFacts({ ...base, ssh: { ...ssh, enabled: false } }, 'x', messages.en, shared.en),
+    ).not.toContainEqual(['SSH', 'ops@bastion:2222'])
+  })
+
+  it('adds the SSL mode where the connection can use it, and says when the server is still being asked', () => {
     const redis = {
       ...base,
       engine: 'redis' as const,
       database: '',
       username: '',
-      tls: true,
-      allowSelfSigned: true,
+      ssl: { ...base.ssl, mode: 'require' as const },
     }
     expect(connectionFacts(redis, null, messages.en, shared.en)).toEqual([
       ['Server', 'Checking…'],
       ['Address', 'default user@db.internal:5432'],
-      ['TLS', 'On · self-signed certificate accepted'],
+      ['SSL', 'Require (any certificate)'],
     ])
-    expect(
-      connectionFacts({ ...base, engine: 'mongodb', database: '' }, 'x', messages.en, shared.en),
-    ).toContainEqual(['TLS', 'Off'])
+    const mongo = {
+      ...base,
+      engine: 'mongodb' as const,
+      database: '',
+      ssl: { ...base.ssl, mode: 'disable' as const },
+    }
+    expect(connectionFacts(mongo, 'x', messages.en, shared.en)).toContainEqual(['SSL', 'Off'])
   })
 
   it('shows a SQLite file as its path', () => {
@@ -56,9 +71,13 @@ describe('connectionFacts', () => {
   })
 
   it('writes the labels in Spanish', () => {
-    expect(
-      connectionFacts({ ...base, engine: 'mongodb', database: '' }, null, messages.es, shared.es),
-    ).toContainEqual(['TLS', 'Desactivado'])
+    const mongo = {
+      ...base,
+      engine: 'mongodb' as const,
+      database: '',
+      ssl: { ...base.ssl, mode: 'disable' as const },
+    }
+    expect(connectionFacts(mongo, null, messages.es, shared.es)).toContainEqual(['SSL', 'Desactivado'])
     expect(connectionFacts(base, null, messages.es, shared.es)[0]).toEqual(['Servidor', 'Comprobando…'])
     const noUser = { ...base, username: '' }
     expect(connectionFacts(noUser, null, messages.es, shared.es)[1]).toEqual([

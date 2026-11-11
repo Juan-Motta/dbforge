@@ -1,4 +1,4 @@
-import type { Connection } from '../../domain/connection'
+import { encrypts, type Connection, type SslMode } from '../../domain/connection'
 
 /**
  * A URL (or, for Cosmos DB, a connection string) that points at the
@@ -22,15 +22,17 @@ export function connectionUrl(connection: Connection): string {
     }
     case 'redis': {
       if (/^rediss?:\/\//.test(host)) return withoutPassword(host)
-      const scheme = connection.tls ? 'rediss' : 'redis'
-      const insecure = connection.tls && connection.allowSelfSigned ? '#insecure' : ''
+      const { mode } = connection.ssl
+      const scheme = encrypts(mode) ? 'rediss' : 'redis'
+      const insecure = mode === 'require' ? '#insecure' : ''
       return `${scheme}://${user}${host}:${port}${path}${insecure}`
     }
     case 'mongodb': {
       if (/^mongodb(\+srv)?:\/\//.test(host)) return withoutPassword(host)
       const options = new URLSearchParams()
-      if (connection.tls && !connection.srv) options.set('tls', 'true')
-      if (connection.tls && connection.allowSelfSigned) options.set('tlsAllowInvalidCertificates', 'true')
+      const { mode } = connection.ssl
+      if (encrypts(mode) && !connection.srv) options.set('tls', 'true')
+      if (mode === 'require') options.set('tlsAllowInvalidCertificates', 'true')
       const query = options.size > 0 ? `?${options}` : ''
       return connection.srv
         ? `mongodb+srv://${user}${host}/${encodeURIComponent(database)}${query}`
@@ -40,9 +42,27 @@ export function connectionUrl(connection: Connection): string {
     case 'mysql':
     case 'postgres': {
       const scheme = engine === 'postgres' ? 'postgresql' : engine
-      return `${scheme}://${user}${host}:${port}${path}`
+      return `${scheme}://${user}${host}:${port}${path}${sslQuery(engine, connection.ssl.mode)}`
     }
   }
+}
+
+/** MySQL's names for the SSL modes, as its `ssl-mode` option takes them. */
+const MYSQL_SSL_MODES: Record<SslMode, string> = {
+  disable: 'DISABLED',
+  prefer: 'PREFERRED',
+  require: 'REQUIRED',
+  'verify-ca': 'VERIFY_CA',
+  'verify-full': 'VERIFY_IDENTITY',
+}
+
+/**
+ * The SSL mode as a URL option, left out when it is `prefer`, the drivers'
+ * default. Certificate files and the SSH tunnel are this machine's, never in the URL.
+ */
+function sslQuery(engine: 'postgres' | 'mysql' | 'mariadb', mode: SslMode): string {
+  if (mode === 'prefer') return ''
+  return engine === 'postgres' ? `?sslmode=${mode}` : `?ssl-mode=${MYSQL_SSL_MODES[mode]}`
 }
 
 /** A URL saved whole as the host, with any password taken out. */

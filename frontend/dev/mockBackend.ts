@@ -6,7 +6,7 @@ import { clearRecordedStatements, recordMock, recordedStatements } from './mockS
 import { mockBackup } from './mockBackup'
 import { exposeMockApproval, mockMcp } from './mockMcp'
 import { mockIPC } from '@tauri-apps/api/mocks'
-import type { Connection } from '../domain/connection'
+import { NO_SSH_TUNNEL, type Connection } from '../domain/connection'
 import type { ConnectionInput } from '../features/connections/api'
 import type { DbObject } from '../features/explorer/api'
 import * as redis from './mockRedis'
@@ -21,8 +21,8 @@ const connections: Connection[] = [
     port: 5432,
     database: 'shop',
     username: 'app',
-    tls: false,
-    allowSelfSigned: false,
+    ssl: { mode: 'prefer', caFile: '', certFile: '', keyFile: '' },
+    ssh: NO_SSH_TUNNEL,
     srv: false,
     agentAccess: 'write',
   },
@@ -35,8 +35,8 @@ const connections: Connection[] = [
     port: 0,
     database: '/Users/demo/app.db',
     username: '',
-    tls: false,
-    allowSelfSigned: false,
+    ssl: { mode: 'disable', caFile: '', certFile: '', keyFile: '' },
+    ssh: NO_SSH_TUNNEL,
     srv: false,
     agentAccess: 'read',
   },
@@ -49,8 +49,15 @@ const connections: Connection[] = [
     port: 3306,
     database: 'app',
     username: 'app',
-    tls: false,
-    allowSelfSigned: false,
+    ssl: { mode: 'prefer', caFile: '', certFile: '', keyFile: '' },
+    ssh: {
+      enabled: true,
+      host: 'bastion.staging.internal',
+      port: 22,
+      username: 'deploy',
+      auth: 'key',
+      keyFile: '/Users/demo/.ssh/id_ed25519',
+    },
     srv: false,
     agentAccess: 'none',
   },
@@ -63,8 +70,8 @@ const connections: Connection[] = [
     port: 443,
     database: '',
     username: '',
-    tls: true,
-    allowSelfSigned: false,
+    ssl: { mode: 'verify-full', caFile: '', certFile: '', keyFile: '' },
+    ssh: NO_SSH_TUNNEL,
     srv: false,
     agentAccess: 'none',
   },
@@ -77,8 +84,8 @@ const connections: Connection[] = [
     port: 6379,
     database: '0',
     username: '',
-    tls: false,
-    allowSelfSigned: false,
+    ssl: { mode: 'disable', caFile: '', certFile: '', keyFile: '' },
+    ssh: NO_SSH_TUNNEL,
     srv: false,
     agentAccess: 'none',
   },
@@ -157,7 +164,7 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       // A copy, as the real backend's JSON is: React must never share the mock's array.
       return delay([...connections])
     case 'save_connection': {
-      const { password: _password, ...input } = payload.input as ConnectionInput
+      const { password: _password, sshSecret: _sshSecret, ...input } = payload.input as ConnectionInput
       const saved = { ...input, id: input.id ?? crypto.randomUUID() }
       const index = connections.findIndex((c) => c.id === saved.id)
       if (index >= 0) connections[index] = saved

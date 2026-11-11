@@ -6,6 +6,7 @@ import {
   ENGINES,
   hasDiagram,
   isRelationalDialect,
+  NO_SSH_TUNNEL,
   sqlDialectOf,
   type Connection,
 } from './connection'
@@ -71,8 +72,8 @@ describe('connectionAddress', () => {
     port: 5432,
     database: 'shop',
     username: 'app',
-    tls: false,
-    allowSelfSigned: false,
+    ssl: { mode: 'prefer', caFile: '', certFile: '', keyFile: '' },
+    ssh: NO_SSH_TUNNEL,
     srv: false,
     agentAccess: 'none',
   }
