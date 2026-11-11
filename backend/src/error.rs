@@ -43,15 +43,20 @@ pub(crate) fn http_message(error: &reqwest::Error) -> String {
     } else if cause.contains("failed to lookup address") || cause.contains("nodename nor servname") {
         "Could not find the host. Check its name, or that you are on the network that can see it.".into()
     } else if cause.contains("invalid peer certificate") || cause.contains("UnknownIssuer") {
-        format!(
-            "The server's TLS certificate isn't trusted ({cause}). If the server uses a self-signed \
-             certificate, turn on Accept self-signed certificate."
-        )
+        untrusted_certificate(&cause)
     } else if error.is_connect() {
         format!("Could not reach the server: {cause}")
     } else {
         cause
     }
+}
+
+/// What to do about a server certificate no trusted authority signed.
+fn untrusted_certificate(cause: &str) -> String {
+    format!(
+        "The server's TLS certificate isn't trusted ({cause}). Choose the authority that signed it in CA \
+         file, or set SSL mode to Require to encrypt without checking it."
+    )
 }
 
 /// The server's reply as redis-cli prints it (`WRONGTYPE Operation against…`).
@@ -66,10 +71,7 @@ pub(crate) fn redis_message(error: &redis::RedisError) -> String {
             "Could not find the host. Check its name, or that you are on the network that can see it.".into()
         }
         _ if error.is_connection_refusal() => format!("Could not reach the server: {error}"),
-        _ if error.to_string().contains("invalid peer certificate") => format!(
-            "The server's TLS certificate isn't trusted ({error}). If the server uses a self-signed \
-             certificate, turn on Accept self-signed certificate."
-        ),
+        _ if error.to_string().contains("invalid peer certificate") => untrusted_certificate(&error.to_string()),
         _ => error.to_string(),
     }
 }

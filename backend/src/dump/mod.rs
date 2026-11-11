@@ -24,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 use self::tools::Tool;
 use crate::connections::model::{Connection, Engine};
 use crate::connections::store::ConnectionStore;
+use crate::connections::transport::SslMode;
 use crate::drivers::postgres;
 use crate::error::{AppError, Result};
 use crate::files::partial_path;
@@ -201,6 +202,28 @@ fn connect_with(command: &mut Command, connection: &Connection, password: Option
     }
     if let Some(password) = password {
         command.env("PGPASSWORD", password);
+    }
+    let ssl = &connection.ssl;
+    command.env("PGSSLMODE", ssl_mode(ssl.mode));
+    if !ssl.ca_file.is_empty() {
+        command.env("PGSSLROOTCERT", &ssl.ca_file);
+    } else if ssl.mode.verifies() {
+        // As the app's own connections: the system's authorities (libpq 16 and later).
+        command.env("PGSSLROOTCERT", "system");
+    }
+    if !ssl.cert_file.is_empty() {
+        command.env("PGSSLCERT", &ssl.cert_file).env("PGSSLKEY", &ssl.key_file);
+    }
+}
+
+/// libpq's name for `mode`.
+fn ssl_mode(mode: SslMode) -> &'static str {
+    match mode {
+        SslMode::Disable => "disable",
+        SslMode::Prefer => "prefer",
+        SslMode::Require => "require",
+        SslMode::VerifyCa => "verify-ca",
+        SslMode::VerifyFull => "verify-full",
     }
 }
 
@@ -407,6 +430,31 @@ mod tests {
         .await
         .unwrap();
         assert!(dump_file_exists(file.display().to_string()));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the TLS PostgreSQL container on port 55433 and the client tools"]
+    async fn pg_dump_uses_the_ssl_mode_and_the_client_certificate() {
+        use crate::connections::transport::SslMode;
+        use crate::drivers::test_certs::{as_certuser, trusting};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tls.sql");
+        let certuser = |ssl, host: &str| Connection {
+            host: host.into(),
+            port: 55433,
+            username: "certuser".into(),
+            ssl,
+            ..local()
+        };
+        let dump = async |connection: Connection| {
+            let run = Run { tool: &pg_dump().await, cancel: &CancellationToken::new() };
+            export(&connection, None, "postgres", &file, &ALL, run, |_| {}).await
+        };
+        assert!(dump(certuser(trusting(SslMode::VerifyFull), "localhost")).await.is_err(), "no certificate");
+        let error = dump(certuser(as_certuser(SslMode::VerifyFull), "127.0.0.1")).await.unwrap_err().to_string();
+        assert!(error.contains("127.0.0.1"), "the name is checked: {error}");
+        dump(certuser(as_certuser(SslMode::VerifyFull), "localhost")).await.unwrap();
+        assert!(file.exists());
     }
 
     async fn pg_dump() -> Tool {

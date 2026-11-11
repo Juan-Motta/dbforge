@@ -13,7 +13,10 @@ mod read_only;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use redis::{AsyncConnectionConfig, Client, ConnectionAddr, ConnectionInfo, IntoConnectionInfo, RedisConnectionInfo};
+use redis::{
+    AsyncConnectionConfig, Client, ClientTlsConfig, ConnectionAddr, ConnectionInfo, IntoConnectionInfo,
+    RedisConnectionInfo, TlsCertificates,
+};
 use serde::Serialize;
 
 pub use admin::create_user;
@@ -25,6 +28,7 @@ pub use read_only::run_read_only;
 
 use super::{DbObject, ObjectKind};
 use crate::connections::model::Connection;
+use crate::connections::transport::Ssl;
 use crate::error::{AppError, Result};
 
 /// How long browsing waits for a reply; consoles wait as long as a command takes.
@@ -70,8 +74,29 @@ pub(crate) async fn connect(
     let config = AsyncConnectionConfig::new()
         .set_connection_timeout(Some(CONNECT_TIMEOUT))
         .set_response_timeout(response_timeout);
-    let inner = Client::open(info)?.get_multiplexed_async_connection_with_config(&config).await?;
+    let inner = client(info, &connection.ssl)?.get_multiplexed_async_connection_with_config(&config).await?;
     Ok(LoggedConnection::new(inner, db))
+}
+
+/// A client for `info`, trusting the authority and presenting the client
+/// certificate that `ssl` names, when it names them.
+fn client(info: ConnectionInfo, ssl: &Ssl) -> Result<Client> {
+    if !ssl.mode.encrypts() || (ssl.ca_file.is_empty() && ssl.cert_file.is_empty()) {
+        return Ok(Client::open(info)?);
+    }
+    let read = |what: &str, path: &str| {
+        std::fs::read(path).map_err(|error| AppError::Invalid(format!("Could not read the {what} {path}: {error}")))
+    };
+    let root_cert = if ssl.ca_file.is_empty() { None } else { Some(read("CA file", &ssl.ca_file)?) };
+    let client_tls = if ssl.cert_file.is_empty() {
+        None
+    } else {
+        Some(ClientTlsConfig {
+            client_cert: read("client certificate", &ssl.cert_file)?,
+            client_key: read("client key", &ssl.key_file)?,
+        })
+    };
+    Ok(Client::build_with_tls(info, TlsCertificates { client_tls, root_cert })?)
 }
 
 fn is_url(host: &str) -> bool {
@@ -275,7 +300,23 @@ pub(super) mod tests {
         let verified = Connection { ssl: Ssl { mode: SslMode::VerifyFull, ..Ssl::default() }, ..tls };
         let error = server_version(&verified, PASSWORD).await.unwrap_err().to_string();
         assert!(error.starts_with("The server's TLS certificate isn't trusted"), "{error}");
-        assert!(error.contains("Accept self-signed certificate"), "{error}");
+        assert!(error.contains("set SSL mode to Require"), "{error}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the TLS Redis container on port 56381, which asks for a client certificate"]
+    async fn ssl_modes_check_what_they_say() {
+        use crate::drivers::test_certs::{as_certuser, trusting};
+        let server = |ssl: Ssl, host: &str| Connection { host: host.into(), port: 56381, ssl, ..local() };
+        let ok = async |ssl: Ssl, host: &str| server_version(&server(ssl, host), PASSWORD).await;
+
+        assert!(ok(trusting(SslMode::VerifyFull), "localhost").await.is_err(), "no client certificate");
+        let any = Ssl { mode: SslMode::Require, ..as_certuser(SslMode::Require) };
+        assert!(ok(any, "127.0.0.1").await.is_ok(), "any server certificate");
+        let unknown = Ssl { ca_file: String::new(), ..as_certuser(SslMode::VerifyFull) };
+        assert!(ok(unknown, "localhost").await.is_err(), "unknown authority");
+        assert!(ok(as_certuser(SslMode::VerifyFull), "127.0.0.1").await.is_err(), "the certificate names localhost");
+        assert!(ok(as_certuser(SslMode::VerifyFull), "localhost").await.is_ok());
     }
 
     #[tokio::test]

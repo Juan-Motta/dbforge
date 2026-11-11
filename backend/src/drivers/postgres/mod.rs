@@ -3,7 +3,7 @@ use std::time::Instant;
 use either::Either;
 use futures_util::TryStreamExt;
 use futures_util::stream::BoxStream;
-use sqlx::postgres::{PgConnectOptions, PgConnection, PgQueryResult, PgRow};
+use sqlx::postgres::{PgConnectOptions, PgConnection, PgQueryResult, PgRow, PgSslMode};
 use sqlx::{AssertSqlSafe, Connection as _, Row, ValueRef};
 
 mod admin;
@@ -24,6 +24,7 @@ use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, TableRef, with_timeout,
 };
 use crate::connections::model::Connection;
+use crate::connections::transport::{Ssl, SslMode};
 use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 use crate::statement_log;
@@ -44,8 +45,10 @@ async fn connect_with(
     database: Option<&str>,
     adjust: impl FnOnce(PgConnectOptions) -> PgConnectOptions,
 ) -> Result<Conn> {
-    let mut options =
-        PgConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username);
+    let mut options = with_ssl(
+        PgConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username),
+        &connection.ssl,
+    );
     let database = database.unwrap_or(&connection.database);
     if !database.is_empty() {
         options = options.database(database);
@@ -54,6 +57,27 @@ async fn connect_with(
         options = options.password(password);
     }
     Ok(Logged::new(PgConnection::connect_with(&adjust(options)).await?, Some(database)))
+}
+
+/// `options` using SSL as `ssl` says, with its certificate files.
+fn with_ssl(options: PgConnectOptions, ssl: &Ssl) -> PgConnectOptions {
+    if ssl.mode.encrypts() {
+        super::install_crypto();
+    }
+    let mut options = options.ssl_mode(match ssl.mode {
+        SslMode::Disable => PgSslMode::Disable,
+        SslMode::Prefer => PgSslMode::Prefer,
+        SslMode::Require => PgSslMode::Require,
+        SslMode::VerifyCa => PgSslMode::VerifyCa,
+        SslMode::VerifyFull => PgSslMode::VerifyFull,
+    });
+    if !ssl.ca_file.is_empty() {
+        options = options.ssl_root_cert(&ssl.ca_file);
+    }
+    if !ssl.cert_file.is_empty() {
+        options = options.ssl_client_cert(&ssl.cert_file).ssl_client_key(&ssl.key_file);
+    }
+    options
 }
 
 /// Whether the server has a database named `name`.
@@ -440,6 +464,33 @@ pub(crate) mod tests {
             srv: false,
             agent_access: Default::default(),
         }
+    }
+
+    /// The TLS server `scripts/test-tls-certs.sh` documents, on port 55433:
+    /// its certificate names `localhost`, and `certuser` signs in with a
+    /// client certificate only.
+    fn tls_server(ssl: Ssl, host: &str) -> Connection {
+        Connection { host: host.into(), port: 55433, database: "postgres".into(), ssl, ..local() }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the TLS PostgreSQL container on port 55433"]
+    async fn ssl_modes_check_what_they_say() {
+        use crate::connections::transport::SslMode::*;
+        use crate::drivers::test_certs::{as_certuser, trusting};
+        let ok = async |ssl: Ssl, host: &str| server_version(&tls_server(ssl, host), PASSWORD).await;
+
+        assert!(ok(Ssl { mode: Require, ..Ssl::default() }, "127.0.0.1").await.is_ok(), "any certificate");
+        assert!(ok(Ssl { mode: VerifyCa, ..Ssl::default() }, "127.0.0.1").await.is_err(), "unknown authority");
+        assert!(ok(trusting(VerifyCa), "127.0.0.1").await.is_ok(), "the CA, whatever the name");
+        let error = ok(trusting(VerifyFull), "127.0.0.1").await.unwrap_err().to_string();
+        assert!(!error.is_empty(), "the certificate names localhost, not 127.0.0.1");
+        assert!(ok(trusting(VerifyFull), "localhost").await.is_ok());
+
+        // certuser has no password: only its certificate signs it in.
+        let certuser = |ssl: Ssl| Connection { username: "certuser".into(), ..tls_server(ssl, "localhost") };
+        assert!(server_version(&certuser(trusting(VerifyFull)), None).await.is_err());
+        assert!(server_version(&certuser(as_certuser(VerifyFull)), None).await.is_ok());
     }
 
     fn names(objects: &[DbObject]) -> Vec<&str> {

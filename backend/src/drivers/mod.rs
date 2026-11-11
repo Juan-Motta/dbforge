@@ -945,3 +945,31 @@ fn hex(bytes: &[u8]) -> String {
 async fn with_timeout<T>(request: impl Future<Output = Result<T>>) -> Result<T> {
     tokio::time::timeout(TIMEOUT, request).await.map_err(|_| AppError::Timeout(TIMEOUT.as_secs()))?
 }
+
+/// The certificates the TLS container tests use, made by
+/// `scripts/test-tls-certs.sh` in `DBFORGE_TEST_CERTS` (default
+/// `~/.cache/dbforge-test-certs`): a test authority, a server certificate for
+/// `localhost`, and a client certificate for the user `certuser`.
+#[cfg(test)]
+pub(crate) mod test_certs {
+    use crate::connections::transport::{Ssl, SslMode};
+
+    /// The path of `name` (`ca.crt`, `client.crt`, `client.key`, `client.pem`…).
+    pub fn path(name: &str) -> String {
+        let dir = std::env::var("DBFORGE_TEST_CERTS")
+            .unwrap_or_else(|_| format!("{}/.cache/dbforge-test-certs", std::env::var("HOME").unwrap()));
+        let path = format!("{dir}/{name}");
+        assert!(std::path::Path::new(&path).is_file(), "{path} is missing: run scripts/test-tls-certs.sh");
+        path
+    }
+
+    /// `mode`, trusting the test authority.
+    pub fn trusting(mode: SslMode) -> Ssl {
+        Ssl { mode, ca_file: path("ca.crt"), ..Ssl::default() }
+    }
+
+    /// `mode`, trusting the test authority and presenting `certuser`'s certificate.
+    pub fn as_certuser(mode: SslMode) -> Ssl {
+        Ssl { cert_file: path("client.crt"), key_file: path("client.key"), ..trusting(mode) }
+    }
+}

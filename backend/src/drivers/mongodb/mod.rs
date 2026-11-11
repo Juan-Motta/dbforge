@@ -84,6 +84,10 @@ async fn options(connection: &Connection, password: Option<&str>) -> Result<Clie
     if connection.ssl.mode.encrypts() && !uri {
         let mut tls = TlsOptions::default();
         tls.allow_invalid_certificates = Some(!connection.ssl.mode.verifies());
+        let file = |path: &str| (!path.is_empty()).then(|| std::path::PathBuf::from(path));
+        tls.ca_file_path = file(&connection.ssl.ca_file);
+        // One file with the certificate and its key, as the driver reads it.
+        tls.cert_key_file_path = file(&connection.ssl.cert_file);
         options.tls = Some(Tls::Enabled(tls));
     }
     options.app_name = Some("DBForge".into());
@@ -558,6 +562,32 @@ pub(super) mod tests {
         let verified = Connection { ssl: Ssl { mode: SslMode::VerifyFull, ..Ssl::default() }, ..tls };
         let Some(Tls::Enabled(settings)) = options(&verified, PASSWORD).await.unwrap().tls else { panic!("no TLS") };
         assert_eq!(settings.allow_invalid_certificates, Some(false));
+        let files = Connection {
+            ssl: Ssl { ca_file: "/ca.crt".into(), cert_file: "/me.pem".into(), ..verified.ssl },
+            ..local()
+        };
+        let Some(Tls::Enabled(settings)) = options(&files, PASSWORD).await.unwrap().tls else { panic!("no TLS") };
+        assert_eq!(settings.ca_file_path.as_deref(), Some(std::path::Path::new("/ca.crt")));
+        assert_eq!(settings.cert_key_file_path.as_deref(), Some(std::path::Path::new("/me.pem")));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the TLS MongoDB container on port 57018"]
+    async fn ssl_modes_check_what_they_say() {
+        use crate::drivers::test_certs::{path, trusting};
+        let server = |ssl: Ssl, host: &str| Connection { host: host.into(), port: 57018, ssl, ..local() };
+        let ok = async |ssl: Ssl, host: &str| server_version(&server(ssl, host), PASSWORD).await;
+
+        assert!(ok(Ssl::default(), "127.0.0.1").await.is_err(), "the server only speaks TLS");
+        assert!(ok(Ssl { mode: SslMode::Require, ..Ssl::default() }, "127.0.0.1").await.is_ok(), "any certificate");
+        assert!(
+            ok(Ssl { mode: SslMode::VerifyFull, ..Ssl::default() }, "localhost").await.is_err(),
+            "unknown authority"
+        );
+        assert!(ok(trusting(SslMode::VerifyFull), "127.0.0.1").await.is_err(), "the certificate names localhost");
+        assert!(ok(trusting(SslMode::VerifyFull), "localhost").await.is_ok());
+        let with_cert = Ssl { cert_file: path("client.pem"), ..trusting(SslMode::VerifyFull) };
+        assert!(ok(with_cert, "localhost").await.is_ok(), "the client certificate is presented");
     }
 
     #[tokio::test]

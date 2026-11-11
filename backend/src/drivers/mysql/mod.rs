@@ -23,7 +23,7 @@ use std::time::Instant;
 use either::Either;
 use futures_util::TryStreamExt;
 use futures_util::stream::BoxStream;
-use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlQueryResult, MySqlRow};
+use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlQueryResult, MySqlRow, MySqlSslMode};
 use sqlx::{AssertSqlSafe, Column as _, Connection as _, Row, TypeInfo};
 
 use super::logged::Logged;
@@ -32,6 +32,7 @@ use super::{
     Column, DbObject, ObjectKind, QueryOutcome, Relation, RelationList, RowSink, RowsPage, TableRef, hex, with_timeout,
 };
 use crate::connections::model::{Connection, Engine};
+use crate::connections::transport::{Ssl, SslMode};
 use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 
@@ -42,8 +43,10 @@ pub(super) type Conn = Logged<MySqlConnection>;
 const SYSTEM_DATABASES: &str = "('mysql', 'information_schema', 'performance_schema', 'sys')";
 
 async fn connect(connection: &Connection, password: Option<&str>, database: Option<&str>) -> Result<Conn> {
-    let mut options =
-        MySqlConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username);
+    let mut options = with_ssl(
+        MySqlConnectOptions::new().host(&connection.host).port(connection.port).username(&connection.username),
+        &connection.ssl,
+    );
     let database = database.unwrap_or(&connection.database);
     if !database.is_empty() {
         options = options.database(database);
@@ -52,6 +55,27 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
         options = options.password(password);
     }
     Ok(Logged::new(MySqlConnection::connect_with(&options).await?, Some(database)))
+}
+
+/// `options` using SSL as `ssl` says, with its certificate files.
+fn with_ssl(options: MySqlConnectOptions, ssl: &Ssl) -> MySqlConnectOptions {
+    if ssl.mode.encrypts() {
+        super::install_crypto();
+    }
+    let mut options = options.ssl_mode(match ssl.mode {
+        SslMode::Disable => MySqlSslMode::Disabled,
+        SslMode::Prefer => MySqlSslMode::Preferred,
+        SslMode::Require => MySqlSslMode::Required,
+        SslMode::VerifyCa => MySqlSslMode::VerifyCa,
+        SslMode::VerifyFull => MySqlSslMode::VerifyIdentity,
+    });
+    if !ssl.ca_file.is_empty() {
+        options = options.ssl_ca(&ssl.ca_file);
+    }
+    if !ssl.cert_file.is_empty() {
+        options = options.ssl_client_cert(&ssl.cert_file).ssl_client_key(&ssl.key_file);
+    }
+    options
 }
 
 /// MariaDB reports a version like `11.4.13-MariaDB-ubu2404`; only the number is kept.
@@ -388,6 +412,32 @@ mod tests {
     use crate::connections::model::Engine;
 
     pub(super) const PASSWORD: Option<&str> = Some("dbforge");
+
+    #[tokio::test]
+    #[ignore = "needs the TLS MySQL container on port 53316"]
+    async fn ssl_modes_check_what_they_say() {
+        use crate::connections::transport::SslMode::*;
+        use crate::drivers::test_certs::{as_certuser, trusting};
+        let server = |ssl: Ssl, host: &str| Connection {
+            host: host.into(),
+            port: 53316,
+            database: String::new(),
+            ssl,
+            ..local()
+        };
+        let ok = async |ssl: Ssl, host: &str| server_version(&server(ssl, host), PASSWORD).await;
+
+        assert!(ok(Ssl { mode: Require, ..Ssl::default() }, "127.0.0.1").await.is_ok(), "any certificate");
+        assert!(ok(Ssl { mode: VerifyCa, ..Ssl::default() }, "127.0.0.1").await.is_err(), "unknown authority");
+        assert!(ok(trusting(VerifyCa), "127.0.0.1").await.is_ok(), "the CA, whatever the name");
+        assert!(ok(trusting(VerifyFull), "127.0.0.1").await.is_err(), "the certificate names localhost");
+        assert!(ok(trusting(VerifyFull), "localhost").await.is_ok());
+
+        // certuser is created REQUIRE X509, with no password.
+        let certuser = |ssl: Ssl| Connection { username: "certuser".into(), ..server(ssl, "localhost") };
+        assert!(server_version(&certuser(trusting(VerifyFull)), None).await.is_err());
+        assert!(server_version(&certuser(as_certuser(VerifyFull)), None).await.is_ok());
+    }
 
     pub(super) fn local() -> Connection {
         Connection {

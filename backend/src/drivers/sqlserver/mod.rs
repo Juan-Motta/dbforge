@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use futures_util::TryStreamExt;
 use tiberius::time::chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
-use tiberius::{AuthMethod, ColumnData, ColumnType, Config, FromSql, QueryItem, Row};
+use tiberius::{AuthMethod, ColumnData, ColumnType, Config, EncryptionLevel, FromSql, QueryItem, Row};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
@@ -35,6 +35,7 @@ use super::{
     hex, with_timeout,
 };
 use crate::connections::model::Connection;
+use crate::connections::transport::{Ssl, SslMode};
 use crate::drivers::Ran;
 use crate::error::{AppError, Result};
 
@@ -53,9 +54,7 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
         config.database(database);
     }
     config.authentication(AuthMethod::sql_server(&connection.username, password.unwrap_or_default()));
-    // Traffic is encrypted, but the certificate isn't checked: servers usually
-    // present a self-signed one. PostgreSQL and MySQL connections do the same.
-    config.trust_cert();
+    apply_ssl(&mut config, &connection.ssl, &connection.host);
 
     let tcp = TcpStream::connect(config.get_addr())
         .await
@@ -63,6 +62,30 @@ async fn connect(connection: &Connection, password: Option<&str>, database: Opti
     tcp.set_nodelay(true).map_err(|e| AppError::Invalid(e.to_string()))?;
     let client = tiberius::Client::connect(config, tcp.compat_write()).await?;
     Ok(LoggedClient::new(client, Some(database)))
+}
+
+/// Applies `ssl` to `config`. The certificate's name is checked against
+/// `host`, the server's own name, whatever address the connection goes to.
+fn apply_ssl(config: &mut Config, ssl: &Ssl, host: &str) {
+    if ssl.mode.encrypts() {
+        super::install_crypto();
+    }
+    config.encryption(match ssl.mode {
+        SslMode::Disable => EncryptionLevel::NotSupported,
+        SslMode::Prefer => EncryptionLevel::On,
+        SslMode::Require | SslMode::VerifyCa | SslMode::VerifyFull => EncryptionLevel::Required,
+    });
+    if ssl.mode.verifies() {
+        config.hostname_in_certificate(host);
+        if !ssl.ca_file.is_empty() {
+            config.trust_cert_ca(&ssl.ca_file);
+        }
+    } else {
+        config.trust_cert();
+    }
+    if !ssl.cert_file.is_empty() {
+        config.client_certificate(&ssl.cert_file, &ssl.key_file);
+    }
 }
 
 /// Runs a query that returns rows and turns every value into text.
@@ -597,6 +620,22 @@ pub(super) mod tests {
     use crate::connections::model::Engine;
 
     pub const PASSWORD: Option<&str> = Some("DbForge#2026");
+
+    #[tokio::test]
+    #[ignore = "needs the SQL Server container on port 51434 with the test certificate"]
+    async fn ssl_modes_check_what_they_say() {
+        use crate::connections::transport::SslMode::*;
+        use crate::drivers::test_certs::trusting;
+        let server = |ssl: Ssl, host: &str| Connection { host: host.into(), port: 51434, ssl, ..local() };
+        let ok = async |ssl: Ssl, host: &str| server_version(&server(ssl, host), PASSWORD).await;
+
+        for mode in [Disable, Prefer, Require] {
+            assert!(ok(Ssl { mode, ..Ssl::default() }, "127.0.0.1").await.is_ok(), "{mode:?}");
+        }
+        assert!(ok(Ssl { mode: VerifyFull, ..Ssl::default() }, "localhost").await.is_err(), "unknown authority");
+        assert!(ok(trusting(VerifyFull), "127.0.0.1").await.is_err(), "the certificate names localhost");
+        assert!(ok(trusting(VerifyFull), "localhost").await.is_ok());
+    }
 
     pub fn local() -> Connection {
         Connection {
