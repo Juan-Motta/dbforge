@@ -115,17 +115,22 @@ fn candidates(name: &str) -> Vec<PathBuf> {
 
 /// The directories a place stands for: itself, or one per match of its `*`.
 fn expand(place: &Path) -> Vec<PathBuf> {
-    let text = place.to_string_lossy();
-    let Some((before, after)) = text.split_once('*') else { return vec![place.to_path_buf()] };
-    // The `*` is inside one path component: `postgresql@*` or a whole `*`.
-    let (parent, prefix) = before.rsplit_once('/').unwrap_or(("", before));
-    let (suffix, rest) = after.split_once('/').map_or((after, ""), |(suffix, rest)| (suffix, rest));
-    let Ok(entries) = std::fs::read_dir(if parent.is_empty() { "/" } else { parent }) else { return Vec::new() };
+    // The `*` is inside one path component: `postgresql@*` or a whole `*`. Components, not `/`, so
+    // Windows paths (`C:\Program Files\PostgreSQL\*\bin`) split the same way.
+    let components: Vec<_> = place.components().collect();
+    let Some(at) = components.iter().position(|part| part.as_os_str().to_string_lossy().contains('*')) else {
+        return vec![place.to_path_buf()];
+    };
+    let parent: PathBuf = components[..at].iter().collect();
+    let rest: PathBuf = components[at + 1..].iter().collect();
+    let pattern = components[at].as_os_str().to_string_lossy();
+    let (prefix, suffix) = pattern.split_once('*').expect("checked");
+    let Ok(entries) = std::fs::read_dir(&parent) else { return Vec::new() };
     let mut matches: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .filter(|name| name.starts_with(prefix) && name.ends_with(suffix) && name.len() >= prefix.len() + suffix.len())
-        .map(|name| Path::new(parent).join(name).join(rest))
+        .map(|name| parent.join(name).join(&rest))
         .collect();
     matches.sort();
     matches
