@@ -267,8 +267,10 @@ export function ImportDatabaseDialog({
       setStatus({
         state: 'done',
         title: done.created ? m.createdAndRestored(name, time) : m.restored(name, time),
-        detail: fileNameOf(path),
-        mono: true,
+        // What the import left out matters more than the file's name.
+        ...(done.skippedExtensions.length > 0
+          ? { detail: m.skippedExtensions(done.skippedExtensions.join(', ')), mono: false }
+          : { detail: fileNameOf(path), mono: true }),
       })
       setImports((n) => n + 1)
       onImported()

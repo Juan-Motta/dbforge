@@ -92,6 +92,14 @@ pub async fn database_exists(connection: &Connection, password: Option<&str>, na
     Ok(exists)
 }
 
+/// The extensions the server can install, whichever database asks.
+pub async fn available_extensions(connection: &Connection, password: Option<&str>) -> Result<Vec<String>> {
+    let mut conn = connect(connection, password, None).await?;
+    let names = sqlx::query_scalar("SELECT name FROM pg_available_extensions").fetch_all(&mut conn).await?;
+    conn.close().await?;
+    Ok(names)
+}
+
 /// Creates an empty database named `name`, owned by the connection's user.
 pub async fn create_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
     run_on_server(connection, password, &format!("CREATE DATABASE {}", quote_ident(name))).await

@@ -72,6 +72,7 @@ export const messages = defineMessages({
     createdAndRestored: (database: string, time: string) =>
       `Created ${database} and imported the file in ${time}`,
     restored: (database: string, time: string) => `Imported into ${database} in ${time}`,
+    skippedExtensions: (names: string) => `Left out extensions this server doesn’t have: ${names}`,
     importStopped: 'Import stopped. Nothing was changed.',
     importFailed: 'Import failed. Nothing was changed.',
     importing: 'Importing…',
@@ -156,6 +157,7 @@ export const messages = defineMessages({
     createdAndRestored: (database: string, time: string) =>
       `Se creó ${database} y se importó el archivo en ${time}`,
     restored: (database: string, time: string) => `Importado en ${database} en ${time}`,
+    skippedExtensions: (names: string) => `Se omitieron extensiones que este servidor no tiene: ${names}`,
     importStopped: 'Importación detenida. No se cambió nada.',
     importFailed: 'La importación falló. No se cambió nada.',
     importing: 'Importando…',

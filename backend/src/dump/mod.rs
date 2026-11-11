@@ -5,14 +5,17 @@
 //! where other users could read them.
 //!
 //! A restore runs in one transaction and stops at the first error, so a failed
-//! one changes nothing; a database created for it is dropped again.
+//! one changes nothing; a database created for it is dropped again. Extensions
+//! the file creates that the server doesn't have are left out (see [`extensions`]).
 
 mod exports;
+mod extensions;
 mod tool_paths;
 mod tools;
 
 pub use tool_paths::ToolPaths;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -64,6 +67,8 @@ pub struct Imported {
     /// The database didn't exist and was created for the restore.
     pub created: bool,
     pub elapsed_ms: u64,
+    /// Extensions the file creates that the server doesn't have, so the restore left them out.
+    pub skipped_extensions: Vec<String>,
 }
 
 /// Writes `database` to `path` as plain SQL. The dump goes to a file beside it
@@ -141,6 +146,8 @@ pub async fn import(
     let started = Instant::now();
     let stop = || if cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) };
     stop()?;
+    let script = Script::of(connection, password, path).await?;
+    stop()?;
     let created = !postgres::database_exists(connection, password, database).await?;
     stop()?;
     if created {
@@ -152,9 +159,13 @@ pub async fn import(
     connect_with(&mut command, connection, &route, password, database, &session);
     command
         .args(["--no-psqlrc", "--no-password", "--set", "ON_ERROR_STOP=1", "--single-transaction", "--file"])
-        .arg(path);
-    let Err(error) = tools::run(command, cancel, on_line).await else {
-        return Ok(Imported { created, elapsed_ms: started.elapsed().as_millis() as u64 });
+        .arg(script.path(path));
+    let Err(error) = tools::run(command, cancel, on_line).await.map_err(|error| script.as_written(error, path)) else {
+        return Ok(Imported {
+            created,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            skipped_extensions: script.skipped,
+        });
     };
     // Killing psql leaves its session working on the server: end it, which rolls the transaction back.
     let mut problems = Vec::new();
@@ -168,6 +179,51 @@ pub async fn import(
         problems.push(format!("The database {database} created for the import couldn't be removed: {problem}"));
     }
     if problems.is_empty() { Err(error) } else { Err(AppError::Invalid(format!("{error}\n{}", problems.join("\n")))) }
+}
+
+/// The script psql runs: the file itself, or a copy without the extensions the
+/// server doesn't have.
+struct Script {
+    copy: Option<tempfile::NamedTempFile>,
+    skipped: Vec<String>,
+}
+
+impl Script {
+    async fn of(connection: &Connection, password: Option<&str>, path: &Path) -> Result<Self> {
+        let file = path.to_path_buf();
+        let requested = blocking(move || extensions::requested(&file)).await?;
+        if requested.is_empty() {
+            return Ok(Self { copy: None, skipped: Vec::new() });
+        }
+        let available = postgres::available_extensions(connection, password).await?;
+        let missing: BTreeSet<String> = requested.into_iter().filter(|name| !available.contains(name)).collect();
+        if missing.is_empty() {
+            return Ok(Self { copy: None, skipped: Vec::new() });
+        }
+        let file = path.to_path_buf();
+        let left_out = missing.clone();
+        let copy = blocking(move || extensions::without(&file, &left_out)).await?;
+        Ok(Self { copy: Some(copy), skipped: missing.into_iter().collect() })
+    }
+
+    fn path<'a>(&'a self, original: &'a Path) -> &'a Path {
+        self.copy.as_ref().map_or(original, |copy| copy.path())
+    }
+
+    /// psql names the script it ran in its errors: the original file, not the copy.
+    fn as_written(&self, error: AppError, original: &Path) -> AppError {
+        match (&self.copy, error) {
+            (Some(copy), AppError::Invalid(text)) => {
+                AppError::Invalid(text.replace(&copy.path().display().to_string(), &original.display().to_string()))
+            }
+            (_, error) => error,
+        }
+    }
+}
+
+/// Runs file work off the async threads.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> std::io::Result<T> + Send + 'static) -> Result<T> {
+    Ok(tokio::task::spawn_blocking(work).await.map_err(|error| AppError::Invalid(error.to_string()))??)
 }
 
 /// The `application_name` a tool's sessions carry, unique per run, so a
@@ -655,6 +711,54 @@ pub(crate) mod tests {
         .await;
         assert!(error.unwrap_err().to_string().starts_with("There's no file at"));
         postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap();
+    }
+
+    /// As a dump of a managed server reads: its provider's extension, then one any server has.
+    const WITH_EXTENSIONS: &str = "\
+--
+-- Name: dbforge_missing; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS dbforge_missing WITH SCHEMA pg_catalog;
+
+--
+-- Name: EXTENSION dbforge_missing; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION dbforge_missing IS 'Only on another server';
+
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+CREATE TABLE kept (id int);
+";
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432 and its client tools"]
+    async fn leaves_out_extensions_the_server_lacks_and_errors_point_at_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("managed.sql");
+        let restore = |database: &'static str, file: PathBuf| async move {
+            let tool = psql().await;
+            let run = Run { tool: &tool, cancel: &CancellationToken::new() };
+            import(&local(), PASSWORD, database, &file, run, |_| {}).await
+        };
+
+        std::fs::write(&file, WITH_EXTENSIONS).unwrap();
+        fresh("dbforge_dump_extensions").await;
+        let imported = restore("dbforge_dump_extensions", file.clone()).await.unwrap();
+        assert_eq!(imported.skipped_extensions, ["dbforge_missing"]);
+        sql("dbforge_dump_extensions", "SELECT * FROM kept").await;
+
+        // Line 20 of the file, though the copy psql ran had lines blanked.
+        std::fs::write(&file, format!("{WITH_EXTENSIONS}INSERT INTO missing VALUES (1);\n")).unwrap();
+        fresh("dbforge_dump_extensions").await;
+        let error = restore("dbforge_dump_extensions", file.clone()).await.unwrap_err().to_string();
+        assert!(error.contains(&format!("psql:{}:20: ERROR:", file.display())), "{error}");
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_extensions").await.unwrap();
     }
 
     #[tokio::test]

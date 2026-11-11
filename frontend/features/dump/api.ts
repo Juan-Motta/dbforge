@@ -33,6 +33,8 @@ export interface Imported {
   /** The database didn't exist and was created for the restore. */
   created: boolean
   elapsedMs: number
+  /** Extensions the file creates that the server doesn't have, so the import left them out. */
+  skippedExtensions: string[]
 }
 
 /** A whole PostgreSQL database to a .sql file with pg_dump, and back with psql. */

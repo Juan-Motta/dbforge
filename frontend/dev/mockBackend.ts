@@ -522,7 +522,11 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
     case 'import_database': {
       const { jobId, database } = payload.request as { jobId: string; database: string }
       await toolRun(jobId, ['SET', 'CREATE TABLE', 'COPY 450', 'ALTER TABLE', 'CREATE INDEX'])
-      return { created: !objects[''].some((o) => o.name === database), elapsedMs: 1830 }
+      return {
+        created: !objects[''].some((o) => o.name === database),
+        elapsedMs: 1830,
+        skippedExtensions: ['azure_cdc', 'azure_storage'],
+      }
     }
     case 'create_object': {
       const { object } = payload.request as { object: { kind: string; name: string } }
