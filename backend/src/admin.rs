@@ -27,3 +27,25 @@ pub async fn create_object(
         })
         .await
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DropRequest {
+    connection_id: String,
+    database: String,
+}
+
+/// Drops a database from a saved connection's server (see `drivers::drop_database`).
+#[tauri::command]
+pub async fn drop_database(
+    store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
+    request: DropRequest,
+) -> Result<()> {
+    store
+        .open(&request.connection_id)?
+        .run(&log, Origin::Admin, async |connection, password| {
+            drivers::drop_database(connection, password, &request.database).await
+        })
+        .await
+}

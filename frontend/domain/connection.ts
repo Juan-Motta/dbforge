@@ -127,6 +127,8 @@ export interface EngineSpec {
   dump: boolean
   /** What a connection's menu can create on its server, in menu order. */
   newObjects: NewObjectKind[]
+  /** A database's menu can drop it from the server. */
+  dropsDatabases: boolean
   /** Its databases open in the key browser, which holds the CLI, rather than as tables and consoles. */
   keyBrowser: boolean
 }
@@ -146,6 +148,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'postgres',
     dump: true,
     newObjects: SERVER_OBJECTS,
+    dropsDatabases: true,
     keyBrowser: false,
   },
   mysql: {
@@ -159,6 +162,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'mysql',
     dump: false,
     newObjects: SERVER_OBJECTS,
+    dropsDatabases: true,
     keyBrowser: false,
   },
   mariadb: {
@@ -172,6 +176,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'mysql',
     dump: false,
     newObjects: SERVER_OBJECTS,
+    dropsDatabases: true,
     keyBrowser: false,
   },
   sqlite: {
@@ -186,6 +191,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'sqlite',
     dump: false,
     newObjects: [],
+    dropsDatabases: false,
     keyBrowser: false,
   },
   sqlserver: {
@@ -206,6 +212,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'sqlserver',
     dump: false,
     newObjects: SERVER_OBJECTS,
+    dropsDatabases: true,
     keyBrowser: false,
   },
   mongodb: {
@@ -225,6 +232,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'mongodb',
     dump: false,
     newObjects: SERVER_OBJECTS,
+    dropsDatabases: true,
     keyBrowser: false,
   },
   cosmosdb: {
@@ -238,6 +246,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'cosmosdb',
     dump: false,
     newObjects: ['database'],
+    dropsDatabases: true,
     keyBrowser: false,
   },
   redis: {
@@ -258,6 +267,7 @@ export const ENGINES: Record<Engine, EngineSpec> = {
     dialect: 'postgres',
     dump: false,
     newObjects: ['user'],
+    dropsDatabases: false,
     keyBrowser: true,
   },
 }

@@ -30,6 +30,7 @@ export interface MenuActions {
   exportTable: (connection: Connection, table: TableRef) => void
   importRows: (connection: Connection, table: TableRef) => void
   dump: (mode: 'export' | 'import', connection: Connection, database: string) => void
+  dropDatabase: (connection: Connection, database: string) => void
   /** Puts the text on the clipboard and says so; call it from the click itself. */
   copy: (text: string | Promise<string>) => void
   structure: (connection: Connection, table: TableRef) => Promise<TableStructure>
@@ -119,7 +120,16 @@ export function explorerMenu(
         connection.engine === 'redis'
           ? []
           : [{ label: m.newQuery, icon: 'code', onSelect: () => actions.newQuery(connection, node.name) }]
-      return [...query, ...diagramItem, refresh, ...dump]
+      const drop: MenuItem[] = ENGINES[connection.engine].dropsDatabases
+        ? [
+            {
+              label: m.dropDatabase,
+              icon: 'trash',
+              onSelect: () => actions.dropDatabase(connection, node.name),
+            },
+          ]
+        : []
+      return [...query, ...diagramItem, refresh, ...dump, ...drop]
     }
     case 'schema':
       return [

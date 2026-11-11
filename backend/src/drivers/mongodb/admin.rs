@@ -1,4 +1,4 @@
-//! Databases, roles and users created from a connection's menu.
+//! Databases, roles and users created from a connection's menu, and databases dropped from theirs.
 
 use mongodb::bson::doc;
 
@@ -35,6 +35,17 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     Ok(())
 }
 
+/// Drops the database `name` and its collections. The server drops a missing
+/// database without a word, so that is checked first.
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    let client = connect(connection, password).await?;
+    if !client.list_database_names().await?.iter().any(|existing| existing == name) {
+        return Err(AppError::Invalid(format!("Database {name} doesn't exist.")));
+    }
+    client.database(name).run_command(doc! { "dropDatabase": 1 }).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use mongodb::bson::Document;
@@ -42,6 +53,7 @@ mod tests {
     use super::super::tests::{PASSWORD, local};
     use super::*;
     use crate::drivers::create_object as create;
+    use crate::drivers::drop_database as drop;
 
     #[tokio::test]
     #[ignore = "needs a local MongoDB on port 57017"]
@@ -87,5 +99,19 @@ mod tests {
         client.database("admin_test_db").drop().await.unwrap();
         admin.run_command(doc! { "dropRole": "admin_test_role" }).await.unwrap();
         admin.run_command(doc! { "dropUser": "admin_test_user" }).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn drops_a_database() {
+        let logged = connect(&local(), PASSWORD).await.unwrap();
+        let client = logged.unlogged();
+        client.database("drop_test_db").collection::<Document>("orders").insert_one(doc! {}).await.unwrap();
+
+        drop(&local(), PASSWORD, "drop_test_db").await.unwrap();
+        let names = client.list_database_names().await.unwrap();
+        assert!(!names.contains(&"drop_test_db".to_string()), "{names:?}");
+        let gone = drop(&local(), PASSWORD, "drop_test_db").await.unwrap_err();
+        assert_eq!(gone.to_string(), "Database drop_test_db doesn't exist.");
     }
 }

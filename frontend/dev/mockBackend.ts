@@ -533,6 +533,13 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       else accounts.add(object.name)
       return delay(null)
     }
+    case 'drop_database': {
+      const { database } = payload.request as { database: string }
+      const at = objects[''].findIndex((o) => o.name === database)
+      if (at < 0) throw `database "${database}" does not exist`
+      objects[''].splice(at, 1)
+      return delay(null)
+    }
     case 'list_tags':
       return delay(tags)
     case 'save_tags': {

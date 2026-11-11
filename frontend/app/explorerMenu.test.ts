@@ -44,6 +44,7 @@ function actions(): MenuActions {
     exportTable: vi.fn(),
     importRows: vi.fn(),
     dump: vi.fn(),
+    dropDatabase: vi.fn(),
     copy: vi.fn(),
     structure: vi.fn(async () => ({
       columns: [{ name: 'id' }, { name: 'name' }],
@@ -82,6 +83,7 @@ describe('explorerMenu', () => {
       'Refresh',
       'Export database…',
       'Import SQL file…',
+      'Drop database…',
     ])
     expect(labels(menu(node('schema', ['shop', 'public']), a))).toEqual([
       'New query',
@@ -118,6 +120,7 @@ describe('explorerMenu', () => {
       'New query',
       'Show ER diagram',
       'Refresh',
+      'Drop database…',
     ])
   })
 
@@ -146,6 +149,9 @@ describe('explorerMenu', () => {
     const cosmos = { ...postgres, engine: 'cosmosdb' as const }
     pick(menu(node('table', ['shop', 'orders'], cosmos), a, cosmos), 'New query').onSelect!()
     expect(a.newQuery).toHaveBeenLastCalledWith(cosmos, 'shop', 'SELECT TOP 100 * FROM c', 'orders')
+
+    pick(menu(node('database', ['shop']), a), 'Drop database…').onSelect!()
+    expect(a.dropDatabase).toHaveBeenCalledWith(postgres, 'shop')
 
     pick(menu(node('connection', []), a), 'Copy connection URL').onSelect!()
     expect(a.copy).toHaveBeenLastCalledWith('postgresql://app@h:5432/shop')

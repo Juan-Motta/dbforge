@@ -29,6 +29,18 @@
   filter: brightness(1.08);
 }
 
+.danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: var(--err-ink);
+  font-weight: 600;
+}
+
+.danger:hover {
+  background: var(--err);
+  filter: brightness(1.08);
+}
+
 .ghost {
   background: transparent;
   border-color: transparent;

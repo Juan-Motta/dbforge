@@ -127,3 +127,23 @@ export function closeConnectionTabs(state: TabsState, connectionId: string): Tab
     .filter((t) => t.connectionId === connectionId)
     .reduce((current, tab) => closeTab(current, tab.id), state)
 }
+
+/** The database a tab shows; a query console's is only where it starts, and it outlives the database. */
+function databaseShown(tab: Tab): string | null {
+  switch (tab.kind) {
+    case 'table':
+      return tab.table.database
+    case 'diagram':
+    case 'keyspace':
+      return tab.database
+    case 'query':
+      return null
+  }
+}
+
+/** Closes the tabs showing a database, e.g. after it is dropped; consoles keep their text. */
+export function closeDatabaseTabs(state: TabsState, connectionId: string, database: string): TabsState {
+  return state.tabs
+    .filter((t) => t.connectionId === connectionId && databaseShown(t) === database)
+    .reduce((current, tab) => closeTab(current, tab.id), state)
+}

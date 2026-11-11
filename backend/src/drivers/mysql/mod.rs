@@ -11,7 +11,7 @@ mod explain;
 mod read_only;
 mod structure;
 
-pub use admin::create_object;
+pub use admin::{create_object, drop_database};
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, import_rows, preview_changes};
 pub use explain::explain;

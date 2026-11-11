@@ -17,7 +17,7 @@ mod read_only;
 mod session;
 mod structure;
 
-pub use admin::create_database;
+pub use admin::{create_database, drop_database};
 pub use edit::{apply_changes, import_rows, preview_changes};
 pub use explain::explain;
 pub use read_only::run_read_only;

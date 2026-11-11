@@ -20,6 +20,7 @@
   --ok: #4cc38a;
   --warn: #e8b44c;
   --err: #f06a6a;
+  --err-ink: #1a0707;
   --info: #6aa9f0;
   /* Tag colors: each reads on this theme's panels, as text and as a 16% tint. */
   --tag-red: #f06a6a;
@@ -64,6 +65,7 @@
   --ok: #1e8553;
   --warn: #8f6400;
   --err: #c23030;
+  --err-ink: #ffffff;
   --info: #2468b8;
   --tag-red: #c23030;
   --tag-orange: #b4531c;

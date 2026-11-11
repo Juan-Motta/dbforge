@@ -1,4 +1,4 @@
-//! Databases, roles and logins created from a connection's menu.
+//! Databases, roles and logins created from a connection's menu, and databases dropped from theirs.
 
 use super::{connect, quote_ident};
 use crate::connections::model::Connection;
@@ -31,6 +31,15 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     Ok(())
 }
 
+/// Drops the database `name` and everything in it, from `master`. Sessions
+/// still on it make the server refuse, saying so.
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    let mut client = connect(connection, password, Some("master")).await?;
+    client.simple_query(format!("DROP DATABASE {}", quote_ident(name))).await?.into_results().await?;
+    client.close().await?;
+    Ok(())
+}
+
 /// A Unicode string literal; inside one only `'` needs escaping.
 fn quote_literal(text: &str) -> String {
     format!("N'{}'", text.replace('\'', "''"))
@@ -41,6 +50,7 @@ mod tests {
     use super::super::tests::{PASSWORD, local};
     use super::*;
     use crate::drivers::create_object as create;
+    use crate::drivers::drop_database as drop;
 
     const CLEANUP: &str = "
         IF DB_ID('admin test db') IS NOT NULL DROP DATABASE [admin test db];
@@ -88,5 +98,17 @@ mod tests {
         let again = new(login).await.unwrap_err();
         assert!(again.to_string().contains("already exists"), "{again}");
         run(CLEANUP).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
+    async fn drops_a_database() {
+        run("IF DB_ID('drop]test db') IS NULL CREATE DATABASE [drop]]test db]").await;
+        let mut on_it = local();
+        on_it.database = "drop]test db".into();
+        drop(&on_it, PASSWORD, "drop]test db").await.unwrap();
+        assert!(!exists("SELECT CASE WHEN DB_ID('drop]test db') IS NULL THEN 0 ELSE 1 END".into()).await);
+        let gone = drop(&local(), PASSWORD, "drop]test db").await.unwrap_err();
+        assert!(gone.to_string().contains("does not exist"), "{gone}");
     }
 }

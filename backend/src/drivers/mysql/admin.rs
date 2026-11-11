@@ -1,4 +1,4 @@
-//! Databases, roles and users created from a connection's menu.
+//! Databases, roles and users created from a connection's menu, and databases dropped from theirs.
 
 use sqlx::AssertSqlSafe;
 
@@ -15,6 +15,14 @@ use crate::statement_log;
 pub async fn create_object(connection: &Connection, password: Option<&str>, object: &NewObject) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;
     create_on(&mut conn, object).await?;
+    conn.close().await?;
+    Ok(())
+}
+
+/// Drops the database `name` and everything in it.
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    let mut conn = connect(connection, password, None).await?;
+    sqlx::raw_sql(AssertSqlSafe(format!("DROP DATABASE {}", quote_ident(name)))).execute(&mut conn).await?;
     conn.close().await?;
     Ok(())
 }
@@ -64,6 +72,7 @@ mod tests {
     use super::super::tests::{PASSWORD, local, mariadb};
     use super::*;
     use crate::drivers::create_object as create;
+    use crate::drivers::drop_database as drop;
 
     async fn run(connection: &Connection, sql: &str) {
         let mut conn = connect(connection, PASSWORD, None).await.unwrap();
@@ -132,6 +141,30 @@ mod tests {
         as_user.database = String::new();
         connect(&as_user, Some(secret), None).await.unwrap();
         run(&server, cleanup).await;
+    }
+
+    async fn drops_a_database(server: Connection) {
+        let name = "drop `test` db";
+        run(&server, "DROP DATABASE IF EXISTS `drop ``test`` db`; CREATE DATABASE `drop ``test`` db`").await;
+        let mut on_it = server.clone();
+        on_it.database = name.into();
+        drop(&on_it, PASSWORD, name).await.unwrap();
+        let schemata = "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?";
+        assert_eq!(count(&server, schemata, name).await, 0);
+        let gone = drop(&server, PASSWORD, name).await.unwrap_err();
+        assert!(gone.to_string().contains("database doesn't exist"), "{gone}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn mysql_drops_a_database() {
+        drops_a_database(local()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MariaDB on port 53307"]
+    async fn mariadb_drops_a_database() {
+        drops_a_database(mariadb()).await;
     }
 
     #[tokio::test]

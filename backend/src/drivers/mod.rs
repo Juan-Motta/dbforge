@@ -907,6 +907,24 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     .await
 }
 
+/// Drops a database and everything in it from the connection's server.
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(AppError::Invalid("Name the database.".into()));
+    }
+    with_timeout(async {
+        match connection.engine {
+            Engine::Postgres => postgres::drop_database(connection, password, name).await,
+            Engine::Mysql | Engine::Mariadb => mysql::drop_database(connection, password, name).await,
+            Engine::Sqlserver => sqlserver::drop_database(connection, password, name).await,
+            Engine::Mongodb => mongodb::drop_database(connection, password, name).await,
+            Engine::Cosmosdb => cosmos::drop_database(connection, password, name).await,
+            Engine::Sqlite | Engine::Redis => Err(AppError::Invalid("This connection can't drop databases.".into())),
+        }
+    })
+    .await
+}
+
 /// rustls needs one process-wide crypto provider when several are compiled in,
 /// as here (the drivers bring their own). Installing it twice is harmless.
 pub(crate) fn install_crypto() {

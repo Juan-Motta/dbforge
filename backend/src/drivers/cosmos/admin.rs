@@ -1,4 +1,4 @@
-//! Databases created from a connection's menu (Cosmos DB users and roles are
+//! Databases created from a connection's menu and dropped from theirs (Cosmos DB users and roles are
 //! managed in Azure, not through the account's key).
 
 use reqwest::Method;
@@ -20,11 +20,23 @@ pub async fn create_database(connection: &Connection, password: Option<&str>, na
     Ok(())
 }
 
+/// Drops the database `name` with its containers and items.
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    let client = Client::new(connection, password)?;
+    // The server's not-found reply doesn't say what is missing.
+    let databases = client.list(&Target::databases(), "Databases").await?;
+    if !databases.iter().any(|database| database["id"] == name) {
+        return Err(AppError::Invalid(format!("Database {name} doesn't exist.")));
+    }
+    client.send(Method::DELETE, &Target::database(name), &[], None).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{KEY, local};
     use super::*;
-    use crate::drivers::{NewObject, create_object};
+    use crate::drivers::{NewObject, create_object, drop_database as drop};
 
     #[tokio::test]
     #[ignore = "needs the Cosmos DB emulator on port 58081"]
@@ -50,5 +62,18 @@ mod tests {
         assert_eq!(refused.to_string(), "This connection can't create a user.");
 
         client.send(Method::DELETE, &Target::database("admin_test_db"), &[], None).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Cosmos DB emulator on port 58081"]
+    async fn drops_a_database() {
+        let client = Client::new(&local(), KEY).unwrap();
+        let _ = client.send(Method::POST, &Target::databases(), &[], Some(&json!({ "id": "drop_test_db" }))).await;
+
+        drop(&local(), KEY, "drop_test_db").await.unwrap();
+        let databases = client.list(&Target::databases(), "Databases").await.unwrap();
+        assert!(databases.iter().all(|database| database["id"] != "drop_test_db"), "{databases:?}");
+        let gone = drop(&local(), KEY, "drop_test_db").await.unwrap_err();
+        assert_eq!(gone.to_string(), "Database drop_test_db doesn't exist.");
     }
 }

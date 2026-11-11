@@ -8,6 +8,7 @@ import {
   type NewObjectKind,
 } from '../domain/connection'
 import { tableRefFromPath, type TableRef } from '../domain/table'
+import { DropDatabaseDialog } from '../features/admin/DropDatabaseDialog'
 import { NewObjectDialog } from '../features/admin/NewObjectDialog'
 import { messages as adminMessages } from '../features/admin/messages'
 import { ConnectionDialog } from '../features/connections/ConnectionDialog'
@@ -31,6 +32,7 @@ import { useTheme } from '../features/settings/useTheme'
 import { TitleBar } from '../features/shell/TitleBar'
 import {
   closeConnectionTabs,
+  closeDatabaseTabs,
   closeTab,
   newQueryTab,
   NO_TABS,
@@ -92,6 +94,12 @@ export function App() {
     refresh: () => void
   } | null>(null)
   const [deleting, setDeleting] = useState<Connection | null>(null)
+  // A database being dropped from its menu.
+  const [dropping, setDropping] = useState<{
+    connection: Connection
+    database: string
+    refresh: () => void
+  } | null>(null)
   const [tabs, setTabs] = useState(NO_TABS)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Changes agents ask to make on connections whose tag asks first.
@@ -234,6 +242,7 @@ export function App() {
         setExporting({ kind: 'table', connectionId: c.id, table, filter: NO_FILTER }),
       importRows: (connection, table) => setImporting({ connection, table }),
       dump: (mode, c, database) => setDump({ mode, connection: c, database, refresh }),
+      dropDatabase: (c, database) => setDropping({ connection: c, database, refresh }),
       copy: (text) =>
         void copyText(text).then(
           () => notify(m.copied),
@@ -268,6 +277,17 @@ export function App() {
     }),
     [m],
   )
+
+  const databaseDropped = ({ connection, database, refresh }: NonNullable<typeof dropping>) => {
+    refresh()
+    setTabs((state) => closeDatabaseTabs(state, connection.id, database))
+    // What was selected in it is gone; its connection stays selected.
+    setSelection((current) =>
+      current?.connectionId === connection.id && current.path[0] === database
+        ? { connectionId: connection.id, path: [] }
+        : current,
+    )
+  }
 
   const removeConnection = async (id: string) => {
     await remove(id)
@@ -359,6 +379,15 @@ export function App() {
             connection={deleting}
             onDelete={removeConnection}
             onClose={() => setDeleting(null)}
+          />
+        )}
+
+        {dropping && (
+          <DropDatabaseDialog
+            connection={dropping.connection}
+            database={dropping.database}
+            onClose={() => setDropping(null)}
+            onDropped={() => databaseDropped(dropping)}
           />
         )}
 

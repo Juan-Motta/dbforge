@@ -12,7 +12,7 @@ mod edit;
 mod read_only;
 mod structure;
 
-pub use admin::create_object;
+pub use admin::{create_object, drop_database};
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, import_rows, preview_changes};
 pub use read_only::run_read_only;
@@ -98,8 +98,9 @@ pub async fn create_database(connection: &Connection, password: Option<&str>, na
 }
 
 /// Drops `name`, first ending the sessions still on it (a tool that was
-/// killed leaves its session running on the server until then).
-pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+/// killed leaves its session running on the server until then). For a
+/// database this app made itself; [`admin::drop_database`] drops one a person picked.
+pub async fn force_drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;
     sqlx::query(
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",

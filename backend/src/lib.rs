@@ -90,6 +90,7 @@ pub fn run() {
             commands::credential_storage,
             commands::set_credential_storage,
             admin::create_object,
+            admin::drop_database,
             explorer::list_objects,
             explorer::list_relations,
             explorer::completion_schema,

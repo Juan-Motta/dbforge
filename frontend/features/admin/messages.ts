@@ -28,6 +28,12 @@ export const messages = defineMessages({
       'A login with SQL Server authentication, without permissions. Grant them in the console.',
     noteRedisUser: 'An ACL user that is on, without permissions. Grant them with ACL SETUSER in the console.',
     noteUser: 'A user without privileges. Grant them in the console.',
+    dropTitle: (database: string) => `Drop database ${database}?`,
+    dropNote: (database: string, connection: string) =>
+      `This deletes ${database} and everything in it from ${connection}’s server. It can’t be undone.`,
+    dropConfirm: (database: string) => `Type ${database} to confirm`,
+    dropDatabase: 'Drop database',
+    dropping: 'Dropping…',
   },
   es: {
     menuDatabase: 'Base de datos',
@@ -56,6 +62,12 @@ export const messages = defineMessages({
       'Un inicio de sesión con autenticación de SQL Server, sin permisos. Otórgalos en la consola.',
     noteRedisUser: 'Un usuario ACL activo, sin permisos. Otórgalos con ACL SETUSER en la consola.',
     noteUser: 'Un usuario sin privilegios. Otórgalos en la consola.',
+    dropTitle: (database: string) => `¿Eliminar la base de datos ${database}?`,
+    dropNote: (database: string, connection: string) =>
+      `Esto borra ${database} y todo lo que contiene del servidor de ${connection}. No se puede deshacer.`,
+    dropConfirm: (database: string) => `Escribe ${database} para confirmar`,
+    dropDatabase: 'Eliminar base de datos',
+    dropping: 'Eliminando…',
   },
 })
 

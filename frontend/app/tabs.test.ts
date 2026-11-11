@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   closeConnectionTabs,
+  closeDatabaseTabs,
   closeTab,
   newQueryTab,
   NO_TABS,
@@ -102,6 +103,21 @@ describe('tabs', () => {
     let state = newQueryTab(openTableTab(NO_TABS, 'pg', orders), en, 'other')
     state = closeConnectionTabs(state, 'pg')
     expect(titles(state)).toEqual(['Query 1'])
+    expect(state.activeId).toBe('query:1')
+  })
+
+  it('closes the tabs showing a dropped database and keeps its consoles', () => {
+    let state = openTableTab(NO_TABS, 'pg', orders)
+    state = openDiagramTab(state, en, 'pg', 'shop', 'public')
+    state = openTableTab(state, 'pg', { ...orders, database: 'archive' })
+    state = openTableTab(state, 'other', orders)
+    state = newQueryTab(state, en, 'pg', 'shop')
+    state = closeDatabaseTabs(state, 'pg', 'shop')
+    expect(state.tabs.map((t) => t.id)).toEqual([
+      'table:pg:archive.public.orders',
+      'table:other:shop.public.orders',
+      'query:1',
+    ])
     expect(state.activeId).toBe('query:1')
   })
 })

@@ -164,7 +164,7 @@ pub async fn import(
         problems.push(problem.to_string());
     }
     // Nothing was restored. Leave no empty database behind.
-    if created && let Err(problem) = postgres::drop_database(connection, password, database).await {
+    if created && let Err(problem) = postgres::force_drop_database(connection, password, database).await {
         problems.push(format!("The database {database} created for the import couldn't be removed: {problem}"));
     }
     if problems.is_empty() { Err(error) } else { Err(AppError::Invalid(format!("{error}\n{}", problems.join("\n")))) }
@@ -503,7 +503,7 @@ pub(crate) mod tests {
     }
 
     async fn fresh(name: &str) {
-        postgres::drop_database(&local(), PASSWORD, name).await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, name).await.unwrap();
         postgres::create_database(&local(), PASSWORD, name).await.unwrap();
     }
 
@@ -538,7 +538,7 @@ pub(crate) mod tests {
         assert!(!text.contains("OWNER TO"), "owners are left out by default");
         assert!(lines.iter().any(|l| l.contains("dumping contents of table")), "{lines:?}");
 
-        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_copy").await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_copy").await.unwrap();
         let mut restored = Vec::new();
         let imported = import(
             &local(),
@@ -597,7 +597,7 @@ pub(crate) mod tests {
         assert!(!std::fs::read_to_string(&structure).unwrap().contains("COPY dumped.items"));
 
         for name in ["dbforge_dump_source", "dbforge_dump_copy"] {
-            postgres::drop_database(&local(), PASSWORD, name).await.unwrap();
+            postgres::force_drop_database(&local(), PASSWORD, name).await.unwrap();
         }
     }
 
@@ -608,7 +608,7 @@ pub(crate) mod tests {
         let file = dir.path().join("broken.sql");
         std::fs::write(&file, "CREATE TABLE ok (id int);\nINSERT INTO missing VALUES (1);\n").unwrap();
 
-        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_broken").await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_broken").await.unwrap();
         let error = import(
             &local(),
             PASSWORD,
@@ -654,7 +654,7 @@ pub(crate) mod tests {
         )
         .await;
         assert!(error.unwrap_err().to_string().starts_with("There's no file at"));
-        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_kept").await.unwrap();
     }
 
     #[tokio::test]
@@ -742,7 +742,7 @@ pub(crate) mod tests {
     #[tokio::test]
     #[ignore = "needs a local PostgreSQL on port 55432 and its client tools"]
     async fn a_stopped_import_ends_its_session_and_removes_the_database_it_created() {
-        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_stopped").await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_stopped").await.unwrap();
         let error = stopped_import("dbforge_dump_stopped", std::time::Duration::from_millis(1500)).await;
         assert_eq!(error.to_string(), "Cancelled.");
         assert!(!postgres::database_exists(&local(), PASSWORD, "dbforge_dump_stopped").await.unwrap());
@@ -753,10 +753,10 @@ pub(crate) mod tests {
         assert_eq!(error.to_string(), "Cancelled.");
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert_eq!(sessions_on("dbforge_dump_stopped_kept").await, 0);
-        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_stopped_kept").await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_stopped_kept").await.unwrap();
 
         // Stopped before psql started: nothing is created.
-        postgres::drop_database(&local(), PASSWORD, "dbforge_dump_never").await.unwrap();
+        postgres::force_drop_database(&local(), PASSWORD, "dbforge_dump_never").await.unwrap();
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("x.sql");
         std::fs::write(&file, "SELECT 1;").unwrap();

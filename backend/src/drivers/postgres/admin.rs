@@ -1,8 +1,8 @@
-//! Databases, roles and users created from a connection's menu.
+//! Databases, roles and users created from a connection's menu, and databases dropped from theirs.
 
 use sqlx::AssertSqlSafe;
 
-use super::connect;
+use super::{connect, quote_ident};
 use crate::connections::model::Connection;
 use crate::drivers::NewObject;
 use crate::error::Result;
@@ -41,11 +41,35 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     Ok(())
 }
 
+/// Drops the database `name` and everything in it. PostgreSQL can't drop the
+/// database a session is on, so this one connects to another; sessions still
+/// on `name` make the server refuse, saying so.
+pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
+    let mut conn = connect(connection, password, Some(other_database(connection, name))).await?;
+    sqlx::raw_sql(AssertSqlSafe(format!("DROP DATABASE {}", quote_ident(name)))).execute(&mut conn).await?;
+    conn.close().await?;
+    Ok(())
+}
+
+/// A database to connect to other than `name`: the connection's own, else
+/// `postgres`, which every server has (or `template1` when dropping that).
+fn other_database<'a>(connection: &'a Connection, name: &str) -> &'a str {
+    let own = connection.database.trim();
+    if !own.is_empty() && own != name {
+        own
+    } else if name != "postgres" {
+        "postgres"
+    } else {
+        "template1"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{PASSWORD, local};
     use super::*;
     use crate::drivers::create_object as create;
+    use crate::drivers::drop_database as drop;
     use crate::statement_log::store::tests::Collected;
     use crate::statement_log::{Origin, StatementLog};
 
@@ -105,5 +129,35 @@ mod tests {
         assert_eq!(empty.to_string(), "Name the role.");
         let user = NewObject::User { name: "x".into(), password: String::new(), host: None, database: None };
         assert_eq!(create(&nowhere, None, &user).await.unwrap_err().to_string(), "Give the user a password.");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn drops_a_database_also_the_one_the_connection_opens() {
+        let name = "Drop \"test\" db";
+        run("DROP DATABASE IF EXISTS \"Drop \"\"test\"\" db\"").await;
+        run("CREATE DATABASE \"Drop \"\"test\"\" db\"").await;
+        let exists = "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)";
+
+        let log = StatementLog::new(50, Collected::default());
+        let mut on_it = local();
+        on_it.database = name.into();
+        statement_log::scoped(&log, "pg", Origin::Admin, drop(&on_it, PASSWORD, name)).await.unwrap();
+        assert!(!scalar(exists, name).await);
+        let texts: Vec<_> = log.entries().into_iter().map(|e| e.text).collect();
+        assert!(texts.contains(&"DROP DATABASE \"Drop \"\"test\"\" db\"".to_string()), "{texts:?}");
+
+        let gone = drop(&local(), PASSWORD, name).await.unwrap_err();
+        assert!(gone.to_string().contains("does not exist"), "{gone}");
+    }
+
+    #[test]
+    fn connects_to_another_database_than_the_one_dropped() {
+        let mut connection = local();
+        connection.database = "app".into();
+        assert_eq!(other_database(&connection, "reports"), "app");
+        assert_eq!(other_database(&connection, "app"), "postgres");
+        connection.database = " ".into();
+        assert_eq!(other_database(&connection, "postgres"), "template1");
     }
 }
