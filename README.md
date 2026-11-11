@@ -17,6 +17,12 @@
       <img src="docs/images/download-light.svg" width="320" height="80" alt="Download DBForge for macOS">
     </picture>
   </a>
+  <a href="https://github.com/Juan-Motta/dbforge/releases/latest">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/download-linux-dark.svg">
+      <img src="docs/images/download-linux-light.svg" width="320" height="80" alt="Download DBForge for Linux">
+    </picture>
+  </a>
   <br>
   <sub>macOS and Linux · updates itself</sub>
 </p>
