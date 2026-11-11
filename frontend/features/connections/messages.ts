@@ -52,7 +52,6 @@ export const messages = defineMessages({
     browse: 'Browse…',
     fileHint: 'The file must exist; DBForge never creates one by mistake.',
     sqliteFiles: 'SQLite database',
-    allFiles: 'All files',
     uri: 'URI',
     uriPlaceholder: 'https://<account>.documents.azure.com:443/, or paste a connection string',
     host: 'Host',
@@ -112,7 +111,6 @@ export const messages = defineMessages({
     mongoClientCertInfo:
       'One PEM file holding the client certificate and its private key, as MongoDB reads it. Optional.',
     noFile: 'None',
-    pemFiles: 'Certificates and keys',
     // SSH
     useSsh: 'Connect through an SSH tunnel',
     useSshHelp: 'Reaches the database from an SSH server that can, such as a bastion host.',
@@ -135,7 +133,6 @@ export const messages = defineMessages({
     sshPassphrase: 'Key passphrase (optional)',
     sshNoSecret: 'Not needed with the agent',
     sshSecretInfo: 'Saved with the database passwords; never shown again.',
-    sshKeyFiles: 'Private keys',
     hostKeysHelp:
       'Host keys are checked against ~/.ssh/known_hosts. A new server’s key is recorded the first time it connects; a changed key is refused.',
     testing: 'Testing…',
@@ -203,7 +200,6 @@ export const messages = defineMessages({
     browse: 'Examinar…',
     fileHint: 'El archivo debe existir; DBForge nunca crea uno por error.',
     sqliteFiles: 'Base de datos SQLite',
-    allFiles: 'Todos los archivos',
     uri: 'URI',
     uriPlaceholder: 'https://<cuenta>.documents.azure.com:443/, o pega una cadena de conexión',
     host: 'Host',
@@ -262,7 +258,6 @@ export const messages = defineMessages({
     mongoClientCertInfo:
       'Un archivo PEM con el certificado de cliente y su clave privada, como lo lee MongoDB. Opcional.',
     noFile: 'Ninguno',
-    pemFiles: 'Certificados y claves',
     useSsh: 'Conectar a través de un túnel SSH',
     useSshHelp: 'Llega a la base de datos desde un servidor SSH que puede alcanzarla, como un bastión.',
     sshNeedsHost:
@@ -284,7 +279,6 @@ export const messages = defineMessages({
     sshPassphrase: 'Frase de paso de la clave (opcional)',
     sshNoSecret: 'No hace falta con el agente',
     sshSecretInfo: 'Se guarda con las contraseñas de las bases de datos; nunca se vuelve a mostrar.',
-    sshKeyFiles: 'Claves privadas',
     hostKeysHelp:
       'Las claves de host se comprueban con ~/.ssh/known_hosts. La clave de un servidor nuevo se registra la primera vez que se conecta; una clave cambiada se rechaza.',
     testing: 'Probando…',

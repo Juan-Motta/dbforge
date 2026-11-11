@@ -18,10 +18,6 @@ export function SslSection({ form, onChange, m }: SslSectionProps) {
   const tunnel = tunnelOn(form)
   const filesOff = !encrypts(ssl.mode)
   const set = (changes: Partial<Ssl>) => onChange({ ...ssl, ...changes })
-  const filters = [
-    { name: m.pemFiles, extensions: ['pem', 'crt', 'cer', 'key'] },
-    { name: m.allFiles, extensions: ['*'] },
-  ]
   const blocked = sslBlockedByTunnel(form)
 
   return (
@@ -51,7 +47,6 @@ export function SslSection({ form, onChange, m }: SslSectionProps) {
           info={m.caFileInfo}
           placeholder={m.noFile}
           browseLabel={m.browse}
-          filters={filters}
           disabled={filesOff}
           value={ssl.caFile}
           onChange={(caFile) => set({ caFile })}
@@ -65,7 +60,6 @@ export function SslSection({ form, onChange, m }: SslSectionProps) {
               info={m.clientCertInfo}
               placeholder={m.noFile}
               browseLabel={m.browse}
-              filters={filters}
               disabled={filesOff}
               invalid={clientCertIncomplete(form) && ssl.certFile.trim() === ''}
               value={ssl.certFile}
@@ -77,7 +71,6 @@ export function SslSection({ form, onChange, m }: SslSectionProps) {
               help={m.clientKeyHelp}
               placeholder={m.noFile}
               browseLabel={m.browse}
-              filters={filters}
               disabled={filesOff}
               invalid={clientCertIncomplete(form) && ssl.keyFile.trim() === ''}
               value={ssl.keyFile}
@@ -90,7 +83,6 @@ export function SslSection({ form, onChange, m }: SslSectionProps) {
             info={m.mongoClientCertInfo}
             placeholder={m.noFile}
             browseLabel={m.browse}
-            filters={filters}
             disabled={filesOff}
             value={ssl.certFile}
             onChange={(certFile) => set({ certFile })}

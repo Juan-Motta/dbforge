@@ -82,7 +82,6 @@ export function SshSection({ form, onChange, editing, m }: SshSectionProps) {
           info={m.sshKeyFileInfo}
           placeholder={m.sshKeyFilePlaceholder}
           browseLabel={m.browse}
-          filters={[{ name: m.sshKeyFiles, extensions: ['*'] }]}
           disabled={!ssh.enabled || ssh.auth !== 'key'}
           invalid={ssh.enabled && ssh.auth === 'key' && ssh.keyFile.trim() === ''}
           value={ssh.keyFile}

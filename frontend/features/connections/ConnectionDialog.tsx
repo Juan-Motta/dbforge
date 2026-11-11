@@ -216,10 +216,7 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
               help={m.fileHint}
               placeholder={m.databaseFilePlaceholder}
               browseLabel={m.browse}
-              filters={[
-                { name: m.sqliteFiles, extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
-                { name: m.allFiles, extensions: ['*'] },
-              ]}
+              filters={[{ name: m.sqliteFiles, extensions: ['db', 'sqlite', 'sqlite3', 'db3'] }]}
               value={form.database}
               onChange={(database) => update({ database })}
             />

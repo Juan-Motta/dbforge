@@ -8,8 +8,12 @@ interface FileFieldProps {
   label: string
   value: string
   onChange: (path: string) => void
-  /** What the native picker lists first; it always adds every file after them. */
-  filters: DialogFilter[]
+  /**
+   * The only files the native picker lets you choose, by extension. Leave it
+   * out for files that may have none, such as SSH keys: macOS has no "all
+   * files" choice, and takes `*` as a literal extension.
+   */
+  filters?: DialogFilter[]
   browseLabel: string
   info?: string
   help?: ReactNode
