@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
-import type { SqlDialect } from '../../domain/connection'
+import type { SqlNames } from '../../components/code/sqlLanguage'
+import { isRelationalDialect, type SqlDialect } from '../../domain/connection'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi } from '../explorer/api'
 import type { HistoryEntry } from '../history/api'
 import { HistoryPanel } from '../history/HistoryPanel'
-import type { StatementResult } from './api'
+import { queryApi, type StatementResult } from './api'
+import { changesStructure, completionNames } from './completion'
 import { PlanView } from './PlanView'
 import { ResultsPanel } from './ResultsPanel'
 import { messages } from './messages'
@@ -55,6 +57,16 @@ export function QueryConsole({
     connectionId,
     { database, container },
   )
+  const { names, reload: reloadNames } = useCompletionNames(
+    isRelationalDialect(dialect) ? connectionId : null,
+    database,
+    dialect,
+  )
+  /** Runs `sql`; a script that may have changed the tables reads their names again. */
+  const runScript = (sql: string) =>
+    void run(sql).then(() => {
+      if (changesStructure(sql)) reloadNames()
+    })
   const [analyze, setAnalyze] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const textToRun = () => editor.current?.textToRun() ?? ''
@@ -115,7 +127,7 @@ export function QueryConsole({
             {cancelling ? m.cancelling : m.cancel}
           </Button>
         ) : (
-          <Button variant="primary" disabled={explaining} onClick={() => run(textToRun())}>
+          <Button variant="primary" disabled={explaining} onClick={() => runScript(textToRun())}>
             <Icon name="play" />
             {m.run}
             <span className={styles.shortcut}>⌘↵</span>
@@ -126,7 +138,13 @@ export function QueryConsole({
       <div className={styles.body}>
         <div className={styles.main}>
           <div className={styles.editor}>
-            <SqlEditor ref={editor} initialValue={initialSql} dialect={dialect} onRun={run} />
+            <SqlEditor
+              ref={editor}
+              initialValue={initialSql}
+              dialect={dialect}
+              names={names}
+              onRun={runScript}
+            />
           </div>
 
           <div className={styles.results} aria-busy={running || explaining}>
@@ -161,6 +179,29 @@ export function QueryConsole({
  * The containers a Cosmos DB console can query, for its picker; `null` for other
  * engines, and while they load. Without a database there is nothing to list.
  */
+/**
+ * The schemas, tables and columns the editor completes, read when the console
+ * opens and again on `reload`. `null` connection: an engine without SQL names.
+ * A failure leaves keyword completion alone; it is no reason to stop typing.
+ */
+function useCompletionNames(connectionId: string | null, database: string | undefined, dialect: SqlDialect) {
+  const [names, setNames] = useState<SqlNames | undefined>(undefined)
+  const [reloads, setReloads] = useState(0)
+  useEffect(() => {
+    if (connectionId === null) return
+    let current = true
+    queryApi.completionSchema(connectionId, database).then(
+      (schema) => current && setNames(completionNames(schema, dialect)),
+      () => {},
+    )
+    return () => {
+      current = false
+    }
+  }, [connectionId, database, dialect, reloads])
+  const reload = useCallback(() => setReloads((n) => n + 1), [])
+  return { names, reload }
+}
+
 function useContainers(connectionId: string | null, database: string | undefined): string[] | null {
   const [containers, setContainers] = useState<string[] | null>(null)
   useEffect(() => {

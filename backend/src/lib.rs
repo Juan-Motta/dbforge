@@ -86,6 +86,7 @@ pub fn run() {
             admin::create_object,
             explorer::list_objects,
             explorer::list_relations,
+            explorer::completion_schema,
             explorer::fetch_rows,
             edit::apply_changes,
             edit::preview_changes,

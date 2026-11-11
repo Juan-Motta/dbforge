@@ -1,8 +1,8 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
 import { basicSetup } from 'codemirror'
-import { EditorState, Prec } from '@codemirror/state'
+import { Compartment, EditorState, Prec } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
-import { sqlLanguage } from '../../components/code/sqlLanguage'
+import { sqlLanguage, type SqlNames } from '../../components/code/sqlLanguage'
 import { sqlTheme } from '../../components/code/sqlTheme'
 import type { SqlDialect } from '../../domain/connection'
 
@@ -16,18 +16,22 @@ export interface SqlEditorHandle {
 interface SqlEditorProps {
   initialValue?: string
   dialect?: SqlDialect
+  /** The database's schemas, tables and columns, completed besides keywords once they arrive. */
+  names?: SqlNames
   /** Called on ⌘/Ctrl+Enter with `textToRun()`. */
   onRun: (sql: string) => void
   ref?: Ref<SqlEditorHandle>
 }
 
 /** CodeMirror SQL editor. Uncontrolled: it owns its text; ⌘/Ctrl+Enter runs. */
-export function SqlEditor({ initialValue = '', dialect, onRun, ref }: SqlEditorProps) {
+export function SqlEditor({ initialValue = '', dialect, names, onRun, ref }: SqlEditorProps) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const initialDoc = useRef(initialValue)
-  // A tab's engine never changes, so the language is set once with the editor.
+  // A tab's engine never changes; the names it completes come later, and the
+  // language is swapped in place for them, keeping the text and the undo history.
   const initialDialect = useRef(dialect)
+  const language = useRef(new Compartment())
 
   useImperativeHandle(
     ref,
@@ -66,7 +70,12 @@ export function SqlEditor({ initialValue = '', dialect, onRun, ref }: SqlEditorP
       parent: host.current!,
       state: EditorState.create({
         doc: initialDoc.current,
-        extensions: [Prec.highest(runKey), basicSetup, sqlLanguage(initialDialect.current), sqlTheme],
+        extensions: [
+          Prec.highest(runKey),
+          basicSetup,
+          language.current.of(sqlLanguage(initialDialect.current)),
+          sqlTheme,
+        ],
       }),
     })
     view.current = editor
@@ -76,6 +85,12 @@ export function SqlEditor({ initialValue = '', dialect, onRun, ref }: SqlEditorP
       view.current = null
     }
   }, [])
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: language.current.reconfigure(sqlLanguage(initialDialect.current, names)),
+    })
+  }, [names])
 
   return <div ref={host} style={{ height: '100%' }} />
 }

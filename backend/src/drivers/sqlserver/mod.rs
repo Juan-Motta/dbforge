@@ -163,6 +163,40 @@ pub async fn list_objects(connection: &Connection, password: Option<&str>, path:
 }
 
 /// Every table and view of `database` (the connection's own when `None`), for search.
+/// Every column of every table and view the user created, for completion.
+pub async fn completion_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+) -> Result<(String, Vec<super::CompletionRow>)> {
+    let mut client = connect(connection, password, database).await?;
+    let database = strings(&mut client, query("SELECT DB_NAME()", &[])).await?.concat();
+    let rows = text_rows(
+        &mut client,
+        query(
+            format!(
+                "SELECT TOP ({}) SCHEMA_NAME(o.schema_id), o.name, o.type, c.name, TYPE_NAME(c.user_type_id)
+                 FROM sys.objects o JOIN sys.columns c ON c.object_id = o.object_id
+                 WHERE o.type IN ('U', 'V') AND o.is_ms_shipped = 0
+                 ORDER BY SCHEMA_NAME(o.schema_id), o.name, c.column_id",
+                super::COMPLETION_COLUMNS
+            ),
+            &[],
+        ),
+    )
+    .await?;
+    client.close().await?;
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            let [schema, table, kind, column, data_type] =
+                <[Option<String>; 5]>::try_from(row).unwrap_or_default().map(Option::unwrap_or_default);
+            (schema, table, kind.trim() == "U", column, data_type)
+        })
+        .collect();
+    Ok((database, rows))
+}
+
 pub async fn list_relations(
     connection: &Connection,
     password: Option<&str>,
@@ -629,6 +663,37 @@ pub(super) mod tests {
 
     fn names(objects: &[DbObject]) -> Vec<&str> {
         objects.iter().map(|o| o.name.as_str()).collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
+    async fn completion_lists_tables_and_views_with_their_columns() {
+        let connection = database(
+            "dbforge_complete",
+            "CREATE SCHEMA sales;
+             GO
+             CREATE TABLE sales.orders (id int PRIMARY KEY, total decimal(10,2));
+             GO
+             CREATE VIEW dbo.recent AS SELECT id FROM sales.orders;",
+        )
+        .await;
+        let schema = super::super::completion_schema(&connection, PASSWORD, None).await.unwrap();
+        assert_eq!(schema.database, "dbforge_complete");
+        let shape: Vec<_> = schema
+            .tables
+            .iter()
+            .map(|t| {
+                let columns: Vec<_> = t.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str())).collect();
+                (t.schema.as_str(), t.name.as_str(), t.kind, columns)
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                ("dbo", "recent", ObjectKind::View, vec![("id", "int")]),
+                ("sales", "orders", ObjectKind::Table, vec![("id", "int"), ("total", "decimal")]),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -131,6 +131,40 @@ pub async fn list_relations(
     Ok(RelationList { database, relations })
 }
 
+/// Every column of every table and view of the database, for completion. In
+/// MySQL a database is its only schema, so the schema is the database.
+pub async fn completion_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+) -> Result<(String, Vec<super::CompletionRow>)> {
+    let mut conn = connect(connection, password, database).await?;
+    let database: Option<String> = sqlx::query_scalar("SELECT CAST(DATABASE() AS CHAR)").fetch_one(&mut conn).await?;
+    let Some(database) = database else {
+        conn.close().await?;
+        return Ok((String::new(), Vec::new()));
+    };
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT CAST(c.table_name AS CHAR), CAST(t.table_type AS CHAR), CAST(c.column_name AS CHAR),
+                CAST(c.column_type AS CHAR)
+         FROM information_schema.columns c
+         JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+         WHERE c.table_schema = ?
+         ORDER BY c.table_name, c.ordinal_position
+         LIMIT ?",
+    )
+    .bind(&database)
+    .bind(super::COMPLETION_COLUMNS as u64)
+    .fetch_all(&mut conn)
+    .await?;
+    conn.close().await?;
+    let rows = rows
+        .into_iter()
+        .map(|(table, kind, column, data_type)| (database.clone(), table, kind != "VIEW", column, data_type))
+        .collect();
+    Ok((database, rows))
+}
+
 /// Reads one page of a table or view, ordered by primary key when there is one.
 pub async fn fetch_rows(
     connection: &Connection,
@@ -438,6 +472,42 @@ mod tests {
             let relations = list_relations(&local(), PASSWORD, Some("dbforge_list")).await.unwrap();
             assert_eq!(relations.database, "dbforge_list");
             assert_eq!(relations.relations[0].schema, "dbforge_list");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn completion_lists_the_database_tables_and_their_columns() {
+        for server in servers() {
+            let _conn = run(
+                &server,
+                "DROP DATABASE IF EXISTS dbforge_complete;
+                 CREATE DATABASE dbforge_complete;
+                 CREATE TABLE dbforge_complete.orders (id int PRIMARY KEY, status varchar(12));
+                 CREATE VIEW dbforge_complete.recent AS SELECT id FROM dbforge_complete.orders;",
+            )
+            .await;
+            let schema = super::super::completion_schema(&server, PASSWORD, Some("dbforge_complete")).await.unwrap();
+            assert_eq!(schema.database, "dbforge_complete");
+            // MariaDB spells int as int(11); MySQL 8 dropped the display width.
+            let shape: Vec<_> = schema
+                .tables
+                .iter()
+                .map(|t| {
+                    let columns: Vec<_> =
+                        t.columns.iter().map(|c| (c.name.as_str(), c.data_type.trim_end_matches("(11)"))).collect();
+                    (t.schema.as_str(), t.name.as_str(), t.kind, columns)
+                })
+                .collect();
+            assert_eq!(
+                shape,
+                [
+                    ("dbforge_complete", "orders", ObjectKind::Table, vec![("id", "int"), ("status", "varchar(12)")]),
+                    ("dbforge_complete", "recent", ObjectKind::View, vec![("id", "int")]),
+                ],
+                "{}",
+                server.name
+            );
         }
     }
 

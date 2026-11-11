@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { GridColumn } from '../../components/data-grid/DataGrid'
+import type { CompletionSchema } from './completion'
 
 export interface StatementResult {
   /** Empty for statements that return no rows (INSERT, CREATE, …). */
@@ -32,6 +33,9 @@ export interface QueryScope {
  * so transactions and SET carry over. It opens on the first run.
  */
 export const queryApi = {
+  /** The tables, views and columns of `database` (the connection's own when omitted), for completion. */
+  completionSchema: (connectionId: string, database?: string) =>
+    invoke<CompletionSchema>('completion_schema', { connectionId, database }),
   /** Runs a script in the session; another scope opens a new one. */
   run: (sessionId: string, connectionId: string, scope: QueryScope, sql: string) =>
     invoke<QueryOutcome>('run_query', { sessionId, connectionId, scope, sql }),

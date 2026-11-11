@@ -1,7 +1,9 @@
 use tauri::State;
 
 use crate::connections::store::ConnectionStore;
-use crate::drivers::{self, DbObject, RelationList, RowFilter, RowsPage, SchemaDiagram, TableRef, TableStructure};
+use crate::drivers::{
+    self, CompletionSchema, DbObject, RelationList, RowFilter, RowsPage, SchemaDiagram, TableRef, TableStructure,
+};
 use crate::error::Result;
 use crate::statement_log::{Origin, StatementLog};
 
@@ -34,6 +36,23 @@ pub async fn list_relations(
         .open(&connection_id)?
         .run(&log, Origin::Metadata, async |connection, password| {
             drivers::list_relations(connection, password, database.as_deref()).await
+        })
+        .await
+}
+
+/// The tables, views and columns of a database, for completing names in the
+/// query console. `database` defaults to the connection's own.
+#[tauri::command]
+pub async fn completion_schema(
+    store: State<'_, ConnectionStore>,
+    log: State<'_, StatementLog>,
+    connection_id: String,
+    database: Option<String>,
+) -> Result<CompletionSchema> {
+    store
+        .open(&connection_id)?
+        .run(&log, Origin::Metadata, async |connection, password| {
+            drivers::completion_schema(connection, password, database.as_deref()).await
         })
         .await
 }

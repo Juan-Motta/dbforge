@@ -67,6 +67,57 @@ pub struct RelationList {
     pub relations: Vec<Relation>,
 }
 
+/// The tables and views of a database with their columns, for the query
+/// console's completion.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CompletionSchema {
+    /// The database read, resolved even when the connection leaves it unset.
+    pub database: String,
+    pub tables: Vec<CompletionTable>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionTable {
+    pub schema: String,
+    pub name: String,
+    pub kind: ObjectKind,
+    pub columns: Vec<CompletionColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionColumn {
+    pub name: String,
+    pub data_type: String,
+}
+
+/// The most columns read for completion: enough for any schema people type
+/// against, without a huge one costing seconds and megabytes.
+const COMPLETION_COLUMNS: usize = 20_000;
+
+/// One row of a completion query: schema, table, whether it is a table (not
+/// a view), column and type, ordered by schema, table and column position.
+type CompletionRow = (String, String, bool, String, String);
+
+/// The rows grouped into their tables, in the order they came.
+fn group_columns(rows: Vec<CompletionRow>) -> Vec<CompletionTable> {
+    let mut tables: Vec<CompletionTable> = Vec::new();
+    for (schema, name, is_table, column, data_type) in rows {
+        let column = CompletionColumn { name: column, data_type };
+        match tables.last_mut() {
+            Some(last) if last.schema == schema && last.name == name => last.columns.push(column),
+            _ => tables.push(CompletionTable {
+                schema,
+                name,
+                kind: if is_table { ObjectKind::Table } else { ObjectKind::View },
+                columns: vec![column],
+            }),
+        }
+    }
+    tables
+}
+
 /// A value written to a cell: the server's text form, NULL, or the column's DEFAULT.
 /// On the wire it is a string, `null`, or `{"kind": "default"}`, so a cell holding
 /// the text `DEFAULT` stays text.
@@ -427,6 +478,28 @@ pub async fn list_relations(
         }
     })
     .await
+}
+
+/// The tables, views and columns of `database` (the connection's own when
+/// `None`) for completing names in the query console. Document and key-value
+/// databases have none to offer.
+pub async fn completion_schema(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+) -> Result<CompletionSchema> {
+    let read = with_timeout(async {
+        match connection.engine {
+            Engine::Postgres => postgres::completion_rows(connection, password, database).await,
+            Engine::Sqlite => sqlite::completion_rows(connection).await,
+            Engine::Mysql | Engine::Mariadb => mysql::completion_rows(connection, password, database).await,
+            Engine::Sqlserver => sqlserver::completion_rows(connection, password, database).await,
+            _ => Ok((database.unwrap_or_default().to_string(), Vec::new())),
+        }
+    })
+    .await?;
+    let (database, rows) = read;
+    Ok(CompletionSchema { database, tables: group_columns(rows) })
 }
 
 /// Sends every row of a table or view to `sink`, ordered by primary key when there is one.

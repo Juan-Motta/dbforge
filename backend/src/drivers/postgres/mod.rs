@@ -201,6 +201,32 @@ pub async fn list_relations(
     Ok(RelationList { database, relations })
 }
 
+/// Every column of every table and view outside the system schemas, for completion.
+pub async fn completion_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    database: Option<&str>,
+) -> Result<(String, Vec<super::CompletionRow>)> {
+    let mut conn = connect(connection, password, database).await?;
+    let database: String = sqlx::query_scalar("SELECT current_database()::text").fetch_one(&mut conn).await?;
+    let rows = sqlx::query_as(
+        "SELECT n.nspname::text, c.relname::text, c.relkind IN ('r', 'p'), a.attname::text,
+                format_type(a.atttypid, a.atttypmod)
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+         WHERE c.relkind IN ('r', 'p', 'v', 'm')
+           AND n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\\_%'
+         ORDER BY n.nspname, c.relname, a.attnum
+         LIMIT $1",
+    )
+    .bind(super::COMPLETION_COLUMNS as i64)
+    .fetch_all(&mut conn)
+    .await?;
+    conn.close().await?;
+    Ok((database, rows))
+}
+
 /// Reads one page of a table or view, ordered by primary key when there is one.
 pub async fn fetch_rows(
     connection: &Connection,
@@ -587,6 +613,46 @@ pub(crate) mod tests {
         assert!(list.relations.iter().all(|r| !r.schema.starts_with("pg_")));
 
         sqlx::query("DROP SCHEMA dbforge_search CASCADE").execute(&mut conn).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn completion_lists_tables_views_and_columns_with_their_types() {
+        let mut conn = connect(&local(), PASSWORD, None).await.unwrap();
+        sqlx::raw_sql(
+            "DROP SCHEMA IF EXISTS dbforge_complete CASCADE;
+             CREATE SCHEMA dbforge_complete;
+             CREATE TABLE dbforge_complete.orders (id int, total numeric(10,2), dropped text);
+             ALTER TABLE dbforge_complete.orders DROP COLUMN dropped;
+             CREATE VIEW dbforge_complete.open_orders AS SELECT id FROM dbforge_complete.orders;",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        let schema = super::super::completion_schema(&local(), PASSWORD, None).await.unwrap();
+        assert_eq!(schema.database, "shop");
+        let mine: Vec<_> = schema.tables.iter().filter(|t| t.schema == "dbforge_complete").collect();
+        let shape: Vec<_> = mine
+            .iter()
+            .map(|t| {
+                (
+                    t.name.as_str(),
+                    t.kind,
+                    t.columns.iter().map(|c| (c.name.as_str(), c.data_type.as_str())).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                ("open_orders", ObjectKind::View, vec![("id", "integer")]),
+                ("orders", ObjectKind::Table, vec![("id", "integer"), ("total", "numeric(10,2)")]),
+            ]
+        );
+        assert!(schema.tables.iter().all(|t| !t.schema.starts_with("pg_") && t.schema != "information_schema"));
+
+        sqlx::query("DROP SCHEMA dbforge_complete CASCADE").execute(&mut conn).await.unwrap();
     }
 
     #[tokio::test]

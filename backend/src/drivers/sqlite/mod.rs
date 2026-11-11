@@ -85,6 +85,27 @@ pub async fn list_relations(connection: &Connection) -> Result<RelationList> {
     Ok(RelationList { database: MAIN.into(), relations })
 }
 
+/// Every column of every table and view, leaving out SQLite's own, for completion.
+pub async fn completion_rows(connection: &Connection) -> Result<(String, Vec<super::CompletionRow>)> {
+    let mut conn = connect(connection).await?;
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT m.name, m.type, p.name, p.type
+         FROM sqlite_schema m JOIN pragma_table_info(m.name) p
+         WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+         ORDER BY m.name, p.cid
+         LIMIT ?",
+    )
+    .bind(super::COMPLETION_COLUMNS as i64)
+    .fetch_all(&mut conn)
+    .await?;
+    conn.close().await?;
+    let rows = rows
+        .into_iter()
+        .map(|(table, kind, column, data_type)| (MAIN.to_string(), table, kind == "table", column, data_type))
+        .collect();
+    Ok((MAIN.to_string(), rows))
+}
+
 /// Tables and views, leaving out SQLite's own (`sqlite_…`).
 async fn relations(connection: &Connection) -> Result<Vec<(String, ObjectKind)>> {
     let mut conn = connect(connection).await?;
@@ -387,6 +408,33 @@ mod tests {
             [("big_orders", ObjectKind::View), ("customers", ObjectKind::Table), ("orders", ObjectKind::Table)]
         );
         assert_eq!(list_relations(&connection).await.unwrap().relations[0].schema, "main");
+    }
+
+    #[tokio::test]
+    async fn completion_lists_each_table_and_view_with_its_columns() {
+        let (_dir, connection) = database(&format!("{SHOP}; ANALYZE;")).await;
+        let schema = super::super::completion_schema(&connection, None, None).await.unwrap();
+        assert_eq!(schema.database, "main");
+        let tables: Vec<_> = schema
+            .tables
+            .iter()
+            .map(|t| {
+                (
+                    t.schema.as_str(),
+                    t.name.as_str(),
+                    t.kind,
+                    t.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        let names: Vec<_> = tables.iter().map(|t| (t.1, t.2)).collect();
+        assert_eq!(
+            names,
+            [("big_orders", ObjectKind::View), ("customers", ObjectKind::Table), ("orders", ObjectKind::Table)]
+        );
+        assert!(tables.iter().all(|t| t.0 == "main" && !t.3.is_empty()));
+        let orders = schema.tables.iter().find(|t| t.name == "orders").unwrap();
+        assert_eq!(orders.columns[0].name, "id");
     }
 
     #[tokio::test]

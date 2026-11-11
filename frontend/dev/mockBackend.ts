@@ -329,6 +329,62 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       return delay((payload.rows as unknown[]).length)
     case 'format_rows':
       return delay('id,name\n1042,Northwind Traders\n')
+    case 'completion_schema': {
+      // The sample shop: tables with their columns, a view, and a second schema.
+      const table = (schema: string, name: string, columns: [string, string][], kind = 'table') => ({
+        schema,
+        name,
+        kind,
+        columns: columns.map(([name, dataType]) => ({ name, dataType })),
+      })
+      return delay({
+        database: 'shop',
+        tables: [
+          table('public', 'customers', [
+            ['id', 'bigint'],
+            ['name', 'text'],
+            ['email', 'text'],
+            ['country', 'char(2)'],
+            ['created_at', 'timestamp with time zone'],
+          ]),
+          table('public', 'orders', [
+            ['id', 'bigint'],
+            ['customer_id', 'bigint'],
+            ['status', 'order_status'],
+            ['total', 'numeric(12,2)'],
+            ['created_at', 'timestamp with time zone'],
+          ]),
+          table('public', 'order_items', [
+            ['id', 'bigint'],
+            ['order_id', 'bigint'],
+            ['product_id', 'bigint'],
+            ['qty', 'integer'],
+            ['unit_price', 'numeric(10,2)'],
+          ]),
+          table('public', 'products', [
+            ['id', 'bigint'],
+            ['sku', 'text'],
+            ['name', 'text'],
+            ['price', 'numeric(10,2)'],
+          ]),
+          table(
+            'public',
+            'v_daily_sales',
+            [
+              ['day', 'date'],
+              ['orders', 'bigint'],
+              ['revenue', 'numeric'],
+            ],
+            'view',
+          ),
+          table('analytics', 'events', [
+            ['id', 'bigint'],
+            ['kind', 'text'],
+            ['at', 'timestamp with time zone'],
+          ]),
+        ],
+      })
+    }
     case 'plugin:updater|check':
       // A newer version, so the update dialog can be seen.
       return delay({
