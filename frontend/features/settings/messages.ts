@@ -42,6 +42,9 @@ export const messages = defineMessages({
     tagline: 'A fast desktop viewer and editor for your databases.',
     version: 'Version',
     versionUnknown: 'Unknown',
+    checkAutomatically: 'Check for updates automatically',
+    checkAutomaticallyDescription: 'Once a day; DBForge asks before installing anything.',
+    checkNow: 'Check for Updates…',
   },
   es: {
     title: 'Configuración',
@@ -86,6 +89,9 @@ export const messages = defineMessages({
     tagline: 'Un visor y editor de escritorio rápido para tus bases de datos.',
     version: 'Versión',
     versionUnknown: 'Desconocida',
+    checkAutomatically: 'Buscar actualizaciones automáticamente',
+    checkAutomaticallyDescription: 'Una vez al día; DBForge pregunta antes de instalar nada.',
+    checkNow: 'Buscar actualizaciones…',
   },
 })
 

@@ -21,6 +21,8 @@ import { Explorer } from '../features/explorer/Explorer'
 import type { TreeNode } from '../features/explorer/tree'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
+import { UpdateDialog } from '../features/updates/UpdateDialog'
+import { useUpdates } from '../features/updates/useUpdates'
 import { StatementConsole } from '../features/statement-log/StatementConsole'
 import { ApprovalDialog } from '../features/mcp/ApprovalDialog'
 import { useApprovals } from '../features/mcp/useApprovals'
@@ -95,6 +97,8 @@ export function App() {
   // Changes agents ask to make on connections whose tag asks first.
   const approvals = useApprovals()
   const [statementsOpen, setStatementsOpen] = useStoredFlag('dbforge.statementsOpen', false)
+  const [autoUpdates, setAutoUpdates] = useStoredFlag('dbforge.updates.automatic', true)
+  const updates = useUpdates(autoUpdates)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const theme = useTheme()
   const m = useMessages(messages)
@@ -422,7 +426,16 @@ export function App() {
             theme={theme.preference}
             onThemeChange={theme.choose}
             onConnectionsChanged={() => void reload()}
+            updates={{ automatic: autoUpdates, onAutomaticChange: setAutoUpdates, onCheck: updates.check }}
             onClose={() => setSettingsOpen(false)}
+          />
+        )}
+        {updates.state.state !== 'idle' && (
+          <UpdateDialog
+            state={updates.state}
+            onInstall={updates.install}
+            onRetry={updates.check}
+            onClose={updates.dismiss}
           />
         )}
       </div>

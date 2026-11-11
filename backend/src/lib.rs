@@ -18,7 +18,8 @@ mod mcp;
 mod query;
 mod statement_log;
 
-use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, MenuItemKind};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use connections::commands;
 use connections::store::ConnectionStore;
@@ -27,6 +28,14 @@ use connections::store::ConnectionStore;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .menu(app_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == CHECK_FOR_UPDATES {
+                let _ = app.emit(CHECK_FOR_UPDATES, ());
+            }
+        })
         .setup(|app| {
             cursor::install();
             let config = app.path().app_config_dir()?;
@@ -119,4 +128,17 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running DBForge");
+}
+
+/// The menu item, and the event the window hears, that look for a new version of DBForge.
+const CHECK_FOR_UPDATES: &str = "check-for-updates";
+
+/// The system's usual menu, with "Check for Updates…" under About in the app's own menu.
+fn app_menu<R: Runtime>(handle: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let menu = Menu::default(handle)?;
+    if let Some(MenuItemKind::Submenu(app)) = menu.items()?.first() {
+        let check = MenuItem::with_id(handle, CHECK_FOR_UPDATES, "Check for Updates…", true, None::<&str>)?;
+        app.insert(&check, 1)?;
+    }
+    Ok(menu)
 }

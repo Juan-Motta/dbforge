@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getVersion } from '@tauri-apps/api/app'
+import { Button } from '../../components/Button'
 import { Callout, CalloutSpace } from '../../components/Callout'
 import { Icon, type IconName } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
@@ -41,11 +42,27 @@ interface SettingsDialogProps {
   onThemeChange: (theme: ThemePreference) => void
   /** An imported backup changed the connections. */
   onConnectionsChanged: () => void
+  updates: UpdateSettings
   onClose: () => void
 }
 
+/** How DBForge looks for new versions, shown under About. */
+interface UpdateSettings {
+  /** Once a day, and at launch when a day has passed. */
+  automatic: boolean
+  onAutomaticChange: (automatic: boolean) => void
+  /** Looks now, and says what it found. */
+  onCheck: () => void
+}
+
 /** App preferences. Changes apply as soon as they are picked. */
-export function SettingsDialog({ theme, onThemeChange, onConnectionsChanged, onClose }: SettingsDialogProps) {
+export function SettingsDialog({
+  theme,
+  onThemeChange,
+  onConnectionsChanged,
+  updates,
+  onClose,
+}: SettingsDialogProps) {
   const m = useMessages(messages)
   const [section, setSection] = useState<Section>('appearance')
 
@@ -92,7 +109,7 @@ export function SettingsDialog({ theme, onThemeChange, onConnectionsChanged, onC
               <BackupSettings onThemeChange={onThemeChange} onConnectionsChanged={onConnectionsChanged} />
             </>
           )}
-          {section === 'about' && <About />}
+          {section === 'about' && <About updates={updates} />}
         </main>
       </div>
     </Modal>
@@ -264,7 +281,7 @@ function progressText(progress: SwitchProgress | null, m: SettingsMessages): str
   return write(progress.current, progress.total)
 }
 
-function About() {
+function About({ updates }: { updates: UpdateSettings }) {
   const m = useMessages(messages)
   const [version, setVersion] = useState<string | null>(null)
 
@@ -295,6 +312,23 @@ function About() {
         {/* The space is kept while the version loads, so nothing moves when it arrives. */}
         <span className={styles.value}>{version === null ? ' ' : version || m.versionUnknown}</span>
       </div>
+      <section className={styles.updates}>
+        <OptionList>
+          <Option
+            type="checkbox"
+            title={m.checkAutomatically}
+            description={m.checkAutomaticallyDescription}
+            checked={updates.automatic}
+            onChange={(event) => updates.onAutomaticChange(event.target.checked)}
+          />
+        </OptionList>
+        <div>
+          <Button onClick={updates.onCheck}>
+            <Icon name="refresh" />
+            {m.checkNow}
+          </Button>
+        </div>
+      </section>
     </>
   )
 }

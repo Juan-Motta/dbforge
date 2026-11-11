@@ -315,3 +315,11 @@
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* Below the version: the automatic check, then a check now. */
+.updates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}

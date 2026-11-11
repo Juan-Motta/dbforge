@@ -39,9 +39,11 @@ jobs:
           NOTARY_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          # An unsigned or unnotarized DMG is refused by Gatekeeper, so never ship one.
-          for name in P12_BASE64 P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+          # An unsigned or unnotarized DMG is refused by Gatekeeper, and an unsigned update by the app's
+          # updater, so never ship either.
+          for name in P12_BASE64 P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID UPDATER_KEY; do
             [[ -n "${!name}" ]] || { echo "The secret for $name is missing" >&2; exit 1; }
           done
 
@@ -104,12 +106,15 @@ jobs:
           NOTARY_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TARGET: universal-apple-darwin
         run: |
           export NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           # The secret holds the .p8 file's text as is, like ColiUI's.
           (umask 077; printf '%s\n' "$NOTARY_KEY_P8" > "$NOTARY_KEY_PATH")
-          # Tauri signs the app with the identity imported above; the script signs and notarizes the DMG.
+          # Tauri signs the app with the identity imported above; the script signs and notarizes the DMG,
+          # then packs and signs the update the app's updater installs.
           scripts/make-dmg.sh
 
       - name: Check the DMG and its app are signed and notarized
@@ -129,7 +134,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" "release/DBForge-$VERSION.dmg" \
+          UPDATE="DBForge-$VERSION.app.tar.gz"
+          # The app reads releases/latest/download/latest.json, so each release carries its own.
+          scripts/make-update-manifest.sh "$VERSION" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$UPDATE" \
+            "release/$UPDATE.sig" "$RUNNER_TEMP/notes.md" > release/latest.json
+          gh release create "$GITHUB_REF_NAME" "release/DBForge-$VERSION.dmg" "release/$UPDATE" release/latest.json \
             --title "DBForge $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
 
       - name: Remove the signing keychain and the notary key

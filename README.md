@@ -53,6 +53,20 @@ It needs these repository secrets, the same as ColiUI's:
 | `APP_STORE_CONNECT_API_KEY_P8` | The text of the App Store Connect API key's `.p8` file |
 | `APP_STORE_CONNECT_KEY_ID` | That key's ID |
 | `APP_STORE_CONNECT_ISSUER_ID` | The issuer ID shown above the keys in App Store Connect |
+| `TAURI_SIGNING_PRIVATE_KEY` | The text of the updater's private key, `~/.tauri/dbforge.key` |
+
+### Updates
+
+DBForge looks for a new version once a day (Settings › About can turn that off) and from
+DBForge › Check for Updates…, reading `latest.json` from the latest GitHub Release. Each release
+carries that manifest and `DBForge-<version>.app.tar.gz`, the notarized app, signed with the
+updater's own key. The app checks that signature against the public key in `backend/tauri.conf.json`,
+and that it was made for the version the manifest announces, before installing anything.
+
+The private key was made with `pnpm tauri signer generate -w ~/.tauri/dbforge.key` and has no
+password. Keep a copy somewhere safe: without it, no installed copy of DBForge can be updated again,
+and a new key means people reinstall by hand once. `scripts/make-dmg.sh` signs the update when
+`TAURI_SIGNING_PRIVATE_KEY` holds the key's text or path.
 
 ## Structure
 

@@ -9,6 +9,8 @@
 #   NOTARY_KEY_PATH         App Store Connect API key (.p8): notarizes the DMG and staples its ticket
 #   NOTARY_KEY_ID           its key ID
 #   NOTARY_ISSUER_ID        its issuer ID
+#   TAURI_SIGNING_PRIVATE_KEY  the updater key (its text or path): also writes the update the app installs,
+#                           release/DBForge-<version>.app.tar.gz, and its signature (.sig)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -49,6 +51,29 @@ if [[ -n "${NOTARY_KEY_PATH:-}" ]]; then
     fi
     # Stapling the ticket lets Gatekeeper accept it offline too.
     xcrun stapler staple "$DMG"
+fi
+
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+    # The update is the app in the DMG. Notarizing the DMG notarized it too, so its ticket can be stapled
+    # to it, and the updated app opens offline like a fresh install.
+    if [[ -n "${NOTARY_KEY_PATH:-}" ]]; then
+        xcrun stapler staple "$APP"
+    fi
+    UPDATE="release/DBForge-$VERSION.app.tar.gz"
+    rm -f "$UPDATE" "$UPDATE.sig"
+    # No AppleDouble (._) files in the archive.
+    COPYFILE_DISABLE=1 tar -czf "$UPDATE" -C "$(dirname "$APP")" "$(basename "$APP")"
+    # Bound to the version, so a manifest can't pair this archive with another version number. The
+    # signer reads a key file from TAURI_SIGNING_PRIVATE_KEY_PATH and only the key's text from
+    # TAURI_SIGNING_PRIVATE_KEY; either way the key stays out of the command line.
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+    if [[ -f "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+        env -u TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH="$TAURI_SIGNING_PRIVATE_KEY" \
+            pnpm tauri signer sign --app-version "$VERSION" "$UPDATE"
+    else
+        pnpm tauri signer sign --app-version "$VERSION" "$UPDATE"
+    fi
+    echo "Built $UPDATE"
 fi
 
 echo "Built $DMG"

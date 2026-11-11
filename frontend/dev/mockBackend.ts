@@ -329,6 +329,20 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       return delay((payload.rows as unknown[]).length)
     case 'format_rows':
       return delay('id,name\n1042,Northwind Traders\n')
+    case 'plugin:updater|check':
+      // A newer version, so the update dialog can be seen.
+      return delay({
+        rid: 1,
+        currentVersion: '0.1.0',
+        version: '0.2.0',
+        date: '2026-11-12 10:00:00.0 +00:00:00',
+        body: '## Features\n\n- **import:** import rows from CSV, TSV and JSON files\n- **export:** format options, column choice, progress and stop\n\n## Fixes\n\n- **grid:** the row number header is centered like the column headers\n',
+        rawJson: {},
+      })
+    case 'plugin:updater|download_and_install':
+      return delay(null)
+    case 'plugin:process|restart':
+      return null
     case 'set_aside_files':
       return []
     case 'list_history': {

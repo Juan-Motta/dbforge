@@ -1,0 +1,123 @@
+/* Laid out like the other dialogs: the product line, the notes, a status box and the footer. */
+.dialog {
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 18px 20px 8px;
+  overflow: auto;
+}
+
+/* The app's mark and the headline, as Settings › About shows the product. */
+.product {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.headline {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.detail {
+  margin: 2px 0 0;
+  color: var(--text3);
+  font-size: 12.5px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.notes {
+  max-height: 220px;
+  padding: 10px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.noteHeading {
+  margin: 10px 0 4px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.noteHeading:first-child {
+  margin-top: 0;
+}
+
+.noteItem,
+.noteText {
+  margin: 0 0 3px;
+}
+
+.noteItem {
+  position: relative;
+  padding-left: 14px;
+}
+
+.noteItem::before {
+  content: '';
+  position: absolute;
+  top: 0.62em;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text3);
+}
+
+.noteItem strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.empty {
+  margin: 0;
+  color: var(--text3);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}
