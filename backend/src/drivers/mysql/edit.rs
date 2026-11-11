@@ -11,7 +11,7 @@ use super::super::sqlx_edits;
 use super::{Conn, TextForm, connect, table_columns, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
-use crate::drivers::{ApplySummary, CellValue, Column, RowChange, TableRef};
+use crate::drivers::{ApplySummary, CellValue, Column, ImportBatches, RowChange, TableRef};
 use crate::error::{AppError, Result};
 
 const MYSQL: Dialect = Dialect {
@@ -45,6 +45,42 @@ pub async fn apply_changes(
     Ok(edit_sql::summarize(changes))
 }
 
+/// The most parameters MySQL binds to one statement.
+const MAX_PARAMS: usize = 65_535;
+
+/// Inserts an import's rows in one transaction, all of them or none, in
+/// strict mode like edits.
+pub async fn import_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
+    let columns = with_timeout(editable_columns(&mut conn, table)).await?;
+    sqlx::query("SET SESSION sql_mode = CONCAT_WS(',', @@SESSION.sql_mode, 'STRICT_ALL_TABLES')")
+        .execute(&mut conn)
+        .await?;
+    let mut transaction = conn.begin().await?;
+    let inserted = sqlx_edits::insert_batches::<sqlx::MySql>(
+        &mut transaction,
+        &MYSQL,
+        &columns,
+        table,
+        names,
+        batches,
+        MAX_PARAMS,
+        check_binary,
+        progress,
+    )
+    .await?;
+    transaction.commit().await?;
+    conn.close().await?;
+    Ok(inserted)
+}
+
 /// The statements `apply_changes` would run, with values written in, for review.
 pub async fn preview_changes(
     connection: &Connection,
@@ -63,25 +99,29 @@ pub async fn preview_changes(
 /// Refuses a value for a binary column that isn't `0x` and pairs of hex digits:
 /// `UNHEX` would turn it into NULL without a word.
 fn check_binary_values(columns: &[Column], changes: &[RowChange]) -> Result<()> {
-    let is_hex = |text: &str| {
-        text.strip_prefix("0x")
-            .is_some_and(|digits| digits.len() % 2 == 0 && digits.bytes().all(|b| b.is_ascii_hexdigit()))
-    };
     let values = changes.iter().flat_map(|change| match change {
         RowChange::Update { values, .. } | RowChange::Insert { values } => Some(values),
         // Deletes carry no values, and whole documents aren't a SQL table's.
         _ => None,
     });
     for (name, value) in values.flatten() {
-        let binary = columns.iter().any(|c| &c.name == name && TextForm::of(&c.data_type) == TextForm::Hex);
-        if let CellValue::Text(text) = value
-            && binary
-            && !is_hex(text)
-        {
-            return Err(AppError::Invalid(format!(
-                "{name} takes binary values as 0x followed by hex digits, like 0x0A1B."
-            )));
+        if let (Some(column), CellValue::Text(text)) = (columns.iter().find(|c| &c.name == name), value) {
+            check_binary(column, text)?;
         }
+    }
+    Ok(())
+}
+
+/// One value of `column`, as `check_binary_values` checks it.
+fn check_binary(column: &Column, text: &str) -> Result<()> {
+    let is_hex = text
+        .strip_prefix("0x")
+        .is_some_and(|digits| digits.len() % 2 == 0 && digits.bytes().all(|b| b.is_ascii_hexdigit()));
+    if TextForm::of(&column.data_type) == TextForm::Hex && !is_hex {
+        return Err(AppError::Invalid(format!(
+            "{} takes binary values as 0x followed by hex digits, like 0x0A1B.",
+            column.name
+        )));
     }
     Ok(())
 }
@@ -118,6 +158,7 @@ mod tests {
 
     use super::super::tests::{PASSWORD, run, servers, table};
     use super::*;
+    use crate::drivers::import_batches;
 
     /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
     fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
@@ -138,6 +179,48 @@ mod tests {
              CREATE TABLE {database}.loose (name text);
              CREATE TABLE {database}.legacy (id int PRIMARY KEY) ENGINE = MyISAM;"
         )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306"]
+    async fn imports_in_one_transaction_and_checks_binary_values() {
+        for server in servers() {
+            let database = "dbforge_mimport";
+            let mut conn = run(
+                &server,
+                &format!(
+                    "DROP DATABASE IF EXISTS {database};
+                     CREATE DATABASE {database};
+                     CREATE TABLE {database}.loose (n int, name varchar(3), data varbinary(4));"
+                ),
+            )
+            .await;
+            let table = table(database, "loose");
+            let names: Vec<String> = ["n", "name", "data"].map(String::from).to_vec();
+            let mut sent =
+                import_batches(vec![Ok(vec![vec![Some("1"), Some("a"), Some("0xACED")], vec![Some("2"), None, None]])]);
+            let inserted = import_rows(&server, PASSWORD, &table, &names, &mut sent, &mut |_| {}).await.unwrap();
+            assert_eq!(inserted, 2);
+
+            // Strict mode: a value too long fails instead of being cut, and nothing of the import stays.
+            let mut too_long = import_batches(vec![
+                Ok(vec![vec![Some("3"), Some("ok"), None]]),
+                Ok(vec![vec![Some("4"), Some("long"), None]]),
+            ]);
+            let error = import_rows(&server, PASSWORD, &table, &names, &mut too_long, &mut |_| {}).await.unwrap_err();
+            assert!(error.to_string().contains("too long"), "{error}");
+            let mut not_hex = import_batches(vec![Ok(vec![vec![Some("5"), None, Some("bytes")]])]);
+            let error = import_rows(&server, PASSWORD, &table, &names, &mut not_hex, &mut |_| {}).await.unwrap_err();
+            assert_eq!(error.to_string(), "data takes binary values as 0x followed by hex digits, like 0x0A1B.");
+
+            let rows: Vec<(i32, Option<String>)> = sqlx::query_as(AssertSqlSafe(format!(
+                "SELECT n, CONCAT('0x', HEX(data)) FROM {database}.loose ORDER BY n"
+            )))
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+            assert_eq!(rows, [(1, Some("0xACED".into())), (2, None)], "{}", server.name);
+        }
     }
 
     async fn rows(conn: &mut Conn, database: &str) -> Vec<(i32, String, i32, Option<String>)> {

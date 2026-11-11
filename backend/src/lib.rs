@@ -11,6 +11,7 @@ mod explorer;
 mod export;
 mod files;
 mod history;
+mod import;
 mod jobs;
 mod keyspace;
 mod mcp;
@@ -94,6 +95,8 @@ pub fn run() {
             export::format_rows,
             export::export_rows,
             export::export_table,
+            import::preview_import,
+            import::import_table,
             dump::export_database,
             dump::import_database,
             jobs::cancel_job,

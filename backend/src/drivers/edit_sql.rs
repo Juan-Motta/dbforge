@@ -121,6 +121,68 @@ pub fn build(dialect: &Dialect, columns: &[Column], table: &TableRef, changes: &
         .collect()
 }
 
+/// One INSERT adding several rows of an import, each with a value (or NULL)
+/// for every one of `names`. Unlike edits, no row is identified afterwards,
+/// so the table needs no primary key.
+pub fn insert_rows(
+    dialect: &Dialect,
+    columns: &[Column],
+    table: &TableRef,
+    names: &[String],
+    rows: &[Vec<Option<String>>],
+) -> Result<InsertBatch> {
+    if names.is_empty() {
+        return Err(AppError::Invalid("Choose at least one column to import into.".into()));
+    }
+    let known: BTreeMap<&str, &Column> = columns.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut seen = BTreeSet::new();
+    for name in names {
+        let column = known.get(name.as_str()).ok_or_else(|| AppError::Invalid(format!("Unknown column: {name}")))?;
+        if column.generated {
+            return Err(AppError::Invalid(format!("{name} is computed by the database and can't be set.")));
+        }
+        if !seen.insert(name.as_str()) {
+            return Err(AppError::Invalid(format!("{name} is filled from two fields of the file.")));
+        }
+    }
+    let builder = Builder { dialect, columns: known };
+    let head = format!(
+        "INSERT INTO {}.{} ({})",
+        builder.quote(&table.schema),
+        builder.quote(&table.name),
+        names.iter().map(|name| builder.quote(name)).collect::<Vec<_>>().join(", ")
+    );
+    let mut params = Vec::new();
+    let tuples = rows
+        .iter()
+        .map(|row| {
+            let markers = names
+                .iter()
+                .zip(row)
+                .map(|(name, value)| builder.value(name, &value.clone().into(), &mut params))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(format!("({})", markers.join(", ")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(InsertBatch {
+        shown: format!("{head} VALUES … -- {} rows", rows.len()),
+        statement: Statement { sql: format!("{head} VALUES {}", tuples.join(", ")), params, key: None },
+    })
+}
+
+/// An import's INSERT, and what the statement log shows for it: its columns
+/// and how many rows, not every value.
+pub struct InsertBatch {
+    pub statement: Statement,
+    pub shown: String,
+}
+
+/// How many rows one INSERT of `columns` values each may add: as many as the
+/// engine's parameter limit allows, up to a thousand.
+pub fn rows_per_insert(max_params: usize, columns: usize) -> usize {
+    (max_params / columns.max(1)).clamp(1, 1000)
+}
+
 struct Builder<'a> {
     dialect: &'a Dialect,
     columns: BTreeMap<&'a str, &'a Column>,
@@ -317,6 +379,43 @@ mod tests {
         let sql = "UPDATE [t]]@P1] SET [a] = @P1, [b] = @P2 WHERE [id] = @P3";
         let bracketed = statement(sql, &[Some("café"), Some("@P1"), None]);
         assert_eq!(inline(&BRACKETS, &bracketed), "UPDATE [t]]@P1] SET [a] = N'café', [b] = N'@P1' WHERE [id] = NULL");
+    }
+
+    fn column(name: &str, generated: bool) -> Column {
+        Column { name: name.into(), data_type: "text".into(), primary_key: false, generated, default: None }
+    }
+
+    #[test]
+    fn an_import_insert_adds_every_row_and_needs_no_primary_key() {
+        let table = TableRef { database: "d".into(), schema: "s".into(), name: "t".into() };
+        let columns = [column("a", false), column("b", false), column("c", true)];
+        let names = ["b".to_string(), "a".to_string()];
+        let rows = [vec![Some("1".into()), None], vec![Some("2".into()), Some("x".into())]];
+        let batch = insert_rows(&DOLLAR, &columns, &table, &names, &rows).unwrap();
+        assert_eq!(
+            batch.statement,
+            statement(
+                r#"INSERT INTO "s"."t" ("b", "a") VALUES ($1, $2), ($3, $4)"#,
+                &[Some("1"), None, Some("2"), Some("x")]
+            )
+        );
+        assert_eq!(batch.shown, r#"INSERT INTO "s"."t" ("b", "a") VALUES … -- 2 rows"#);
+
+        let fail = |names: &[&str]| {
+            let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            insert_rows(&DOLLAR, &columns, &table, &names, &rows).err().unwrap().to_string()
+        };
+        assert_eq!(fail(&["c", "a"]), "c is computed by the database and can't be set.");
+        assert_eq!(fail(&["a", "a"]), "a is filled from two fields of the file.");
+        assert_eq!(fail(&["z", "a"]), "Unknown column: z");
+        assert_eq!(fail(&[]), "Choose at least one column to import into.");
+    }
+
+    #[test]
+    fn an_import_insert_stays_under_the_parameter_limit() {
+        assert_eq!(rows_per_insert(2099, 12), 174);
+        assert_eq!(rows_per_insert(65_535, 2), 1000);
+        assert_eq!(rows_per_insert(10, 400), 1);
     }
 
     #[test]

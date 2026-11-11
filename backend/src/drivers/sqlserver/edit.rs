@@ -9,8 +9,9 @@ use super::logged::Statement;
 use super::{Client, connect, table_columns, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
-use crate::drivers::{ApplySummary, RowChange, TableRef};
+use crate::drivers::{ApplySummary, Column, ImportBatches, RowChange, TableRef};
 use crate::error::Result;
+use crate::statement_log;
 
 const SQLSERVER: Dialect = Dialect {
     quote: ['[', ']'],
@@ -69,6 +70,55 @@ async fn run_all(client: &mut Client, statements: &[edit_sql::Statement]) -> Res
     Ok(())
 }
 
+/// The most parameters SQL Server takes in one request is 2,100; one is kept spare.
+const MAX_PARAMS: usize = 2_099;
+
+/// Inserts an import's rows in one transaction: all of them or none. A
+/// cancelled import drops the connection, and the server rolls back with it.
+pub async fn import_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    let mut client = with_timeout(connect(connection, password, Some(&table.database))).await?;
+    let columns = with_timeout(table_columns(&mut client, table)).await?;
+    client.simple_query("BEGIN TRANSACTION").await?.into_results().await?;
+    let inserted = insert_all(&mut client, &columns, table, names, batches, progress).await;
+    let ending = if inserted.is_ok() { "COMMIT" } else { "ROLLBACK" };
+    client.simple_query(ending).await?.into_results().await?;
+    client.close().await?;
+    inserted
+}
+
+async fn insert_all(
+    client: &mut Client,
+    columns: &[Column],
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    let size = edit_sql::rows_per_insert(MAX_PARAMS, names.len());
+    let mut inserted = 0;
+    while let Some(batch) = batches.recv().await {
+        for rows in batch?.chunks(size) {
+            let edit_sql::InsertBatch { statement, shown } =
+                edit_sql::insert_rows(&SQLSERVER, columns, table, names, rows)?;
+            let bound = statement
+                .params
+                .iter()
+                .fold(Statement::new(statement.sql.as_str()), |bound, param| bound.bind(param.as_deref()));
+            statement_log::shown_as(shown, client.execute(bound)).await?;
+            inserted += rows.len() as u64;
+            progress(inserted);
+        }
+    }
+    Ok(inserted)
+}
+
 pub async fn preview_changes(
     connection: &Connection,
     password: Option<&str>,
@@ -88,6 +138,7 @@ mod tests {
 
     use super::super::tests::{PASSWORD, database, table};
     use super::*;
+    use crate::drivers::import_batches;
     use crate::statement_log::store::tests::Collected;
     use crate::statement_log::{self, Origin, StatementLog};
 
@@ -117,6 +168,52 @@ mod tests {
         .await
         .unwrap()
         .rows
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local SQL Server on port 51433"]
+    async fn imports_in_one_transaction_over_the_parameter_limit() {
+        let connection = database("dbforge_import", ITEMS).await;
+        let loose = table("dbforge_import", "items");
+        let names: Vec<String> = ["id", "name", "blob", "seen"].map(String::from).to_vec();
+        // 600 rows of 4 values: more parameters than one request takes, so several INSERTs.
+        let ids: Vec<String> = (10..610).map(|n| n.to_string()).collect();
+        let file: Vec<Vec<Option<&str>>> = ids
+            .iter()
+            .map(|id| vec![Some(id.as_str()), Some("über"), Some("0x0A0B"), Some("2024-03-04 05:06:07.123")])
+            .collect();
+        let mut sent = import_batches(vec![Ok(file)]);
+        let inserted = import_rows(&connection, PASSWORD, &loose, &names, &mut sent, &mut |_| {}).await.unwrap();
+        assert_eq!(inserted, 600);
+        assert_eq!(count(&connection).await, 603);
+        assert_eq!(
+            rows(&connection, "items").await[3][1..5],
+            [Some("über".into()), Some("5".into()), Some("0x0A0B".into()), Some("2024-03-04 05:06:07.123".into())]
+        );
+
+        // A value too long for its column, after a batch that went in, leaves nothing of the import.
+        let mut too_long = import_batches(vec![
+            Ok(vec![vec![Some("700"), Some("ok"), None, None]]),
+            Ok(vec![vec![Some("701"), Some("much too long"), None, None]]),
+        ]);
+        let error = import_rows(&connection, PASSWORD, &loose, &names, &mut too_long, &mut |_| {}).await.unwrap_err();
+        assert!(error.to_string().contains("truncated"), "{error}");
+        assert_eq!(count(&connection).await, 603);
+    }
+
+    /// How many rows `items` has, past the first page: those after the first 600, and 600.
+    async fn count(connection: &Connection) -> usize {
+        let past = super::super::fetch_rows(
+            connection,
+            PASSWORD,
+            &table(&connection.database, "items"),
+            &crate::drivers::RowFilter::default(),
+            600,
+            50,
+        )
+        .await
+        .unwrap();
+        600 + past.rows.len()
     }
 
     #[tokio::test]

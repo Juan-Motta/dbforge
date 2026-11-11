@@ -21,8 +21,9 @@ use super::shell::{date, parse_value};
 use super::{columns_of, connect, literal, type_name};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{changed_elsewhere, summarize};
-use crate::drivers::{ApplySummary, CellValue, RowChange, TableRef};
+use crate::drivers::{ApplySummary, CellValue, ImportBatches, RowChange, TableRef};
 use crate::error::{AppError, Result};
+use crate::statement_log;
 
 /// Documents read to learn the type of a field a document doesn't have.
 const SAMPLE: i64 = 100;
@@ -95,15 +96,20 @@ fn id_filter(id: &Bson) -> Document {
     doc! { "_id": id.clone() }
 }
 
-/// Finds every edited document and converts every value; nothing is written.
-async fn prepare(collection: &LoggedCollection, changes: &[RowChange]) -> Result<Vec<Write>> {
+/// The type of each field that has one in the collection's first documents.
+async fn known_types(collection: &LoggedCollection) -> Result<BTreeMap<String, String>> {
     let sample: Vec<Document> =
         collection.find(Find::new(doc! {}).sort(doc! { "_id": 1 }).limit(SAMPLE)).await?.try_collect().await?;
-    let known: BTreeMap<String, String> = columns_of(&sample)
+    Ok(columns_of(&sample)
         .into_iter()
         .filter(|c| !matches!(c.data_type.as_str(), "mixed" | "null"))
         .map(|c| (c.name, c.data_type))
-        .collect();
+        .collect())
+}
+
+/// Finds every edited document and converts every value; nothing is written.
+async fn prepare(collection: &LoggedCollection, changes: &[RowChange]) -> Result<Vec<Write>> {
+    let known = known_types(collection).await?;
 
     let mut writes = Vec::new();
     for change in changes {
@@ -142,16 +148,11 @@ async fn prepare(collection: &LoggedCollection, changes: &[RowChange]) -> Result
                 })
             }
             RowChange::Insert { values } => {
-                let mut document = Document::new();
-                // `_id` first, as the server would put it.
-                let mut fields: Vec<_> = values.iter().collect();
-                fields.sort_by_key(|(field, _)| field.as_str() != "_id");
-                for (field, text) in fields {
-                    if let CellValue::Text(text) = text {
-                        document.insert(field, convert(field, text, known.get(field).map(String::as_str))?);
-                    }
-                }
-                Some(Write::InsertOne(document))
+                let fields = values.iter().map(|(field, value)| match value {
+                    CellValue::Text(text) => (field.as_str(), Some(text.as_str())),
+                    CellValue::Null | CellValue::Default => (field.as_str(), None),
+                });
+                Some(Write::InsertOne(new_document(fields, &known)?))
             }
             RowChange::Delete { key } => {
                 let document = find(collection, key).await?;
@@ -176,6 +177,85 @@ async fn prepare(collection: &LoggedCollection, changes: &[RowChange]) -> Result
         });
     }
     Ok(writes)
+}
+
+/// A new document from text values, converted as [`convert`] does; a NULL
+/// leaves the field out. `_id` goes first, as the server would put it.
+fn new_document<'a>(
+    fields: impl Iterator<Item = (&'a str, Option<&'a str>)>,
+    known: &BTreeMap<String, String>,
+) -> Result<Document> {
+    let mut fields: Vec<_> = fields.filter_map(|(field, text)| Some((field, text?))).collect();
+    fields.sort_by_key(|(field, _)| *field != "_id");
+    let mut document = Document::new();
+    for (field, text) in fields {
+        document.insert(field, convert(field, text, known.get(field).map(String::as_str))?);
+    }
+    Ok(document)
+}
+
+/// Inserts an import's rows a batch at a time, each value converted as a
+/// grid insert converts it. There is no transaction: the first error stops
+/// the import, and says how many rows were already in.
+pub async fn import_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    let client = connect(connection, password).await?;
+    let collection = client.database(&table.database).collection(&table.name);
+    let mut inserted = 0;
+    let result = import(&collection, table, names, batches, &mut inserted, progress).await;
+    client.shutdown().await;
+    result.map_err(|error| imported_before(inserted, error))?;
+    Ok(inserted)
+}
+
+async fn import(
+    collection: &LoggedCollection,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    inserted: &mut u64,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<()> {
+    let known = known_types(collection).await?;
+    while let Some(batch) = batches.recv().await {
+        let documents = batch?
+            .iter()
+            .map(|row| new_document(names.iter().map(String::as_str).zip(row.iter().map(Option::as_deref)), &known))
+            .collect::<Result<Vec<_>>>()?;
+        let count = documents.len() as u64;
+        // The log shows the call, not every document.
+        let shown = format!(
+            "db.getCollection({}).insertMany([…]) // {count} documents",
+            literal(&Bson::String(table.name.clone()))
+        );
+        match statement_log::shown_as(shown, collection.write(&Write::InsertMany(documents))).await {
+            Ok(_) => *inserted += count,
+            Err(error) => {
+                // An ordered insertMany stops at its first failing document, after the ones before it.
+                *inserted += first_failure(&error).unwrap_or(0);
+                return Err(error.into());
+            }
+        }
+        progress(*inserted);
+    }
+    Ok(())
+}
+
+/// Where in its batch an insertMany failed: how many of the batch went in.
+fn first_failure(error: &mongodb::error::Error) -> Option<u64> {
+    let mongodb::error::ErrorKind::InsertMany(failure) = error.kind.as_ref() else { return None };
+    failure.write_errors.as_ref()?.iter().map(|e| e.index as u64).min()
+}
+
+/// The error an import stopped with, saying how many rows it had added.
+fn imported_before(inserted: u64, error: AppError) -> AppError {
+    AppError::Invalid(format!("{inserted} rows were imported before it stopped: {error}"))
 }
 
 fn id_unchangeable() -> AppError {
@@ -260,6 +340,7 @@ mod tests {
 
     use super::super::tests::{PASSWORD, database, table};
     use super::*;
+    use crate::drivers::import_batches;
 
     /// Keys (`Option<String>`) or values (`CellValue`) from text, `None` being NULL.
     fn map<V: From<Option<String>>>(pairs: &[(&str, Option<&str>)]) -> BTreeMap<String, V> {
@@ -282,6 +363,31 @@ mod tests {
             )],
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MongoDB on port 57017"]
+    async fn imports_batches_and_says_how_many_went_in_before_an_error() {
+        let connection = people("dbforge_import").await;
+        let table = table("dbforge_import", "people");
+        let names: Vec<String> = ["_id", "name", "age"].map(String::from).to_vec();
+        let mut sent = import_batches(vec![
+            Ok(vec![vec![Some("10"), Some("Di"), Some("50")], vec![Some("11"), Some("Ed"), None]]),
+            // The second document repeats an _id: the one before it goes in, then it stops.
+            Ok(vec![vec![Some("12"), Some("Flo"), Some("7")], vec![Some("10"), Some("Again"), None]]),
+            Ok(vec![vec![Some("13"), Some("Never"), None]]),
+        ]);
+        let mut seen = Vec::new();
+        let error =
+            import_rows(&connection, PASSWORD, &table, &names, &mut sent, &mut |n| seen.push(n)).await.unwrap_err();
+        assert!(error.to_string().starts_with("3 rows were imported before it stopped:"), "{error}");
+        assert_eq!(seen, [2]);
+        let found = documents(&connection, "dbforge_import").await;
+        assert_eq!(found.len(), 6);
+        // Values take the type the field has in the collection; a NULL leaves the field out.
+        let di = found.iter().find(|d| d.get_str("name") == Ok("Di")).unwrap();
+        assert_eq!(di.get("age"), Some(&Bson::Int64(50)));
+        assert!(!found.iter().find(|d| d.get_str("name") == Ok("Ed")).unwrap().contains_key("age"));
     }
 
     async fn documents(connection: &Connection, name: &str) -> Vec<Document> {

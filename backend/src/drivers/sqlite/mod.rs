@@ -7,7 +7,7 @@ mod edit;
 mod read_only;
 mod structure;
 
-pub use edit::{apply_changes, preview_changes};
+pub use edit::{apply_changes, import_rows, preview_changes};
 pub use read_only::run_read_only;
 pub use structure::{schema_diagram, table_structure};
 

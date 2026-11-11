@@ -17,7 +17,7 @@ use super::query::{Feed, Items, Select, documents};
 use super::{shared_type, text, type_name, without_system_properties};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{changed_elsewhere, summarize};
-use crate::drivers::{ApplySummary, CellValue, RowChange, RowFilter, TableRef};
+use crate::drivers::{ApplySummary, CONCURRENT_REQUESTS, CellValue, ImportBatches, RowChange, RowFilter, TableRef};
 use crate::error::{AppError, Result};
 
 /// Items read to learn each property's type for new items.
@@ -74,13 +74,18 @@ fn describe(container: &str, write: &Write) -> String {
     }
 }
 
-async fn prepare(client: &Client, table: &TableRef, changes: &[RowChange]) -> Result<Vec<Write>> {
+/// The container's partition key paths.
+async fn partition_paths(client: &Client, table: &TableRef) -> Result<Vec<String>> {
     let container = client.get(&Target::container(&table.database, &table.name), &[]).await?.body;
-    let paths: Vec<String> = container
+    Ok(container
         .pointer("/partitionKey/paths")
         .and_then(Value::as_array)
         .map(|paths| paths.iter().filter_map(Value::as_str).map(String::from).collect())
-        .unwrap_or_default();
+        .unwrap_or_default())
+}
+
+async fn prepare(client: &Client, table: &TableRef, changes: &[RowChange]) -> Result<Vec<Write>> {
+    let paths = partition_paths(client, table).await?;
     let types = if changes.iter().any(|change| matches!(change, RowChange::Insert { .. })) {
         sample_types(client, table).await?
     } else {
@@ -105,15 +110,7 @@ async fn prepare(client: &Client, table: &TableRef, changes: &[RowChange]) -> Re
                     item: without_system_properties(updated),
                 }
             }
-            RowChange::Insert { values } => {
-                let mut item = Value::Object(Map::new());
-                for (property, value) in id_first(values) {
-                    let kind = if property == "id" { Some("string") } else { types.get(property).map(String::as_str) };
-                    set(&mut item, property, value, kind)?;
-                }
-                with_id(&mut item);
-                Write::Create { partition: partition(&item, &paths), item }
-            }
+            RowChange::Insert { values } => create(values, &types, &paths)?,
             RowChange::Replace { key, document } => {
                 let item = find(client, table, key).await?;
                 let replacement = parse_document(document)?;
@@ -137,6 +134,88 @@ async fn prepare(client: &Client, table: &TableRef, changes: &[RowChange]) -> Re
         });
     }
     Ok(writes)
+}
+
+/// A new item from text values, each converted by its property's type in
+/// `types`; it gets an `id` when it has none.
+fn create(values: &BTreeMap<String, CellValue>, types: &BTreeMap<String, String>, paths: &[String]) -> Result<Write> {
+    let mut item = Value::Object(Map::new());
+    for (property, value) in id_first(values) {
+        let kind = if property == "id" { Some("string") } else { types.get(property).map(String::as_str) };
+        set(&mut item, property, value, kind)?;
+    }
+    with_id(&mut item);
+    Ok(Write::Create { partition: partition(&item, paths), item })
+}
+
+/// Creates an import's items, a few at a time. Cosmos DB has no transaction
+/// across partitions: the first error stops the import, and says how many
+/// rows were already in.
+pub async fn import_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    let mut inserted = 0;
+    let result = import(connection, password, table, names, batches, &mut inserted, progress).await;
+    result.map_err(|error| AppError::Invalid(format!("{inserted} rows were imported before it stopped: {error}")))?;
+    Ok(inserted)
+}
+
+async fn import(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    inserted: &mut u64,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<()> {
+    let client = Client::new(connection, password)?;
+    let paths = partition_paths(&client, table).await?;
+    let types = sample_types(&client, table).await?;
+    while let Some(batch) = batches.recv().await {
+        let writes = batch?
+            .into_iter()
+            .map(|row| {
+                let values = names.iter().cloned().zip(row.into_iter().map(CellValue::from)).collect();
+                create(&values, &types, &paths)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let created = create_all(&client, table, writes, inserted).await;
+        progress(*inserted);
+        created?;
+    }
+    Ok(())
+}
+
+/// Sends `writes` a few at a time, counting in `inserted` each one that
+/// succeeds. After a failure no more are sent, and the ones on their way are
+/// waited for, so the count is exact.
+async fn create_all(client: &Client, table: &TableRef, writes: Vec<Write>, inserted: &mut u64) -> Result<()> {
+    use futures_util::StreamExt;
+    use futures_util::stream::FuturesUnordered;
+
+    let mut writes = writes.into_iter();
+    let mut sending = FuturesUnordered::new();
+    let mut failure = None;
+    loop {
+        while failure.is_none() && sending.len() < CONCURRENT_REQUESTS {
+            let Some(write) = writes.next() else { break };
+            sending.push(async move { execute(client, table, &write).await });
+        }
+        match sending.next().await {
+            None => break,
+            Some(Ok(())) => *inserted += 1,
+            Some(Err(error)) => {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+    failure.map_or(Ok(()), Err)
 }
 
 async fn execute(client: &Client, table: &TableRef, write: &Write) -> Result<()> {
@@ -302,6 +381,7 @@ mod tests {
     use super::super::tests::{KEY, database, table};
     use super::*;
     use crate::drivers::cosmos::fetch_rows;
+    use crate::drivers::import_batches;
     use crate::statement_log::store::tests::Collected;
     use crate::statement_log::{self, Origin, StatementLog};
 
@@ -341,6 +421,23 @@ mod tests {
     async fn rows(connection: &Connection, name: &str) -> Vec<Vec<Option<String>>> {
         let filter = RowFilter { filter: String::new(), order: "c.id".into() };
         fetch_rows(connection, KEY, &table(name, "orders"), &filter, 0, 50).await.unwrap().rows
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Cosmos DB emulator on port 58081"]
+    async fn imports_items_and_counts_exactly_when_one_fails() {
+        let connection = database("dbforge_import", &[("orders", "/customer", orders())]).await;
+        let table = table("dbforge_import", "orders");
+        let names: Vec<String> = ["id", "customer", "total"].map(String::from).to_vec();
+        // Ten new items, then one whose id is already taken in its partition.
+        let ids: Vec<String> = (10..20).map(|n| n.to_string()).collect();
+        let mut file: Vec<Vec<Option<&str>>> =
+            ids.iter().map(|id| vec![Some(id.as_str()), Some("c"), Some("5")]).collect();
+        file.push(vec![Some("1"), Some("a"), None]);
+        let mut sent = import_batches(vec![Ok(file)]);
+        let error = import_rows(&connection, KEY, &table, &names, &mut sent, &mut |_| {}).await.unwrap_err();
+        assert!(error.to_string().starts_with("10 rows were imported before it stopped:"), "{error}");
+        assert_eq!(rows(&connection, "dbforge_import").await.len(), 13);
     }
 
     #[tokio::test]

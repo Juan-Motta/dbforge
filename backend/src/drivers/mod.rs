@@ -133,6 +133,23 @@ pub enum RowChange {
     },
 }
 
+/// The rows of an import, a batch at a time as the file is read, each with a
+/// value per column imported into; an error ends the import.
+pub type ImportBatches = tokio::sync::mpsc::Receiver<Result<Vec<Vec<Option<String>>>>>;
+
+/// Batches for an import test, as the file reader would send them; `None` in
+/// a row is NULL.
+#[cfg(test)]
+pub fn import_batches(batches: Vec<Result<Vec<Vec<Option<&str>>>>>) -> ImportBatches {
+    let (sender, receiver) = tokio::sync::mpsc::channel(batches.len().max(1));
+    for batch in batches {
+        let batch = batch
+            .map(|rows| rows.into_iter().map(|row| row.into_iter().map(|v| v.map(String::from)).collect()).collect());
+        sender.try_send(batch).unwrap();
+    }
+    receiver
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ApplySummary {
     pub updated: u64,
@@ -493,6 +510,30 @@ pub async fn apply_changes(
     }
 }
 
+/// Inserts the rows of an import into `table`, filling `columns`, and returns
+/// how many went in. SQL engines insert them in one transaction, all or none;
+/// document databases a batch at a time, stopping at the first error.
+pub async fn import_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    columns: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    match connection.engine {
+        Engine::Postgres => postgres::import_rows(connection, password, table, columns, batches, progress).await,
+        Engine::Sqlite => sqlite::import_rows(connection, table, columns, batches, progress).await,
+        Engine::Mysql | Engine::Mariadb => {
+            mysql::import_rows(connection, password, table, columns, batches, progress).await
+        }
+        Engine::Sqlserver => sqlserver::import_rows(connection, password, table, columns, batches, progress).await,
+        Engine::Mongodb => mongodb::import_rows(connection, password, table, columns, batches, progress).await,
+        Engine::Cosmosdb => cosmos::import_rows(connection, password, table, columns, batches, progress).await,
+        other => Err(AppError::Unsupported(other.label())),
+    }
+}
+
 /// The statements `apply_changes` would run, with values written in.
 pub async fn preview_changes(
     connection: &Connection,
@@ -803,7 +844,7 @@ pub(crate) fn install_crypto() {
 }
 
 /// Requests sent at once by [`each_concurrently`].
-const CONCURRENT_REQUESTS: usize = 8;
+pub(crate) const CONCURRENT_REQUESTS: usize = 8;
 
 /// `work` for each of `items`, a few at a time, with the results in the
 /// items' order; the first error stops the rest. The requests share the

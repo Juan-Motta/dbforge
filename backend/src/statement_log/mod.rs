@@ -33,6 +33,8 @@ pub enum Origin {
     Admin,
     /// Writing rows to a file.
     Export,
+    /// Reading rows from a file into a table.
+    Import,
     /// Preparing or cleaning up after pg_dump and psql.
     Dump,
     /// Testing a connection.

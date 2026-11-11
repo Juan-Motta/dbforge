@@ -14,7 +14,7 @@ mod structure;
 
 pub use admin::create_object;
 pub use diagram::schema_diagram;
-pub use edit::{apply_changes, preview_changes};
+pub use edit::{apply_changes, import_rows, preview_changes};
 pub use read_only::run_read_only;
 pub use structure::table_structure;
 

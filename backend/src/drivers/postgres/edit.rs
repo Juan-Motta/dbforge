@@ -8,7 +8,7 @@ use super::Conn;
 use super::{connect, with_timeout};
 use crate::connections::model::Connection;
 use crate::drivers::edit_sql::{self, Dialect, default_keyword};
-use crate::drivers::{ApplySummary, Column, RowChange, TableRef};
+use crate::drivers::{ApplySummary, Column, ImportBatches, RowChange, TableRef};
 use crate::error::Result;
 
 /// Values are sent as text and cast to the column's type by the server.
@@ -37,6 +37,38 @@ pub async fn apply_changes(
     transaction.commit().await?;
     conn.close().await?;
     Ok(edit_sql::summarize(changes))
+}
+
+/// The most parameters PostgreSQL binds to one statement.
+const MAX_PARAMS: usize = 65_535;
+
+/// Inserts an import's rows in one transaction: all of them or none.
+pub async fn import_rows(
+    connection: &Connection,
+    password: Option<&str>,
+    table: &TableRef,
+    names: &[String],
+    batches: &mut ImportBatches,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> Result<u64> {
+    let mut conn = with_timeout(connect(connection, password, Some(&table.database))).await?;
+    let columns = with_timeout(editable_columns(&mut conn, table)).await?;
+    let mut transaction = conn.begin().await?;
+    let inserted = sqlx_edits::insert_batches::<sqlx::Postgres>(
+        &mut transaction,
+        &POSTGRES,
+        &columns,
+        table,
+        names,
+        batches,
+        MAX_PARAMS,
+        |_, _| Ok(()),
+        progress,
+    )
+    .await?;
+    transaction.commit().await?;
+    conn.close().await?;
+    Ok(inserted)
 }
 
 /// The statements `apply_changes` would run, with values written in, for review.
@@ -94,7 +126,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::drivers::CellValue;
+    use crate::drivers::{CellValue, import_batches};
     use crate::statement_log::store::tests::Collected;
     use crate::statement_log::{self, Origin, StatementLog};
 
@@ -118,6 +150,50 @@ mod tests {
             .fetch_all(conn)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local PostgreSQL on port 55432"]
+    async fn imports_typed_values_in_one_transaction() {
+        let mut conn = run("
+            DROP SCHEMA IF EXISTS dbforge_import CASCADE;
+            CREATE SCHEMA dbforge_import;
+            CREATE TYPE dbforge_import.state AS ENUM ('new', 'done');
+            CREATE TABLE dbforge_import.loose (n int, price numeric(6,2), status dbforge_import.state, meta jsonb, code varchar(3));")
+        .await;
+        let table = TableRef { database: "shop".into(), schema: "dbforge_import".into(), name: "loose".into() };
+        let names: Vec<String> = ["n", "price", "status", "meta", "code"].map(String::from).to_vec();
+        let mut sent = import_batches(vec![
+            Ok(vec![vec![Some("1"), Some("2.50"), Some("new"), Some(r#"{"a": 1}"#), Some("abc")]]),
+            Ok(vec![vec![Some("2"), None, Some("done"), None, None]]),
+        ]);
+        let log = StatementLog::new(10, Collected::default());
+        let inserted = statement_log::scoped(&log, "pg", Origin::Import, async {
+            import_rows(&local(), PASSWORD, &table, &names, &mut sent, &mut |_| {}).await
+        })
+        .await
+        .unwrap();
+        assert_eq!(inserted, 2);
+        // The log shows each INSERT's columns and row count, not its values.
+        let shown: Vec<String> = log.entries().into_iter().map(|e| e.text).collect();
+        assert!(shown.iter().any(|sql| sql.ends_with("VALUES … -- 1 rows")), "{shown:?}");
+        let rows: Vec<(i32, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT n, price::text, status::text FROM dbforge_import.loose ORDER BY n")
+                .fetch_all(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(rows, [(1, Some("2.50".into()), Some("new".into())), (2, None, Some("done".into()))]);
+
+        // A value too long for its column, in the second batch, leaves the table as it was.
+        let mut too_long = import_batches(vec![
+            Ok(vec![vec![Some("3"), None, None, None, Some("ok")]]),
+            Ok(vec![vec![Some("4"), None, None, None, Some("toolong")]]),
+        ]);
+        let error = import_rows(&local(), PASSWORD, &table, &names, &mut too_long, &mut |_| {}).await.unwrap_err();
+        assert!(error.to_string().contains("too long"), "{error}");
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM dbforge_import.loose").fetch_one(&mut conn).await.unwrap();
+        assert_eq!(count, 2);
     }
 
     const SETUP: &str = "
