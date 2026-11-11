@@ -30,6 +30,10 @@
 
 .head,
 .number {
+  /* Centered by flex, not line-height, which the font shorthand would reset. */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   box-sizing: border-box;
   padding: 0 10px;
   border-right: 1px solid var(--border);
@@ -44,7 +48,6 @@
   top: 0;
   z-index: 1;
   height: 30px;
-  line-height: 29px;
   background: var(--panel);
   font: 600 11.5px var(--font-sans);
 }
@@ -52,7 +55,6 @@
 /* As tall as a table row: 26px with its bottom border. */
 .number {
   height: 26px;
-  line-height: 25px;
   cursor: default;
 }
 
