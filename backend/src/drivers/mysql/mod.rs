@@ -400,8 +400,11 @@ mod tests {
             port: 53306,
             database: "shop".into(),
             username: "root".into(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Prefer,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }

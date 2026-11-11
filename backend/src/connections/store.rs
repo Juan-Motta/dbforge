@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::model::Connection;
+use super::model::{Connection, ConnectionParts};
 use crate::credentials::Credentials;
 use crate::error::{AppError, Result};
 use crate::files::JsonFile;
@@ -50,6 +50,40 @@ impl ConnectionStore {
         self.credentials.get(id)
     }
 
+    /// The saved SSH password or key passphrase of connection `id`, if any.
+    pub fn ssh_secret(&self, id: &str) -> Result<Option<String>> {
+        self.credentials.get(&Connection::ssh_credential_id(id))
+    }
+
+    /// Saves a validated connection with the secrets it brings; a `None`
+    /// secret keeps the saved one, an empty one clears it.
+    pub fn save(&self, parts: ConnectionParts) -> Result<Connection> {
+        let ConnectionParts { connection, password, ssh_secret } = parts;
+        if let Some(password) = password {
+            self.credentials.set(&connection.id, &password)?;
+        }
+        if let Some(secret) = ssh_secret {
+            self.credentials.set(&Connection::ssh_credential_id(&connection.id), &secret)?;
+        }
+        self.upsert(connection.clone())?;
+        Ok(connection)
+    }
+
+    /// Every id a secret may be saved under: each connection's password and SSH secret.
+    pub fn credential_ids(&self) -> Vec<String> {
+        self.list()
+            .into_iter()
+            .flat_map(|connection| [Connection::ssh_credential_id(&connection.id), connection.id])
+            .collect()
+    }
+
+    /// Removes connection `id` and its secrets.
+    pub fn delete(&self, id: &str) -> Result<()> {
+        self.remove(id)?;
+        self.credentials.delete(id)?;
+        self.credentials.delete(&Connection::ssh_credential_id(id))
+    }
+
     /// Where the connections file was moved when it couldn't be read at start.
     pub fn set_aside(&self) -> Option<&std::path::Path> {
         self.connections.set_aside()
@@ -81,7 +115,7 @@ impl ConnectionStore {
     }
 
     /// A copy of connection `id` named `name`, with a new id and the same
-    /// saved password.
+    /// saved secrets.
     pub fn duplicate(&self, id: &str, name: &str) -> Result<Connection> {
         let name = name.trim();
         if name.is_empty() {
@@ -89,11 +123,18 @@ impl ConnectionStore {
         }
         let original = self.get(id)?;
         let copy = Connection { id: uuid::Uuid::new_v4().to_string(), name: name.to_string(), ..original };
-        if let Some(password) = self.credentials.get(id)? {
-            self.credentials.set(&copy.id, &password)?;
-        }
-        if let Err(error) = self.upsert(copy.clone()) {
-            let _ = self.credentials.delete(&copy.id);
+        let secrets = [
+            (id.to_string(), copy.id.clone()),
+            (Connection::ssh_credential_id(id), Connection::ssh_credential_id(&copy.id)),
+        ];
+        let copied = secrets.iter().try_for_each(|(from, to)| match self.credentials.get(from)? {
+            Some(secret) => self.credentials.set(to, &secret),
+            None => Ok(()),
+        });
+        if let Err(error) = copied.and_then(|()| self.upsert(copy.clone())) {
+            for (_, to) in &secrets {
+                let _ = self.credentials.delete(to);
+            }
             return Err(error);
         }
         Ok(copy)
@@ -144,8 +185,11 @@ mod tests {
             port: 5432,
             database: "shop".into(),
             username: "app".into(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Disable,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }
@@ -180,6 +224,31 @@ mod tests {
 
         assert!(matches!(store.duplicate("a", "  "), Err(AppError::Invalid(_))));
         assert!(matches!(store.duplicate("missing", "x"), Err(AppError::NotFound(_))));
+    }
+
+    #[test]
+    fn the_ssh_secret_is_saved_copied_and_deleted_with_its_connection() {
+        let (_dir, path) = temp_store();
+        let store = load(path);
+        let parts = |ssh_secret: Option<&str>| ConnectionParts {
+            connection: connection("a", "first"),
+            password: Some("db".into()),
+            ssh_secret: ssh_secret.map(String::from),
+        };
+        store.save(parts(Some("passphrase"))).unwrap();
+        assert_eq!(store.ssh_secret("a").unwrap().as_deref(), Some("passphrase"));
+        store.save(parts(None)).unwrap();
+        assert_eq!(store.ssh_secret("a").unwrap().as_deref(), Some("passphrase"), "None keeps it");
+        assert_eq!(store.credential_ids(), ["a.ssh", "a"]);
+
+        let copy = store.duplicate("a", "copy").unwrap();
+        assert_eq!(store.ssh_secret(&copy.id).unwrap().as_deref(), Some("passphrase"));
+
+        store.delete("a").unwrap();
+        assert_eq!((store.password("a").unwrap(), store.ssh_secret("a").unwrap()), (None, None));
+        assert_eq!(store.ssh_secret(&copy.id).unwrap().as_deref(), Some("passphrase"), "the copy keeps its own");
+        store.save(ConnectionParts { ssh_secret: Some(String::new()), ..parts(None) }).unwrap();
+        assert_eq!(store.ssh_secret("a").unwrap(), None, "empty clears it");
     }
 
     #[test]

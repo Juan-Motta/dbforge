@@ -39,10 +39,30 @@ fn connection(id: &str, name: &str, tag: Option<&str>) -> Connection {
         port: 5432,
         database: "shop".into(),
         username: "app".into(),
-        tls: false,
-        allow_self_signed: false,
+        ssl: crate::connections::transport::Ssl {
+            mode: crate::connections::transport::SslMode::Disable,
+            ..Default::default()
+        },
+        ssh: Default::default(),
         srv: false,
         agent_access: AgentAccess::Read,
+    }
+}
+
+/// `connection` reached through a bastion with a key, verifying the server's CA.
+fn tunnelled(connection: Connection) -> Connection {
+    use crate::connections::transport::{SshAuth, SshTunnel, Ssl, SslMode};
+    Connection {
+        ssl: Ssl { mode: SslMode::VerifyCa, ca_file: "/ca.pem".into(), ..Ssl::default() },
+        ssh: SshTunnel {
+            enabled: true,
+            host: "bastion".into(),
+            username: "ops".into(),
+            auth: SshAuth::Key,
+            key_file: "/id_ed25519".into(),
+            ..SshTunnel::default()
+        },
+        ..connection
     }
 }
 
@@ -56,8 +76,9 @@ fn source(dir: &Path) -> Install {
     tags.push(Tag { id: "qa".into(), name: "QA".into(), color: TagColor::Teal, confirm: false });
     install.tags.replace(tags).unwrap();
     install.connections.upsert(connection("a", "Shop", Some("qa"))).unwrap();
-    install.connections.upsert(connection("b", "Reports", None)).unwrap();
+    install.connections.upsert(tunnelled(connection("b", "Reports", None))).unwrap();
     install.connections.credentials().set("a", "s3cret").unwrap();
+    install.connections.credentials().set("b.ssh", "passphr4se").unwrap();
     install.mcp.set(McpSettings { enabled: true, port: 9000 }).unwrap();
     install.connections.credentials().set(crate::mcp::token::CREDENTIAL_ID, "tok").unwrap();
     install.tools.set("pg_dump", Some(dir.join("pg_dump-only-here"))).unwrap();
@@ -83,6 +104,8 @@ fn moves_everything_to_a_new_installation_secrets_included() {
     assert_eq!(imported.missing_tools, ["pg_dump"], "a path that isn't on this computer is left out");
     assert_eq!(target.connections.get("a").unwrap(), connection("a", "Shop", Some("qa")));
     assert_eq!(target.connections.password("a").unwrap().as_deref(), Some("s3cret"));
+    assert_eq!(target.connections.get("b").unwrap(), tunnelled(connection("b", "Reports", None)));
+    assert_eq!(target.connections.ssh_secret("b").unwrap().as_deref(), Some("passphr4se"));
     assert!(target.tags.list().iter().any(|tag| tag.id == "qa" && tag.name == "QA"));
     assert_eq!(target.mcp.get(), McpSettings { enabled: true, port: 9000 });
     let token = target.connections.credentials().get(crate::mcp::token::CREDENTIAL_ID).unwrap();
@@ -94,7 +117,7 @@ fn without_secrets_the_file_holds_no_password_or_token() {
     let from = tempfile::tempdir().unwrap();
     let backup = collect(&source(from.path()).stores(), BTreeMap::new(), false, 7, "0.1.0").unwrap();
     let text = serde_json::to_string(&backup).unwrap();
-    assert!(!text.contains("s3cret") && !text.contains("\"tok\""), "{text}");
+    assert!(!text.contains("s3cret") && !text.contains("\"tok\"") && !text.contains("passphr4se"), "{text}");
     assert_eq!(read(&text).unwrap().connections.len(), 2);
 }
 
@@ -129,4 +152,15 @@ fn refuses_other_files_and_newer_backups() {
     assert!(read(other).unwrap_err().to_string().contains("isn't a DBForge backup"));
     let newer = r#"{"format":"dbforge-backup","version":99,"exportedAt":0,"appVersion":"x","mcp":null}"#;
     assert!(read(newer).unwrap_err().to_string().contains("newer DBForge"));
+}
+
+#[test]
+fn reads_backups_made_before_ssl_modes() {
+    let v1 = r#"{"format":"dbforge-backup","version":1,"exportedAt":0,"appVersion":"0.2.1","mcp":null,
+        "connections":[{"id":"r","name":"Cache","engine":"redis","environment":null,"host":"h","port":6380,
+        "database":"0","username":"","tls":true,"allowSelfSigned":true,"password":"pw"}]}"#;
+    let backup = read(v1).unwrap();
+    let cache = &backup.connections[0];
+    assert_eq!(cache.connection.ssl.mode, crate::connections::transport::SslMode::Require);
+    assert_eq!((cache.password.as_deref(), cache.ssh_secret.as_deref()), (Some("pw"), None));
 }

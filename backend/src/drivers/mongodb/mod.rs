@@ -53,7 +53,7 @@ async fn connect(connection: &Connection, password: Option<&str>) -> Result<Logg
 
 async fn options(connection: &Connection, password: Option<&str>) -> Result<ClientOptions> {
     let uri = is_uri(&connection.host);
-    if connection.tls || connection.srv || uri {
+    if connection.ssl.mode.encrypts() || connection.srv || uri {
         super::install_crypto();
     }
     let mut options = if uri {
@@ -81,9 +81,9 @@ async fn options(connection: &Connection, password: Option<&str>) -> Result<Clie
     if password.is_some() && options.credential.as_ref().is_some_and(|c| c.password.is_none()) {
         options.credential.as_mut().expect("checked").password = password.map(String::from);
     }
-    if connection.tls && !uri {
+    if connection.ssl.mode.encrypts() && !uri {
         let mut tls = TlsOptions::default();
-        tls.allow_invalid_certificates = Some(connection.allow_self_signed);
+        tls.allow_invalid_certificates = Some(!connection.ssl.mode.verifies());
         options.tls = Some(Tls::Enabled(tls));
     }
     options.app_name = Some("DBForge".into());
@@ -438,6 +438,7 @@ fn pretty(value: &Bson, depth: usize) -> String {
 /// Each test creates its own database.
 #[cfg(test)]
 pub(super) mod tests {
+    use crate::connections::transport::{Ssl, SslMode};
     use mongodb::bson::oid::ObjectId;
     use mongodb::bson::{DateTime, Decimal128};
 
@@ -457,8 +458,11 @@ pub(super) mod tests {
             port: 57017,
             database: String::new(),
             username: "root".into(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Disable,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }
@@ -548,10 +552,10 @@ pub(super) mod tests {
     async fn tls_options_reach_the_driver() {
         let plain = options(&local(), PASSWORD).await.unwrap();
         assert!(plain.tls.is_none());
-        let tls = Connection { tls: true, allow_self_signed: true, ..local() };
+        let tls = Connection { ssl: Ssl { mode: SslMode::Require, ..Ssl::default() }, ..local() };
         let Some(Tls::Enabled(settings)) = options(&tls, PASSWORD).await.unwrap().tls else { panic!("no TLS") };
         assert_eq!(settings.allow_invalid_certificates, Some(true));
-        let verified = Connection { allow_self_signed: false, ..tls };
+        let verified = Connection { ssl: Ssl { mode: SslMode::VerifyFull, ..Ssl::default() }, ..tls };
         let Some(Tls::Enabled(settings)) = options(&verified, PASSWORD).await.unwrap().tls else { panic!("no TLS") };
         assert_eq!(settings.allow_invalid_certificates, Some(false));
     }

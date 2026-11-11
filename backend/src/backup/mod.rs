@@ -24,8 +24,9 @@ use crate::mcp::{McpSettings, SettingsFile};
 
 /// What the file says it is, so another JSON file is refused clearly.
 const FORMAT: &str = "dbforge-backup";
-/// Files from a newer DBForge may hold what this one can't read.
-const VERSION: u32 = 1;
+/// Files from a newer DBForge may hold what this one can't read. Version 2
+/// added SSL modes, SSH tunnels and their secrets; version 1 files still load.
+const VERSION: u32 = 2;
 
 /// The file's contents.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,6 +58,9 @@ pub struct BackedUpConnection {
     /// Left out when the export left secrets out, or the connection has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    /// The SSH password or key passphrase, left out as `password` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,7 +92,13 @@ pub fn collect(
         .connections
         .list()
         .into_iter()
-        .map(|connection| Ok(BackedUpConnection { password: secret(&connection.id)?, connection }))
+        .map(|connection| {
+            Ok(BackedUpConnection {
+                password: secret(&connection.id)?,
+                ssh_secret: secret(&Connection::ssh_credential_id(&connection.id))?,
+                connection,
+            })
+        })
         .collect::<Result<_>>()?;
     Ok(Backup {
         format: FORMAT.into(),
@@ -184,7 +194,7 @@ pub fn apply(stores: &Stores<'_>, backup: Backup, parts: Parts) -> Result<Import
         let renamed = merge_tags(stores.tags, backup.tags)?;
         let credentials = stores.connections.credentials();
         let here: Vec<String> = stores.connections.list().into_iter().map(|connection| connection.id).collect();
-        for BackedUpConnection { mut connection, password } in backup.connections {
+        for BackedUpConnection { mut connection, password, ssh_secret } in backup.connections {
             if let Some(tag) = &connection.environment {
                 connection.environment = Some(renamed.get(tag).cloned().unwrap_or_else(|| tag.clone()));
             }
@@ -199,6 +209,9 @@ pub fn apply(stores: &Stores<'_>, backup: Backup, parts: Parts) -> Result<Import
                     imported.without_password.push(connection.name.clone());
                 }
                 None => {}
+            }
+            if let Some(secret) = ssh_secret {
+                credentials.set(&Connection::ssh_credential_id(&connection.id), &secret)?;
             }
             stores.connections.upsert(connection)?;
         }

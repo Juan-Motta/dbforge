@@ -432,8 +432,11 @@ pub(crate) mod tests {
             port: 55432,
             database: "shop".into(),
             username: "postgres".into(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Prefer,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }

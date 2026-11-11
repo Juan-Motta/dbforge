@@ -164,8 +164,11 @@ mod tests {
             port: 0,
             database: path.to_string_lossy().into_owned(),
             username: String::new(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Disable,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }

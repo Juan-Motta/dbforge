@@ -319,8 +319,11 @@ pub(super) mod tests {
             port: 58081,
             database: String::new(),
             username: String::new(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Disable,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }

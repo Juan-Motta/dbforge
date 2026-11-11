@@ -41,14 +41,14 @@ pub(crate) async fn connect(
     response_timeout: Option<Duration>,
 ) -> Result<LoggedConnection> {
     let url = is_url(&connection.host);
-    if connection.tls || connection.host.starts_with("rediss://") {
+    if connection.ssl.mode.encrypts() || connection.host.starts_with("rediss://") {
         super::install_crypto();
     }
     let mut info: ConnectionInfo = if url {
         connection.host.as_str().into_connection_info()?
-    } else if connection.tls {
+    } else if connection.ssl.mode.encrypts() {
         let (host, port) = (connection.host.clone(), connection.port);
-        ConnectionAddr::TcpTls { host, port, insecure: connection.allow_self_signed, tls_params: None }
+        ConnectionAddr::TcpTls { host, port, insecure: !connection.ssl.mode.verifies(), tls_params: None }
             .into_connection_info()?
     } else {
         ConnectionAddr::Tcp(connection.host.clone(), connection.port).into_connection_info()?
@@ -203,6 +203,7 @@ pub async fn overview(connection: &Connection, password: Option<&str>, db: i64) 
 pub(super) mod tests {
     use super::*;
     use crate::connections::model::Engine;
+    use crate::connections::transport::{Ssl, SslMode};
 
     pub const PASSWORD: Option<&str> = Some("dbforge");
 
@@ -217,8 +218,11 @@ pub(super) mod tests {
             port: 56379,
             database: String::new(),
             username: String::new(),
-            tls: false,
-            allow_self_signed: false,
+            ssl: crate::connections::transport::Ssl {
+                mode: crate::connections::transport::SslMode::Disable,
+                ..Default::default()
+            },
+            ssh: Default::default(),
             srv: false,
             agent_access: Default::default(),
         }
@@ -262,13 +266,13 @@ pub(super) mod tests {
     #[tokio::test]
     #[ignore = "needs a local Redis with TLS on port 56380 (self-signed certificate)"]
     async fn connects_over_tls() {
-        let tls = Connection { port: 56380, tls: true, allow_self_signed: true, ..local() };
+        let tls = Connection { port: 56380, ssl: Ssl { mode: SslMode::Require, ..Ssl::default() }, ..local() };
         assert!(server_version(&tls, PASSWORD).await.unwrap().starts_with("Redis 7."));
         // Hosts saved as URLs keep working.
         let url = Connection { host: "rediss://127.0.0.1:56380/#insecure".into(), port: 0, ..local() };
         assert!(server_version(&url, PASSWORD).await.is_ok());
 
-        let verified = Connection { allow_self_signed: false, ..tls };
+        let verified = Connection { ssl: Ssl { mode: SslMode::VerifyFull, ..Ssl::default() }, ..tls };
         let error = server_version(&verified, PASSWORD).await.unwrap_err().to_string();
         assert!(error.starts_with("The server's TLS certificate isn't trusted"), "{error}");
         assert!(error.contains("Accept self-signed certificate"), "{error}");

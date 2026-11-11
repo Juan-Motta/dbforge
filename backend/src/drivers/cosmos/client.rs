@@ -15,6 +15,7 @@ use sha2::Sha256;
 
 use super::logged::{self, Request};
 use crate::connections::model::Connection;
+use crate::connections::transport::SslMode;
 use crate::error::{AppError, Result};
 
 /// The REST API version every request asks for.
@@ -149,10 +150,10 @@ impl Client {
         super::super::install_crypto();
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(8))
-            .tls_danger_accept_invalid_certs(connection.tls && connection.allow_self_signed)
+            .tls_danger_accept_invalid_certs(connection.ssl.mode == SslMode::Require)
             .user_agent("DBForge")
             .build()?;
-        let scheme = if connection.tls { "https" } else { "http" };
+        let scheme = if connection.ssl.mode.encrypts() { "https" } else { "http" };
         Ok(Self { http, endpoint: format!("{scheme}://{}:{}", connection.host, connection.port), key })
     }
 
