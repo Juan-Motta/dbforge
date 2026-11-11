@@ -20,7 +20,7 @@ interface QueryConsoleProps {
   /** Identifies the console's session, the connection kept open between runs. */
   sessionId: string
   connectionId: string
-  /** Runs against this database; the connection's default when omitted. */
+  /** The database picked first, the connection's default when omitted; the console's picker can change it. */
   database?: string
   /** Cosmos DB: the container picked first; the console's picker can change it. */
   container?: string
@@ -38,7 +38,7 @@ interface QueryConsoleProps {
 export function QueryConsole({
   sessionId,
   connectionId,
-  database,
+  database: firstDatabase,
   container: firstContainer,
   initialSql,
   onExportResult,
@@ -48,6 +48,9 @@ export function QueryConsole({
 }: QueryConsoleProps) {
   const m = useMessages(messages)
   const editor = useRef<SqlEditorHandle>(null)
+  const [database, setDatabase] = useState(firstDatabase)
+  // A SQLite file is its one database: nothing to pick.
+  const databases = useDatabases(dialect === 'sqlite' ? null : connectionId)
   const containers = useContainers(dialect === 'cosmosdb' ? connectionId : null, database)
   const [picked, setPicked] = useState(firstContainer)
   // Until one is picked, the database's first container.
@@ -57,6 +60,12 @@ export function QueryConsole({
     connectionId,
     { database, container },
   )
+  const busy = running || explaining
+  /** Queries another database; a container picked in the previous one is not in it. */
+  const pickDatabase = (name: string | undefined) => {
+    setDatabase(name)
+    setPicked(undefined)
+  }
   const { names, reload: reloadNames } = useCompletionNames(
     isRelationalDialect(dialect) ? connectionId : null,
     database,
@@ -83,15 +92,36 @@ export function QueryConsole({
       }}
     >
       <div className={styles.toolbar}>
-        <span className="muted">
-          <Icon name="database" size={14} className={styles.inline} /> {database ?? m.defaultDatabase}
-        </span>
+        <Icon name="database" size={14} className="muted" />
+        {databases === null || databases.length > 0 ? (
+          <select
+            className={styles.picker}
+            aria-label={m.databaseToQuery}
+            value={database ?? ''}
+            disabled={busy || databases === null}
+            onChange={(event) => pickDatabase(event.target.value || undefined)}
+          >
+            {/* The connection's own database, until another is picked. */}
+            {database === undefined && <option value="">{m.defaultDatabase}</option>}
+            {/* A database the list leaves out, e.g. one the user cannot see listed, stays selectable. */}
+            {database !== undefined && !databases?.includes(database) && (
+              <option value={database}>{database}</option>
+            )}
+            {databases?.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="muted">{database ?? m.defaultDatabase}</span>
+        )}
         {containers && (
           <select
-            className={styles.container}
+            className={styles.picker}
             aria-label={m.containerToQuery}
             value={container ?? ''}
-            disabled={running || explaining || containers.length === 0}
+            disabled={busy || containers.length === 0}
             onChange={(event) => setPicked(event.target.value)}
           >
             {containers.length === 0 && <option value="">{m.noContainers}</option>}
@@ -117,7 +147,7 @@ export function QueryConsole({
           <input type="checkbox" checked={analyze} onChange={(event) => setAnalyze(event.target.checked)} />
           {m.analyze}
         </label>
-        <Button disabled={running || explaining} onClick={() => explain(textToRun(), analyze)}>
+        <Button disabled={busy} onClick={() => explain(textToRun(), analyze)}>
           <Icon name="plan" />
           {explaining ? m.explaining : m.explain}
         </Button>
@@ -147,7 +177,7 @@ export function QueryConsole({
             />
           </div>
 
-          <div className={styles.results} aria-busy={running || explaining}>
+          <div className={styles.results} aria-busy={busy}>
             {lastRun && 'error' in lastRun ? (
               <p className={styles.error}>{lastRun.error}</p>
             ) : lastRun && 'plan' in lastRun ? (
@@ -156,7 +186,7 @@ export function QueryConsole({
               // Remount per run so the selected result tab resets.
               <ResultsPanel key={lastRun.id} outcome={lastRun.outcome} onExport={onExportResult} />
             ) : (
-              <p className={styles.placeholder}>{running || explaining ? m.running : m.placeholder}</p>
+              <p className={styles.placeholder}>{busy ? m.running : m.placeholder}</p>
             )}
           </div>
         </div>
@@ -175,10 +205,6 @@ export function QueryConsole({
   )
 }
 
-/**
- * The containers a Cosmos DB console can query, for its picker; `null` for other
- * engines, and while they load. Without a database there is nothing to list.
- */
 /**
  * The schemas, tables and columns the editor completes, read when the console
  * opens and again on `reload`. `null` connection: an engine without SQL names.
@@ -202,6 +228,33 @@ function useCompletionNames(connectionId: string | null, database: string | unde
   return { names, reload }
 }
 
+/**
+ * The connection's databases, for the console's picker; `null` while they load.
+ * Empty when there are none to pick: a `null` connection, or a list that failed.
+ */
+function useDatabases(connectionId: string | null): string[] | null {
+  const [databases, setDatabases] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (connectionId === null) return
+    let current = true
+    explorerApi.listObjects(connectionId, []).then(
+      (objects) =>
+        current &&
+        setDatabases(objects.filter((object) => object.kind === 'database').map((object) => object.name)),
+      // Without the list, the console keeps querying the database it opened on.
+      () => current && setDatabases([]),
+    )
+    return () => {
+      current = false
+    }
+  }, [connectionId])
+  return connectionId === null ? [] : databases
+}
+
+/**
+ * The containers a Cosmos DB console can query, for its picker; `null` for other
+ * engines, and while they load. Without a database there is nothing to list.
+ */
 function useContainers(connectionId: string | null, database: string | undefined): string[] | null {
   const [containers, setContainers] = useState<string[] | null>(null)
   useEffect(() => {

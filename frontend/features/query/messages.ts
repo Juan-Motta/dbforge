@@ -3,6 +3,7 @@ import { defineMessages } from '../../lib/i18n/messages'
 export const messages = defineMessages({
   en: {
     defaultDatabase: 'default database',
+    databaseToQuery: 'Database to query',
     containerToQuery: 'Container to query',
     noContainers: 'No containers',
     couldNotCancel: (error: string) => `Could not cancel: ${error}`,
@@ -53,6 +54,7 @@ export const messages = defineMessages({
   },
   es: {
     defaultDatabase: 'base de datos por defecto',
+    databaseToQuery: 'Base de datos a consultar',
     containerToQuery: 'Contenedor a consultar',
     noContainers: 'Sin contenedores',
     couldNotCancel: (error: string) => `No se pudo cancelar: ${error}`,
