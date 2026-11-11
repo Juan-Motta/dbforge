@@ -18,7 +18,7 @@
     </picture>
   </a>
   <br>
-  <sub>Signed &amp; notarized · updates itself</sub>
+  <sub>macOS and Linux · updates itself</sub>
 </p>
 
 <p align="center">
@@ -29,10 +29,9 @@
 
 ## Install
 
-1. Download `DBForge-x.y.z.dmg` from the [latest release](https://github.com/Juan-Motta/dbforge/releases/latest).
-2. Open it and drag **DBForge** to **Applications**.
+**macOS:** download `DBForge-x.y.z.dmg` from the [latest release](https://github.com/Juan-Motta/dbforge/releases/latest), open it and drag **DBForge** to **Applications**. It runs on Apple silicon and Intel Macs with **macOS 10.13** or later, signed and notarized by Apple.
 
-DBForge runs on Apple silicon and Intel Macs with **macOS 10.13** or later. It's signed and notarized by Apple.
+**Linux (x86_64):** download `DBForge-x.y.z-amd64.AppImage`, make it executable (`chmod +x`) and open it. On Debian or Ubuntu you can install `DBForge-x.y.z-amd64.deb` instead (`sudo apt install ./DBForge-x.y.z-amd64.deb`). Both update themselves.
 
 ## Works with your databases
 
@@ -138,7 +137,7 @@ frontend/
   features/     One folder per feature, with its components, logic and styles
   styles/       Design tokens (theme.css) and global base styles
 backend/        Rust backend (Tauri): one driver per engine, and the commands the UI calls
-scripts/        Release tooling: the DMG, its window, release notes and the update manifest
+scripts/        Release tooling: the DMG, the Linux packages, release notes and the update manifest
 ```
 
 Conventions:

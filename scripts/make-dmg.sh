@@ -60,19 +60,10 @@ if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
         xcrun stapler staple "$APP"
     fi
     UPDATE="release/DBForge-$VERSION.app.tar.gz"
-    rm -f "$UPDATE" "$UPDATE.sig"
+    rm -f "$UPDATE"
     # No AppleDouble (._) files in the archive.
     COPYFILE_DISABLE=1 tar -czf "$UPDATE" -C "$(dirname "$APP")" "$(basename "$APP")"
-    # Bound to the version, so a manifest can't pair this archive with another version number. The
-    # signer reads a key file from TAURI_SIGNING_PRIVATE_KEY_PATH and only the key's text from
-    # TAURI_SIGNING_PRIVATE_KEY; either way the key stays out of the command line.
-    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
-    if [[ -f "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
-        env -u TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH="$TAURI_SIGNING_PRIVATE_KEY" \
-            pnpm tauri signer sign --app-version "$VERSION" "$UPDATE"
-    else
-        pnpm tauri signer sign --app-version "$VERSION" "$UPDATE"
-    fi
+    scripts/sign-update.sh "$UPDATE" "$VERSION"
     echo "Built $UPDATE"
 fi
 
