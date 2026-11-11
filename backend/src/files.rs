@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::Result;
+use crate::error::{AppError, Result};
 
 /// Who may read a file written with [`write_atomic`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,6 +63,40 @@ pub struct SetAside(pub Vec<String>);
 #[tauri::command]
 pub fn set_aside_files(set_aside: tauri::State<'_, SetAside>) -> Vec<String> {
     set_aside.0.clone()
+}
+
+/// Shows `path` in the system's file manager: selected in Finder or Explorer,
+/// its folder elsewhere.
+#[tauri::command(async)]
+pub fn reveal_file(path: PathBuf) -> Result<()> {
+    if !path.exists() {
+        return Err(AppError::Invalid(format!("{} is no longer there.", path.display())));
+    }
+    let mut command = reveal_command(&path);
+    // Explorer exits with 1 even when it opened; only a failure to start counts.
+    command.spawn()?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reveal_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("open");
+    command.arg("-R").arg(path);
+    command
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("explorer");
+    command.arg(format!("/select,{}", path.display()));
+    command
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn reveal_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("xdg-open");
+    command.arg(path.parent().unwrap_or(path));
+    command
 }
 
 /// Moves a file that couldn't be read beside itself, as `name.damaged-<time>`.

@@ -1,17 +1,6 @@
-import { useEffect, useState } from 'react'
 import { Callout, CalloutSpace } from '../../components/Callout'
+import { useElapsed } from '../../components/useElapsed'
 import type { Status } from './dumpJob'
-
-/** Whole seconds since `startedAt`, as 0:07 or 1:12, ticking while mounted. */
-function useElapsed(startedAt: number) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000))
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
 
 function Running({ title, line, startedAt }: { title: string; line: string; startedAt: number }) {
   const elapsed = useElapsed(startedAt)

@@ -312,8 +312,19 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
     }
     case 'plugin:dialog|save':
       return delay(`/Users/demo/Downloads/${(payload.options as { defaultPath: string }).defaultPath}`)
-    case 'export_table':
-      return delay(48213)
+    case 'export_table': {
+      // 48,213 rows in ten steps, a cancel ending it between two.
+      const jobId = String(payload.jobId)
+      const total = 48213
+      for (let step = 1; step <= 10; step++) {
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        if (cancelled.delete(jobId)) throw 'Cancelled.'
+        await emit('export-progress', { jobId, rows: Math.round((total * step) / 10) })
+      }
+      return total
+    }
+    case 'reveal_file':
+      return null
     case 'export_rows':
       return delay((payload.rows as unknown[]).length)
     case 'format_rows':
@@ -453,7 +464,7 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       return delay(String(payload.path).includes('exists'))
     case 'plugin:path|resolve_directory':
       return '/Users/demo/Documents'
-    case 'cancel_dump':
+    case 'cancel_job':
       cancelled.add(String(payload.jobId))
       return null
     default:

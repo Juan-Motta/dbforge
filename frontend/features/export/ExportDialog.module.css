@@ -1,20 +1,17 @@
+/* Laid out like the dump dialogs: titled sections, then a status box and the footer. */
 .dialog {
   width: min(640px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
 }
 
 .body {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
+  min-height: 0;
   padding: 18px 20px 8px;
-}
-
-.label {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--text2);
-  font-size: 12px;
-  font-weight: 500;
+  overflow: auto;
 }
 
 .source {
@@ -25,17 +22,30 @@
   font-size: 13px;
 }
 
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .formats {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
 .format {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 3px;
+  gap: 10px;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--border2);
   border-radius: 8px;
@@ -46,8 +56,52 @@
   cursor: pointer;
 }
 
-.format strong {
+.format:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.format[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The same icon tile the option lists draw. */
+.formatIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text2);
+}
+
+.format[aria-checked='true'] .formatIcon {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+
+.formatText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.formatName {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   font-weight: 500;
+}
+
+.extension {
+  color: var(--text3);
+  font: 11px var(--font-mono);
 }
 
 .description {
@@ -55,29 +109,112 @@
   font-size: 11.5px;
 }
 
-.format[aria-checked='true'] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.extension {
-  color: var(--accent-text);
-  font: 600 12px var(--font-mono);
-}
-
-.status {
-  min-height: 18px;
+.fieldset {
+  min-width: 0;
   margin: 0;
-  color: var(--text2);
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
-  -webkit-user-select: text;
-  user-select: text;
+  padding: 0;
+  border: 0;
 }
 
-.status code {
-  font-family: var(--font-mono);
-  font-size: 12px;
+/* One row of the same height for every format, so the dialog keeps its size. */
+.options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 54px;
+}
+
+.noOptions {
+  grid-column: 1 / -1;
+  align-self: center;
+  margin: 0;
+  color: var(--text3);
+  font-size: 12.5px;
+}
+
+.columns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Bordered like the dump dialog's folder row. */
+.columnRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 13px;
+}
+
+.columnRow > svg {
+  flex: none;
+  color: var(--text3);
+}
+
+.columnSummary {
+  flex: 1;
+  min-width: 0;
+}
+
+.columnRow .error {
+  flex: 1;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.link:disabled {
+  color: var(--text3);
+  cursor: default;
+}
+
+.columnList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 2px 12px;
+  max-height: 168px;
+  margin: 0;
+  padding: 8px 12px;
+  overflow-y: auto;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+  list-style: none;
+}
+
+.columnList label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 0;
+  font: 12.5px var(--font-mono);
+  cursor: pointer;
+}
+
+.columnList span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnList input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .error {
@@ -88,6 +225,5 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--border);
+  padding: 12px 20px 16px;
 }

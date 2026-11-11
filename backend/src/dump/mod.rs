@@ -13,9 +13,7 @@ mod tools;
 
 pub use tool_paths::ToolPaths;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +27,7 @@ use crate::connections::store::ConnectionStore;
 use crate::drivers::postgres;
 use crate::error::{AppError, Result};
 use crate::files::partial_path;
+use crate::jobs::{Every, Jobs, cancelled};
 use crate::statement_log::{Origin, StatementLog};
 
 /// What a dump holds.
@@ -137,7 +136,7 @@ pub async fn import(
         return Err(AppError::Invalid(format!("There's no file at {}.", path.display())));
     }
     let started = Instant::now();
-    let stop = || if cancel.is_cancelled() { Err(tools::cancelled()) } else { Ok(()) };
+    let stop = || if cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) };
     stop()?;
     let created = !postgres::database_exists(connection, password, database).await?;
     stop()?;
@@ -218,22 +217,6 @@ fn with_version_hint(error: AppError) -> AppError {
     }
 }
 
-/// Running exports and imports, by job id, so they can be cancelled.
-#[derive(Default)]
-pub struct DumpJobs(Mutex<HashMap<String, CancellationToken>>);
-
-impl DumpJobs {
-    fn start(&self, id: &str) -> CancellationToken {
-        let cancel = CancellationToken::new();
-        self.0.lock().unwrap().insert(id.to_string(), cancel.clone());
-        cancel
-    }
-
-    fn finish(&self, id: &str) {
-        self.0.lock().unwrap().remove(id);
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
@@ -266,39 +249,18 @@ const PROGRESS: &str = "dump-progress";
 /// statement, so lines are sent this often at most, not one event for each.
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
-/// Says yes at most once per `period`: the first time, then once it has passed again.
-struct Every {
-    period: Duration,
-    last: Option<Instant>,
-}
-
-impl Every {
-    fn new(period: Duration) -> Self {
-        Self { period, last: None }
-    }
-
-    fn due(&mut self) -> bool {
-        let now = Instant::now();
-        let due = self.last.is_none_or(|last| now.duration_since(last) >= self.period);
-        if due {
-            self.last = Some(now);
-        }
-        due
-    }
-}
-
 #[tauri::command]
 pub async fn export_database(
     app: AppHandle,
     store: State<'_, ConnectionStore>,
-    jobs: State<'_, DumpJobs>,
+    jobs: State<'_, Jobs>,
     chosen: State<'_, ToolPaths>,
     log: State<'_, StatementLog>,
     request: ExportRequest,
 ) -> Result<Exported> {
     let opened = store.open(&request.connection_id)?;
     let tool = tools::resolve("pg_dump", chosen.get("pg_dump").as_deref()).await?;
-    let cancel = jobs.start(&request.job_id);
+    let job = jobs.start(&request.job_id);
     let mut every = Every::new(PROGRESS_EVERY);
     let report = |line: &str| {
         if every.due() {
@@ -306,28 +268,26 @@ pub async fn export_database(
         }
     };
     let path = Path::new(&request.path);
-    let run = Run { tool: &tool, cancel: &cancel };
-    let result = opened
+    let run = Run { tool: &tool, cancel: job.token() };
+    opened
         .run(&log, Origin::Dump, async |connection, password| {
             export(connection, password, &request.database, path, &request.options, run, report).await
         })
-        .await;
-    jobs.finish(&request.job_id);
-    result
+        .await
 }
 
 #[tauri::command]
 pub async fn import_database(
     app: AppHandle,
     store: State<'_, ConnectionStore>,
-    jobs: State<'_, DumpJobs>,
+    jobs: State<'_, Jobs>,
     chosen: State<'_, ToolPaths>,
     log: State<'_, StatementLog>,
     request: ImportRequest,
 ) -> Result<Imported> {
     let opened = store.open(&request.connection_id)?;
     let tool = tools::resolve("psql", chosen.get("psql").as_deref()).await?;
-    let cancel = jobs.start(&request.job_id);
+    let job = jobs.start(&request.job_id);
     let mut every = Every::new(PROGRESS_EVERY);
     let report = |line: &str| {
         if every.due() {
@@ -335,14 +295,12 @@ pub async fn import_database(
         }
     };
     let path = Path::new(&request.path);
-    let run = Run { tool: &tool, cancel: &cancel };
-    let result = opened
+    let run = Run { tool: &tool, cancel: job.token() };
+    opened
         .run(&log, Origin::Dump, async |connection, password| {
             import(connection, password, &request.database, path, run, report).await
         })
-        .await;
-    jobs.finish(&request.job_id);
-    result
+        .await
 }
 
 /// How an export or import runs: with which tool, and what stops it.
@@ -410,13 +368,6 @@ pub fn clear_export_folder(folder: String) -> Result<exports::ExportFiles> {
 }
 
 /// Stops a running export or import. Harmless once it has finished.
-#[tauri::command]
-pub fn cancel_dump(jobs: State<'_, DumpJobs>, job_id: String) {
-    if let Some(cancel) = jobs.0.lock().unwrap().get(&job_id) {
-        cancel.cancel();
-    }
-}
-
 /// Runs against the local server and the client tools installed. Start the server and run
 /// `cargo test -- --ignored`; see `drivers::postgres::tests` for the container.
 #[cfg(test)]

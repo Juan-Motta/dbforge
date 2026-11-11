@@ -12,6 +12,7 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{AppError, Result};
+use crate::jobs::cancelled;
 
 /// Where client tools live besides PATH. `*` stands for any version.
 const PLACES: [&str; 10] = [
@@ -132,10 +133,6 @@ fn version_of(text: &str) -> Option<(u32, u32)> {
     let mut parts = word.splitn(2, '.');
     let major = number(parts.next()?)?;
     Some((major, parts.next().and_then(number).unwrap_or(0)))
-}
-
-pub fn cancelled() -> AppError {
-    AppError::Invalid("Cancelled.".into())
 }
 
 /// Runs `command`, handing every line it writes (output and errors alike) to

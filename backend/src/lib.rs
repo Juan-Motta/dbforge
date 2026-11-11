@@ -11,6 +11,7 @@ mod explorer;
 mod export;
 mod files;
 mod history;
+mod jobs;
 mod keyspace;
 mod mcp;
 mod query;
@@ -33,7 +34,7 @@ pub fn run() {
             app.manage(connections::tags::TagStore::load(config.join("tags.json"))?);
             app.manage(dump::ToolPaths::load(config.join("tools.json"))?);
             app.manage(query::QuerySessions::default());
-            app.manage(dump::DumpJobs::default());
+            app.manage(jobs::Jobs::default());
             let mcp_settings = mcp::SettingsFile::load(config.join("mcp.json"))?;
             let settings = mcp_settings.get();
             app.manage(mcp_settings);
@@ -62,6 +63,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             files::set_aside_files,
+            files::reveal_file,
             commands::list_connections,
             commands::save_connection,
             commands::delete_connection,
@@ -94,7 +96,7 @@ pub fn run() {
             export::export_table,
             dump::export_database,
             dump::import_database,
-            dump::cancel_dump,
+            jobs::cancel_job,
             dump::dump_tool,
             dump::set_dump_tool,
             dump::dump_file_exists,

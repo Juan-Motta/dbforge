@@ -46,7 +46,7 @@ export const dumpApi = {
   }) => invoke<Exported>('export_database', { request }),
   importDatabase: (request: { jobId: string; connectionId: string; database: string; path: string }) =>
     invoke<Imported>('import_database', { request }),
-  cancel: (jobId: string) => invoke<void>('cancel_dump', { jobId }),
+  cancel: (jobId: string) => invoke<void>('cancel_job', { jobId }),
   /** Which tool will run; rejects with why none can. */
   tool: (name: DumpTool) => invoke<ToolInfo>('dump_tool', { name }),
   /** Runs `path` from now on once it proves to be that tool; `null` goes back to the one found. */
