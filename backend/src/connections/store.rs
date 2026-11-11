@@ -69,11 +69,16 @@ impl ConnectionStore {
         Ok(connection)
     }
 
-    /// Every id a secret may be saved under: each connection's password and SSH secret.
+    /// Every id a secret may be saved under: each connection's password, and
+    /// its SSH secret when it has SSH settings (on, or kept while off). The
+    /// keychain may ask for each one, so ids that can't hold a secret are left out.
     pub fn credential_ids(&self) -> Vec<String> {
         self.list()
             .into_iter()
-            .flat_map(|connection| [Connection::ssh_credential_id(&connection.id), connection.id])
+            .flat_map(|connection| {
+                let ssh = (!connection.ssh.host.is_empty()).then(|| Connection::ssh_credential_id(&connection.id));
+                ssh.into_iter().chain([connection.id])
+            })
             .collect()
     }
 
@@ -239,6 +244,12 @@ mod tests {
         assert_eq!(store.ssh_secret("a").unwrap().as_deref(), Some("passphrase"));
         store.save(parts(None)).unwrap();
         assert_eq!(store.ssh_secret("a").unwrap().as_deref(), Some("passphrase"), "None keeps it");
+        assert_eq!(store.credential_ids(), ["a"], "no SSH settings, no SSH secret to move");
+        let tunnelled = Connection {
+            ssh: crate::connections::transport::SshTunnel { host: "b".into(), ..Default::default() },
+            ..connection("a", "first")
+        };
+        store.upsert(tunnelled).unwrap();
         assert_eq!(store.credential_ids(), ["a.ssh", "a"]);
 
         let copy = store.duplicate("a", "copy").unwrap();

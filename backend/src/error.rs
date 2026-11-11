@@ -43,12 +43,21 @@ pub(crate) fn http_message(error: &reqwest::Error) -> String {
     } else if cause.contains("failed to lookup address") || cause.contains("nodename nor servname") {
         "Could not find the host. Check its name, or that you are on the network that can see it.".into()
     } else if cause.contains("invalid peer certificate") || cause.contains("UnknownIssuer") {
-        untrusted_certificate(&cause)
+        untrusted_account_certificate(&cause)
     } else if error.is_connect() {
         format!("Could not reach the server: {cause}")
     } else {
         cause
     }
+}
+
+/// What to do about an account's HTTPS certificate no trusted authority signed,
+/// in the terms of the Cosmos DB form, the only one reached over HTTP.
+fn untrusted_account_certificate(cause: &str) -> String {
+    format!(
+        "The server's TLS certificate isn't trusted ({cause}). If the server uses a self-signed \
+         certificate, turn on Accept self-signed certificate."
+    )
 }
 
 /// What to do about a server certificate no trusted authority signed.
@@ -122,3 +131,14 @@ impl Serialize for AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untrusted_certificate_hints_name_the_form_s_own_controls() {
+        assert!(untrusted_account_certificate("x").ends_with("turn on Accept self-signed certificate."));
+        assert!(untrusted_certificate("x").contains("CA file") && untrusted_certificate("x").contains("SSL mode"));
+    }
+}

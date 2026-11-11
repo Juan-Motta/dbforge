@@ -217,6 +217,14 @@ impl Tunnel {
     }
 }
 
+/// A tunnel dropped without `close` (its slot was replaced or forgotten) still
+/// stops forwarding, so no listener or session outlives it.
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        self.forwarding.abort();
+    }
+}
+
 /// Forwards every socket accepted on `listener` to `target` over `session`.
 async fn forward(
     listener: TcpListener,
