@@ -13,8 +13,8 @@ icon = "backend/icons/icon.icns"
 
 # Drawn by scripts/make-dmg-background.swift: the arrow and the INSERT INTO statement between the icons.
 background = "backend/dmg/background.tiff"
-# Content size; it matches the 660 x 400 background.
-window_rect = ((200, 120), (660, 400))
+# Content size; it matches the 660 x 440 background.
+window_rect = ((200, 120), (660, 440))
 default_view = "icon-view"
 show_status_bar = False
 show_tab_view = False
@@ -28,6 +28,6 @@ text_size = 13
 arrange_by = None
 label_pos = "bottom"
 icon_locations = {
-    app_name: (180, 170),
-    "Applications": (480, 170),
+    app_name: (180, 150),
+    "Applications": (480, 150),
 }
