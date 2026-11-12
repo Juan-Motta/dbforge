@@ -132,6 +132,8 @@ impl Reply {
 pub struct Client {
     http: reqwest::Client,
     endpoint: String,
+    /// Requests go over HTTPS; off only for a local emulator without TLS.
+    encrypted: bool,
     key: Vec<u8>,
 }
 
@@ -153,8 +155,9 @@ impl Client {
             .tls_danger_accept_invalid_certs(connection.ssl.mode == SslMode::Require)
             .user_agent("DBForge")
             .build()?;
-        let scheme = if connection.ssl.mode.encrypts() { "https" } else { "http" };
-        Ok(Self { http, endpoint: format!("{scheme}://{}:{}", connection.host, connection.port), key })
+        let encrypted = connection.ssl.mode.encrypts();
+        let scheme = if encrypted { "https" } else { "http" };
+        Ok(Self { http, endpoint: format!("{scheme}://{}:{}", connection.host, connection.port), encrypted, key })
     }
 
     pub async fn get(&self, target: &Target, headers: &[(&str, &str)]) -> Result<Reply> {
@@ -184,7 +187,11 @@ impl Client {
     ) -> Result<Reply> {
         let mut attempt = 0;
         loop {
-            let response = self.request(method.clone(), target, headers, body).send().await?;
+            let response = self
+                .request(method.clone(), target, headers, body)
+                .send()
+                .await
+                .map_err(|error| self.unanswered(error))?;
             let status = response.status();
             let headers = response.headers().clone();
             let text = response.text().await?;
@@ -204,6 +211,19 @@ impl Client {
             }
             return Err(AppError::Invalid(error_message(status, &text)));
         }
+    }
+
+    /// Why a request got no answer. An account only speaks HTTPS, and hangs up
+    /// on plain HTTP without a word, which reads as a dropped connection.
+    fn unanswered(&self, error: reqwest::Error) -> AppError {
+        if self.encrypted || error.is_timeout() || error.is_connect() {
+            return error.into();
+        }
+        AppError::Invalid(
+            "The server closed the connection without answering. Cosmos DB accounts are reached over \
+             HTTPS: start the URI with https:// (http:// is only for a local emulator without TLS)."
+                .into(),
+        )
     }
 
     /// Every resource of a feed, following its continuation tokens; `items` is
@@ -341,6 +361,39 @@ fn encode(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server that accepts one connection and closes it without answering,
+    /// as an account does when spoken to in plain HTTP.
+    async fn hanging_up() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut request).await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn a_dropped_plain_http_request_points_at_https() {
+        let port = hanging_up().await;
+        let connection = Connection { port, ..crate::drivers::cosmos::tests::local() };
+        let client = Client::new(&connection, crate::drivers::cosmos::tests::KEY).unwrap();
+        let Err(error) = client.get(&Target::account(), &[]).await else { panic!("the request was answered") };
+        let error = error.to_string();
+        assert!(error.contains("start the URI with https://"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_keeps_its_own_message() {
+        let port = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+        let connection = Connection { port, ..crate::drivers::cosmos::tests::local() };
+        let client = Client::new(&connection, crate::drivers::cosmos::tests::KEY).unwrap();
+        let Err(error) = client.get(&Target::account(), &[]).await else { panic!("the request was answered") };
+        let error = error.to_string();
+        assert!(error.starts_with("Could not reach the server"), "{error}");
+    }
 
     #[test]
     fn paths_encode_names_and_sign_with_the_unencoded_link() {
