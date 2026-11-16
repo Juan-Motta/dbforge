@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NO_SSH_TUNNEL, type Connection } from '../../domain/connection'
 import { messages } from './messages'
 import {
+  agentAccessChosen,
   canSubmit,
   canTest,
   emptyForm,
@@ -57,6 +58,23 @@ describe('canSubmit', () => {
     const sqlite = { ...withEngine(emptyForm(), 'sqlite'), name: 'local' }
     expect(canSubmit(sqlite)).toBe(false)
     expect(canSubmit({ ...sqlite, database: '/data/app.db' })).toBe(true)
+  })
+})
+
+describe('agent access', () => {
+  it('starts a new connection without a choice, which saving requires', () => {
+    expect(emptyForm().agentAccess).toBeNull()
+    expect(agentAccessChosen(emptyForm())).toBe(false)
+    expect(agentAccessChosen({ ...emptyForm(), agentAccess: 'none' })).toBe(true)
+  })
+
+  it('keeps the choice a saved connection has', () => {
+    const saved = { ...toInput({ ...emptyForm(), name: 'n', agentAccess: 'read' }, 'id'), id: 'id' }
+    expect(formFromConnection(saved as Connection).agentAccess).toBe('read')
+  })
+
+  it('tests a connection before access is chosen, giving agents none', () => {
+    expect(toInput({ ...emptyForm(), name: 'n' }).agentAccess).toBe('none')
   })
 })
 

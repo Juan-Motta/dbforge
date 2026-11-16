@@ -54,6 +54,14 @@
   white-space: nowrap;
 }
 
+.placeholder {
+  color: var(--text3);
+}
+
+.button[aria-invalid='true'] {
+  border-color: var(--err);
+}
+
 .backdrop {
   position: fixed;
   inset: 0;

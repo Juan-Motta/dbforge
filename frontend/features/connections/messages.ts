@@ -44,6 +44,7 @@ export const messages = defineMessages({
     agentAccess: 'Agent access (MCP)',
     agentAccessInfo:
       'What AI agents connected to DBForge’s MCP server may do with this connection. They never see its password. Changes on a tag that asks first wait for your approval.',
+    agentChoose: 'Choose what agents may do',
     agentNone: 'No access',
     agentRead: 'Read only',
     agentWrite: 'Read and write',
@@ -192,6 +193,7 @@ export const messages = defineMessages({
     agentAccess: 'Acceso de agentes (MCP)',
     agentAccessInfo:
       'Lo que pueden hacer con esta conexión los agentes de IA conectados al servidor MCP de DBForge. Nunca ven su contraseña. Los cambios en una etiqueta que pregunta antes esperan tu aprobación.',
+    agentChoose: 'Elige qué pueden hacer los agentes',
     agentNone: 'Sin acceso',
     agentRead: 'Solo lectura',
     agentWrite: 'Lectura y escritura',

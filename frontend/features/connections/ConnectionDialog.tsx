@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
@@ -23,6 +23,7 @@ import { tagColor } from '../tags/tags'
 import { useTags } from '../tags/useTags'
 import { connectionsApi, type ConnectionInput, type CredentialStorage } from './api'
 import {
+  agentAccessChosen,
   canSubmit,
   canTest,
   emptyForm,
@@ -86,6 +87,9 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
   /** What a pasted URL held that the form can't, or `null` when nothing was pasted. */
   const [fromUrl, setFromUrl] = useState<string[] | null>(null)
   const [chosenSection, setSection] = useState<Section>('general')
+  /** Save was pressed before agent access was chosen. */
+  const [accessAsked, setAccessAsked] = useState(false)
+  const accessField = useRef<HTMLButtonElement>(null)
   const ids = useId()
 
   const update = (changes: Partial<ConnectionForm>) => {
@@ -176,7 +180,18 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
         className={styles.form}
         onSubmit={(event) => {
           event.preventDefault()
-          if (canSubmit(form)) void save()
+          if (!canSubmit(form)) return
+          if (!agentAccessChosen(form)) {
+            // The field sits at the end of the form, often out of view.
+            setSection('general')
+            setAccessAsked(true)
+            requestAnimationFrame(() => {
+              accessField.current?.scrollIntoView({ block: 'center' })
+              accessField.current?.focus()
+            })
+            return
+          }
+          void save()
         }}
       >
         <div {...panel('general')}>
@@ -354,6 +369,9 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
             label={m.agentAccess}
             info={m.agentAccessInfo}
             value={form.agentAccess}
+            placeholder={m.agentChoose}
+            invalid={accessAsked && !agentAccessChosen(form)}
+            ref={accessField}
             options={[
               { value: 'none', label: m.agentNone },
               { value: 'read', label: m.agentRead },

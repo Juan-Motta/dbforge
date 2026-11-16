@@ -36,7 +36,8 @@ export interface ConnectionForm {
   /** The SSH password or key passphrase; empty keeps the saved one. */
   sshSecret: string
   srv: boolean
-  agentAccess: AgentAccess
+  /** `null` until the user chooses: a new connection never gets agent access by default. */
+  agentAccess: AgentAccess | null
 }
 
 /** The SSH tunnel as typed: its port is text, like the server's. */
@@ -65,7 +66,7 @@ export function emptyForm(): ConnectionForm {
     ssh: NO_SSH_FORM,
     sshSecret: '',
     srv: false,
-    agentAccess: 'none',
+    agentAccess: null,
   }
 }
 
@@ -183,6 +184,13 @@ function usesSrv(form: ConnectionForm): boolean {
   return form.engine === 'mongodb' && form.srv
 }
 
+/** The user chose what agents may do; saving asks for it, as the field can be out of view. */
+export function agentAccessChosen(
+  form: ConnectionForm,
+): form is ConnectionForm & { agentAccess: AgentAccess } {
+  return form.agentAccess !== null
+}
+
 export function canSubmit(form: ConnectionForm): boolean {
   return form.name.trim() !== '' && canTest(form)
 }
@@ -192,7 +200,9 @@ export function canSubmit(form: ConnectionForm): boolean {
  * needs no server details, SSL or tunnel; an account has no tunnel.
  */
 export function toInput(form: ConnectionForm, id?: string): ConnectionInput {
-  const { password, port, sshSecret, ssh: sshForm, ...rest } = form
+  const { password, port, sshSecret, ssh: sshForm, agentAccess, ...fields } = form
+  // A test runs before access is chosen; it gives agents nothing, and saving requires a choice.
+  const rest = { ...fields, agentAccess: agentAccess ?? 'none' }
   const secret = (value: string) => (value === '' ? undefined : value)
   const ssh: SshTunnel = ENGINES[form.engine].tunnels
     ? { ...sshForm, port: isValidPort(sshForm.port) ? Number(sshForm.port) : NO_SSH_TUNNEL.port }

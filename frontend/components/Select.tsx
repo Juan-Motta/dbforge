@@ -1,4 +1,12 @@
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import { Icon } from './Icon'
 import { InfoTip } from './InfoTip'
 import { matchTyped, step } from './selectKeys'
@@ -15,8 +23,14 @@ export interface SelectOption<T extends string> {
 
 interface SelectProps<T extends string> {
   label: string
-  value: T
+  /** `null` while nothing is chosen yet; the button shows `placeholder`. */
+  value: T | null
   options: SelectOption<T>[]
+  placeholder?: string
+  /** Marks the field as needing an answer, as a text field marks invalid input. */
+  invalid?: boolean
+  /** The dropdown's button, e.g. to bring the field into view and focus it. */
+  ref?: Ref<HTMLButtonElement>
   onChange: (value: T) => void
   /** Explains the field in a tooltip next to its label. */
   info?: string
@@ -44,9 +58,14 @@ export function Select<T extends string>({
   info,
   autoFocus,
   hideLabel = false,
+  placeholder,
+  invalid = false,
+  ref,
 }: SelectProps<T>) {
   const id = useId()
   const button = useRef<HTMLButtonElement>(null)
+  // Read after mount, when the button exists.
+  useImperativeHandle(ref, () => button.current!, [])
   const [placement, setPlacement] = useState<Placement | null>(null)
   const [active, setActive] = useState(-1)
   // Letters typed in a row jump to the option they start; the run ends after a pause.
@@ -130,12 +149,16 @@ export function Select<T extends string>({
         aria-activedescendant={placement && active >= 0 ? `${id}-${active}` : undefined}
         aria-labelledby={`${id}-label ${id}-value`}
         data-autofocus={autoFocus || undefined}
+        aria-invalid={invalid || undefined}
         onClick={() => (placement ? close() : open())}
         onKeyDown={onKeyDown}
       >
         {selected?.icon}
-        <span className={styles.value} id={`${id}-value`}>
-          {selected?.label}
+        <span
+          className={selected ? styles.value : `${styles.value} ${styles.placeholder}`}
+          id={`${id}-value`}
+        >
+          {selected?.label ?? placeholder}
         </span>
         <Icon name="chevronDown" size={12} />
       </button>
