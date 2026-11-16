@@ -1,0 +1,72 @@
+.root {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.line {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--err);
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.line:hover {
+  text-decoration: underline;
+}
+
+.popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 50;
+  width: min(460px, 70vw);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: var(--elev);
+  box-shadow: var(--shadow);
+}
+
+.text {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  color: var(--err);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.copy:hover {
+  color: var(--text);
+}

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
 import { Icon } from '../../components/Icon'
+import { useDismiss } from '../../components/useDismiss'
 import type { Connection } from '../../domain/connection'
 import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
@@ -24,20 +25,8 @@ export function ConnectionDetails({ connection, onEdit }: ConnectionDetailsProps
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
 
-  // Closes on a click elsewhere or Escape, as menus do.
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setOpen(false)
-    document.addEventListener('pointerdown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onPointer)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const close = useCallback(() => setOpen(false), [])
+  useDismiss(open, root, close)
 
   return (
     <div className={styles.chip} ref={root}>

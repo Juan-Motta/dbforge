@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Button, IconButton } from '../../components/Button'
 import { EngineLogo } from '../../components/EngineLogo'
+import { ErrorLine } from '../../components/ErrorLine'
 import { Icon } from '../../components/Icon'
 import { InfoTip } from '../../components/InfoTip'
 import { Modal } from '../../components/Modal'
@@ -381,8 +382,8 @@ export function ConnectionDialog({ connection, onSave, onClose }: ConnectionDial
         </Button>
         <span role="status" className={styles.result}>
           {test.status === 'ok' && <Badge tone="ok">{test.message}</Badge>}
-          {test.status === 'error' && <span className={styles.error}>{test.message}</span>}
-          {saveError && <span className={styles.error}>{saveError}</span>}
+          {test.status === 'error' && <ErrorLine key={test.message} text={test.message} />}
+          {saveError && <ErrorLine key={saveError} text={saveError} />}
         </span>
 
         <Button variant="ghost" onClick={onClose}>

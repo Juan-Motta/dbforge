@@ -29,6 +29,14 @@ pub enum AppError {
     Http(#[from] reqwest::Error),
 }
 
+/// What to do when the host's name doesn't resolve.
+const UNKNOWN_HOST: &str = "Could not find the host. Check its name, or that you are on the network that can see it.";
+
+/// The system resolver's words for a name it can't find (`getaddrinfo`).
+fn names_unknown_host(cause: &str) -> bool {
+    cause.contains("failed to lookup address") || cause.contains("nodename nor servname")
+}
+
 /// Why an HTTP request (Cosmos DB) never got an answer, from the innermost cause:
 /// reqwest's own text only says that sending failed.
 pub(crate) fn http_message(error: &reqwest::Error) -> String {
@@ -40,8 +48,8 @@ pub(crate) fn http_message(error: &reqwest::Error) -> String {
     }
     if error.is_timeout() {
         "The server took too long to answer.".into()
-    } else if cause.contains("failed to lookup address") || cause.contains("nodename nor servname") {
-        "Could not find the host. Check its name, or that you are on the network that can see it.".into()
+    } else if names_unknown_host(&cause) {
+        UNKNOWN_HOST.into()
     } else if cause.contains("invalid peer certificate") || cause.contains("UnknownIssuer") {
         untrusted_account_certificate(&cause)
     } else if error.is_connect() {
@@ -76,9 +84,7 @@ pub(crate) fn redis_message(error: &redis::RedisError) -> String {
         _ if error.kind() == redis::ErrorKind::AuthenticationFailed => {
             "Authentication failed: wrong user name or password.".into()
         }
-        _ if error.to_string().contains("failed to lookup address") => {
-            "Could not find the host. Check its name, or that you are on the network that can see it.".into()
-        }
+        _ if names_unknown_host(&error.to_string()) => UNKNOWN_HOST.into(),
         _ if error.is_connection_refusal() => format!("Could not reach the server: {error}"),
         _ if error.to_string().contains("invalid peer certificate") => untrusted_certificate(&error.to_string()),
         _ => error.to_string(),
@@ -101,6 +107,7 @@ pub(crate) fn mongodb_message(error: &mongodb::error::Error) -> String {
 pub(crate) fn sqlserver_message(error: &tiberius::error::Error) -> String {
     match error {
         tiberius::error::Error::Server(server) => server.message().to_string(),
+        other if names_unknown_host(&other.to_string()) => UNKNOWN_HOST.into(),
         other => other.to_string(),
     }
 }
@@ -110,7 +117,13 @@ pub(crate) fn sqlserver_message(error: &tiberius::error::Error) -> String {
 /// points into PostgreSQL's source code, not into the user's query.
 pub(crate) fn database_message(error: &sqlx::Error) -> String {
     let Some(server) = error.as_database_error() else {
-        return error.to_string();
+        return match error {
+            sqlx::Error::Io(io) if names_unknown_host(&io.to_string()) => UNKNOWN_HOST.into(),
+            sqlx::Error::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused => {
+                format!("Could not reach the server: {io}")
+            }
+            other => other.to_string(),
+        };
     };
     let mut message = server.message().to_string();
     if let Some(pg) = server.try_downcast_ref::<sqlx::postgres::PgDatabaseError>() {
@@ -135,6 +148,16 @@ pub type Result<T> = std::result::Result<T, AppError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_that_doesn_t_resolve_reads_as_an_unknown_host() {
+        let lookup = std::io::Error::other("failed to lookup address information: nodename nor servname provided");
+        assert_eq!(database_message(&sqlx::Error::Io(lookup)), UNKNOWN_HOST);
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(database_message(&sqlx::Error::Io(refused)).starts_with("Could not reach the server: "));
+        let other = std::io::Error::other("broken pipe");
+        assert_eq!(database_message(&sqlx::Error::Io(other)), "error communicating with database: broken pipe");
+    }
 
     #[test]
     fn untrusted_certificate_hints_name_the_form_s_own_controls() {

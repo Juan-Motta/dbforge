@@ -184,6 +184,10 @@ async function answer(cmd: string, payload: Record<string, unknown>): Promise<un
       )
       return delay(null)
     case 'test_connection':
+      // A host ending in `.invalid` fails with a message too long for one line.
+      if ((payload.input as { host: string }).host.endsWith('.invalid')) {
+        throw "The server's TLS certificate isn't trusted (invalid peer certificate: UnknownIssuer). Choose the authority that signed it in CA file, or set SSL mode to Require to encrypt without checking it."
+      }
       return delay('PostgreSQL 17.0 (mock)')
     case 'list_objects': {
       const path = (payload.path as string[]).join('/')
