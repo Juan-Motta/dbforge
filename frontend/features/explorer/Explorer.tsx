@@ -16,7 +16,7 @@ interface ExplorerProps {
   /** Double-click on a table or view. */
   onOpen: (node: TreeNode) => void
   onNewConnection: () => void
-  /** A node's right-click menu; `refresh` reloads the tree, e.g. once a database was created. */
+  /** A node's right-click menu; `refresh` reloads that node's part of the tree, e.g. once a database was created. */
   menuOf: (node: TreeNode, refresh: () => void) => MenuItem[]
 }
 
@@ -45,7 +45,7 @@ export function Explorer({ connections, onSelect, onOpen, onNewConnection, menuO
         <IconButton label={m.newConnection} onClick={onNewConnection}>
           <Icon name="plus" />
         </IconButton>
-        <IconButton label={m.refresh} onClick={refresh}>
+        <IconButton label={m.refresh} onClick={() => refresh()}>
           <Icon name="refresh" />
         </IconButton>
         <IconButton label={m.collapseAll} onClick={collapseAll}>
@@ -77,7 +77,7 @@ export function Explorer({ connections, onSelect, onOpen, onNewConnection, menuO
               onToggle={toggle}
               onOpen={onOpen}
               onMenu={(node, x, y) => {
-                const items = menuOf(node, refresh)
+                const items = menuOf(node, () => refresh(node))
                 setMenu(items.length > 0 ? { x, y, items } : null)
               }}
             />

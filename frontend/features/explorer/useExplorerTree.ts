@@ -4,18 +4,16 @@ import { errorMessage } from '../../lib/errors'
 import { useMessages } from '../../lib/i18n/useLanguage'
 import { explorerApi, type DbObject } from './api'
 import { messages } from './messages'
-import { connectionNode, toChildNodes, type TreeNode } from './tree'
+import { connectionNode, loadsChildren, nodesToReload, toChildNodes, type TreeNode } from './tree'
 
 // The listed objects are kept, not their nodes, so folder names follow the language.
 type ChildState =
   { status: 'loading' } | { status: 'loaded'; objects: DbObject[] } | { status: 'error'; message: string }
 
-/** A node whose children come from the backend (folders arrive pre-loaded). */
-const loadsChildren = (node: TreeNode) => node.expandable && node.kind !== 'folder'
-
 /**
  * The explorer tree for the given connections. A node's children load from the
- * backend the first time it is expanded; `refresh` reloads every expanded node.
+ * backend the first time it is expanded; `refresh` reloads every expanded node,
+ * or with a node, only that node's part of the tree.
  */
 export function useExplorerTree(connections: Connection[]) {
   const m = useMessages(messages)
@@ -66,17 +64,7 @@ export function useExplorerTree(connections: Connection[]) {
 
   const collapseAll = () => setExpanded(new Set())
 
-  const refresh = () => {
-    const toReload: TreeNode[] = []
-    const walk = (nodes: TreeNode[]) =>
-      nodes.forEach((node) => {
-        if (!expanded.has(node.id)) return
-        if (loadsChildren(node)) toReload.push(node)
-        walk(node.children ?? [])
-      })
-    walk(roots)
-    load(toReload)
-  }
+  const refresh = (scope?: TreeNode) => load(nodesToReload(roots, (id) => expanded.has(id), scope?.id))
 
   return { roots, expanded, toggle, collapseAll, refresh }
 }

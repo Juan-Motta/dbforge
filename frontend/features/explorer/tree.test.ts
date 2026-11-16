@@ -5,6 +5,7 @@ import { messages } from './messages'
 import {
   connectionNode,
   filterTree,
+  nodesToReload,
   toChildNodes as toNodes,
   visibleRows as rowsOf,
   type TreeNode,
@@ -153,5 +154,53 @@ describe('filterTree', () => {
 
   it('returns nothing when no node matches', () => {
     expect(filterTree(sampleTree(), 'zzz')).toEqual([])
+  })
+})
+
+describe('nodesToReload', () => {
+  const other: Connection = { ...connection, id: 'other', name: 'remote' }
+  /** Two connections, every loaded node expanded. */
+  function twoConnections() {
+    const roots = [...sampleTree(), connectionNode(other)]
+    const [otherShop] = toChildNodes(roots[1], [object('shop', 'database')])
+    otherShop.children = []
+    roots[1].children = [otherShop]
+    return roots
+  }
+  const everyExpanded = () => true
+  const paths = (nodes: TreeNode[]) => nodes.map((n) => `${n.connectionId}:${n.path.join('/')}`)
+
+  it('reloads every expanded node of every connection without a scope', () => {
+    expect(paths(nodesToReload(twoConnections(), everyExpanded))).toEqual([
+      'pg:',
+      'pg:shop',
+      'pg:shop/public',
+      'other:',
+      'other:shop',
+    ])
+  })
+
+  it('reloads only the chosen connection and its expanded nodes', () => {
+    expect(paths(nodesToReload(twoConnections(), everyExpanded, 'pg'))).toEqual([
+      'pg:',
+      'pg:shop',
+      'pg:shop/public',
+    ])
+  })
+
+  it('reloads a folder through the node that lists it', () => {
+    const roots = twoConnections()
+    const tables = roots[0].children![0].children![0].children![0]
+    expect(paths(nodesToReload(roots, everyExpanded, tables.id))).toEqual(['pg:shop/public'])
+  })
+
+  it('skips collapsed descendants but still reloads the chosen loaded node', () => {
+    const roots = twoConnections()
+    const shop = roots[0].children![0]
+    expect(paths(nodesToReload(roots, (id) => id === 'pg', shop.id))).toEqual(['pg:shop'])
+  })
+
+  it('reloads nothing for a node that is gone', () => {
+    expect(nodesToReload(twoConnections(), everyExpanded, 'missing')).toEqual([])
   })
 })

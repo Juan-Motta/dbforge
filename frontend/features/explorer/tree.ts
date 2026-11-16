@@ -124,3 +124,41 @@ export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
     return children.length > 0 ? [{ ...node, children }] : []
   })
 }
+
+/** A node whose children come from the backend (folders arrive pre-loaded). */
+export const loadsChildren = (node: TreeNode) => node.expandable && node.kind !== 'folder'
+
+/**
+ * The nodes to list again on a refresh. Without `scopeId`, every expanded node
+ * of every connection. With it, the node that lists the scope's children (a
+ * folder's parent) and its expanded descendants: refreshing one connection
+ * leaves the others alone.
+ */
+export function nodesToReload(
+  roots: TreeNode[],
+  isExpanded: (id: string) => boolean,
+  scopeId?: string,
+): TreeNode[] {
+  const expandedBelow = (nodes: TreeNode[]): TreeNode[] =>
+    nodes.flatMap((node) => {
+      if (!isExpanded(node.id)) return []
+      return [...(loadsChildren(node) ? [node] : []), ...expandedBelow(node.children ?? [])]
+    })
+  if (scopeId === undefined) return expandedBelow(roots)
+
+  const start = lister(roots, scopeId)
+  if (!start) return []
+  const loaded = isExpanded(start.id) || start.children !== undefined || start.error !== undefined
+  return [...(loaded ? [start] : []), ...expandedBelow(start.children ?? [])]
+}
+
+/** The deepest node on the way to `id` whose children come from the backend. */
+function lister(nodes: TreeNode[], id: string, nearest?: TreeNode): TreeNode | undefined {
+  for (const node of nodes) {
+    const candidate = loadsChildren(node) ? node : nearest
+    if (node.id === id) return candidate
+    const found = lister(node.children ?? [], id, candidate)
+    if (found) return found
+  }
+  return undefined
+}
