@@ -8,10 +8,12 @@
 mod approvals;
 pub mod commands;
 mod server;
+mod sessions;
 mod settings;
 pub mod token;
 mod tools;
 
 pub use approvals::Approvals;
 pub use server::McpServer;
+pub use sessions::SessionFile;
 pub use settings::{McpSettings, SettingsFile};

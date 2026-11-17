@@ -12,6 +12,7 @@ use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use rmcp::transport::streamable_http_server::session::SessionStore;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde::Serialize;
@@ -46,18 +47,25 @@ struct Running {
     task: JoinHandle<()>,
 }
 
+/// Where agents' sessions are kept, so they outlive a restart of the server.
+pub type Sessions = Arc<dyn SessionStore>;
+
 /// The running server, if any: started and stopped as the settings say.
-#[derive(Default)]
 pub struct McpServer {
     running: tokio::sync::Mutex<Option<Running>>,
     status: Mutex<Option<Status>>,
     token: SharedToken,
+    sessions: Sessions,
 }
 
 /// How long a stopping server may take to let its agents go before it is cut off.
 const STOP_WAIT: Duration = Duration::from_secs(3);
 
 impl McpServer {
+    pub fn new(sessions: Sessions) -> Self {
+        Self { running: Default::default(), status: Default::default(), token: Default::default(), sessions }
+    }
+
     pub fn status(&self) -> Status {
         lock(&self.status).clone().unwrap_or(Status::Stopped)
     }
@@ -79,7 +87,13 @@ impl McpServer {
         let status = match TcpListener::bind(address).await {
             Ok(listener) => {
                 let cancel = CancellationToken::new();
-                let router = secured(move || Tools::new(app.clone()), self.token.clone(), port, cancel.child_token());
+                let router = secured(
+                    move || Tools::new(app.clone()),
+                    self.token.clone(),
+                    self.sessions.clone(),
+                    port,
+                    cancel.child_token(),
+                );
                 let shutdown = cancel.clone();
                 let task = tauri::async_runtime::spawn(async move {
                     let served = axum::serve(listener, router).with_graceful_shutdown(shutdown.cancelled_owned());
@@ -118,10 +132,12 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// `handler` served over Streamable HTTP at [`PATH`], only to requests with
-/// the token, a loopback `Host` and no web page's `Origin`.
+/// the token, a loopback `Host` and no web page's `Origin`. A session unknown
+/// to this server (it restarted) is brought back from `sessions`.
 fn secured<H>(
     handler: impl Fn() -> H + Send + Sync + 'static,
     token: SharedToken,
+    sessions: Sessions,
     port: u16,
     cancel: CancellationToken,
 ) -> Router
@@ -135,6 +151,7 @@ where
     // Agents don't send an Origin; a web page always does, and none is let in.
     config.allowed_origins = Vec::new();
     config = config.enforce_origin_validation();
+    config.session_store = Some(sessions);
     let service = StreamableHttpService::new(move || Ok(handler()), Arc::new(LocalSessionManager::default()), config);
     Router::new().nest_service(PATH, service).layer(middleware::from_fn_with_state(token, authorize))
 }
@@ -176,8 +193,15 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_util::sync::CancellationToken;
 
-    use super::{PATH, secured};
+    use super::{PATH, Sessions, secured};
     use crate::drivers::install_crypto;
+    use crate::mcp::SessionFile;
+
+    /// Sessions in a file of their own, for one test.
+    fn sessions() -> (Sessions, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        (Arc::new(SessionFile::load(dir.path().join("mcp-sessions.json")).unwrap()), dir)
+    }
 
     #[derive(Clone)]
     struct Echo;
@@ -195,10 +219,15 @@ mod tests {
 
     /// The server on a free port, and its address.
     async fn serve(token: &str) -> (String, CancellationToken) {
+        serve_with(token, sessions().0).await
+    }
+
+    /// The server on a free port, keeping its sessions in `sessions`.
+    async fn serve_with(token: &str, sessions: Sessions) -> (String, CancellationToken) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let cancel = CancellationToken::new();
-        let router = secured(|| Echo, Arc::new(RwLock::new(token.to_owned())), port, cancel.child_token());
+        let router = secured(|| Echo, Arc::new(RwLock::new(token.to_owned())), sessions, port, cancel.child_token());
         let shutdown = cancel.clone();
         tokio::spawn(
             async move { axum::serve(listener, router).with_graceful_shutdown(shutdown.cancelled_owned()).await },
@@ -241,7 +270,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let token = Arc::new(RwLock::new("old".to_owned()));
         let cancel = CancellationToken::new();
-        let router = secured(|| Echo, token.clone(), port, cancel.child_token());
+        let router = secured(|| Echo, token.clone(), sessions().0, port, cancel.child_token());
         tokio::spawn(axum::serve(listener, router).into_future());
         let url = format!("http://127.0.0.1:{port}{PATH}");
 
@@ -259,7 +288,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let cancel = CancellationToken::new();
         let token = "only-this-test-uses-this-token";
-        let router = secured(|| Echo, Arc::new(RwLock::new(token.into())), port, cancel.child_token());
+        let router = secured(|| Echo, Arc::new(RwLock::new(token.into())), sessions().0, port, cancel.child_token());
         let shutdown = cancel.clone();
         let task = tauri::async_runtime::spawn(async move {
             let _ = axum::serve(listener, router).with_graceful_shutdown(shutdown.cancelled_owned()).await;
@@ -290,6 +319,40 @@ mod tests {
         assert_eq!(from_page.status(), 403);
         let rebound = initialize(&url, &[auth, ("host", "evil.example")]).await;
         assert!(rebound.status().is_client_error(), "{}", rebound.status());
+        cancel.cancel();
+    }
+
+    /// A JSON-RPC message sent within `session`.
+    async fn send(url: &str, session: &str, body: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(url)
+            .header("authorization", "Bearer s3cret")
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream")
+            .header("mcp-protocol-version", "2025-06-18")
+            .header("mcp-session-id", session)
+            .body(body.to_owned())
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_agent_s_session_outlives_a_restart() {
+        install_crypto();
+        let (sessions, _dir) = sessions();
+        let (url, cancel) = serve_with("s3cret", sessions.clone()).await;
+        let connected = initialize(&url, &[("authorization", "Bearer s3cret")]).await;
+        let session = connected.headers()["mcp-session-id"].to_str().unwrap().to_owned();
+        let initialized = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        assert!(send(&url, &session, initialized).await.status().is_success());
+        cancel.cancel();
+
+        // The app reopens: a new server, on the same sessions.
+        let (url, cancel) = serve_with("s3cret", sessions).await;
+        let listed = send(&url, &session, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#).await;
+        assert_eq!(listed.status(), 200);
+        assert!(listed.text().await.unwrap().contains("ping"));
         cancel.cancel();
     }
 }

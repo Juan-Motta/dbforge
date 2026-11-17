@@ -54,7 +54,8 @@ pub fn run() {
             let mcp_settings = mcp::SettingsFile::load(config.join("mcp.json"))?;
             let settings = mcp_settings.get();
             app.manage(mcp_settings);
-            app.manage(mcp::McpServer::default());
+            let mcp_sessions = std::sync::Arc::new(mcp::SessionFile::load(config.join("mcp-sessions.json"))?);
+            app.manage(mcp::McpServer::new(mcp_sessions.clone()));
             app.manage(mcp::Approvals::default());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -67,6 +68,7 @@ pub fn run() {
                 app.state::<connections::tags::TagStore>().set_aside(),
                 app.state::<dump::ToolPaths>().set_aside(),
                 app.state::<mcp::SettingsFile>().set_aside(),
+                mcp_sessions.set_aside(),
             ]
             .into_iter()
             .flatten()
