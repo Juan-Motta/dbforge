@@ -134,7 +134,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// `handler` served over Streamable HTTP at [`PATH`], only to requests with
 /// the token, a loopback `Host` and no web page's `Origin`. A session unknown
 /// to this server (it restarted) is brought back from `sessions`.
-fn secured<H>(
+pub(super) fn secured<H>(
     handler: impl Fn() -> H + Send + Sync + 'static,
     token: SharedToken,
     sessions: Sessions,

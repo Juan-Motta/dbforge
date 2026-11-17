@@ -7,6 +7,7 @@
 
 use rmcp::RoleServer;
 use rmcp::handler::server::wrapper::{Json, Parameters};
+use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::service::RequestContext;
 use rmcp::{tool, tool_handler, tool_router};
@@ -213,7 +214,7 @@ fn language_of(connection: &Connection) -> &'static str {
     }
 }
 
-#[tool_router]
+#[tool_router(vis = "pub(crate)")]
 impl Tools {
     #[tool(
         description = "Lists the database connections saved in DBForge that you may use, with the language each one takes and whether you may change data. Call this first."
@@ -351,8 +352,19 @@ impl Tools {
     }
 }
 
-#[tool_handler(
-    name = "DBForge",
-    instructions = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console."
-)]
-impl rmcp::ServerHandler for Tools {}
+/// What the agent is told about the server, the same from the app and from the stdio bridge.
+const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console.";
+
+/// How DBForge's MCP server introduces itself, wherever the agent reaches it.
+pub(crate) fn server_info() -> ServerConfig {
+    ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        .with_server_info(Implementation::new("DBForge", env!("CARGO_PKG_VERSION")))
+        .with_instructions(INSTRUCTIONS.to_owned())
+}
+
+#[tool_handler]
+impl rmcp::ServerHandler for Tools {
+    fn get_info(&self) -> ServerConfig {
+        server_info()
+    }
+}

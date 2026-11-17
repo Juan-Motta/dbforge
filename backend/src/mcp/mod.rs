@@ -6,6 +6,7 @@
 //! an agent causes lands in the statement log as the agent's.
 
 mod approvals;
+pub mod bridge;
 pub mod commands;
 mod server;
 mod sessions;
