@@ -58,6 +58,13 @@ describe('agent setup', () => {
     expect(prompt).toContain(projectNote())
     expect(instructionsFile('claude')).toBe('CLAUDE.md')
     expect(agentPrompt('other', http)).not.toContain('mcp list')
+    // Over HTTP the wording stays as it was before stdio existed.
+    expect(agentPrompt('claude', http)).toContain(
+      "Then check it is connected with `claude mcp get dbforge` (DBForge must be open), and tell me if it isn't.",
+    )
+    expect(agentPrompt('other', http)).toContain(
+      'Then check it is connected (DBForge must be open), and tell me if it isn’t.',
+    )
   })
 
   it('has each agent start DBForge itself, with no token, on every platform', () => {

@@ -25,7 +25,6 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use connections::commands;
 use connections::store::ConnectionStore;
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// The argument that starts DBForge as an agent's MCP server over stdio.
 pub const MCP_STDIO_FLAG: &str = mcp::bridge::FLAG;
 
@@ -34,6 +33,7 @@ pub fn run_mcp_stdio() -> i32 {
     mcp::bridge::run()
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

@@ -192,6 +192,7 @@ export function projectNote(): string {
 export function agentPrompt(agent: AgentId, endpoint: Endpoint): string {
   const steps = setupSteps(agent, endpoint)
   const check = checkCommand(agent)
+  const mustBeOpen = endpoint.transport === 'http' ? ' (DBForge must be open)' : ''
   const how = steps
     .map((step) => {
       switch (step.kind) {
@@ -214,7 +215,9 @@ export function agentPrompt(agent: AgentId, endpoint: Endpoint): string {
       : 'Add the MCP server "dbforge" (the DBForge database app on this computer) to your configuration, available in every project.',
     how,
     // Over stdio the agent starts DBForge's side itself; over HTTP the app must be open to answer.
-    `Then check it is connected${check ? ` with \`${check}\`` : ''}${endpoint.transport === 'http' ? ' (DBForge must be open)' : ''}, and tell me if it isn’t.`,
+    check
+      ? `Then check it is connected with \`${check}\`${mustBeOpen}, and tell me if it isn't.`
+      : `Then check it is connected${mustBeOpen}, and tell me if it isn’t.`,
     `Finally, add this section to the ${instructionsFile(agent)} of the current project, creating the file if needed:\n\n${projectNote()}`,
     ...(endpoint.transport === 'http'
       ? ['The token is a secret: don’t print it back, and don’t put it in the project.']

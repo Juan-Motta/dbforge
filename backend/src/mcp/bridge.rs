@@ -104,8 +104,7 @@ impl Bridge {
         if !settings.enabled {
             return Err(OFF.into());
         }
-        // A refused connection is the app being closed; tell it apart from a server that answers badly.
-        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, settings.port)).await.is_err() {
+        if !listening(settings.port).await {
             return Err(CLOSED.into());
         }
         let credentials = Credentials::load(self.config.clone())
@@ -130,6 +129,17 @@ impl Bridge {
             Ok(json) => serde_json::from_str(&json).map_err(|error| format!("DBForge's mcp.json is invalid: {error}")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(McpSettings::default()),
             Err(error) => Err(format!("Could not read DBForge's mcp.json: {error}")),
+        }
+    }
+
+    /// What to tell the agent when a call got no answer: the app closed (the
+    /// usual case: quit since the last call), or the call broke off midway.
+    async fn why_lost(&self) -> String {
+        match self.settings() {
+            Ok(settings) if !settings.enabled => OFF.into(),
+            Ok(settings) if !listening(settings.port).await => CLOSED.into(),
+            _ => "Lost DBForge before it answered, so the call may or may not have run. Check before trying it again."
+                .into(),
         }
     }
 
@@ -170,15 +180,18 @@ impl ServerHandler for Bridge {
         match app.call_tool_once(request).await {
             Ok(response) => Ok(response),
             Err(ServiceError::McpError(error)) => Err(error),
-            Err(error) => {
+            Err(_) => {
                 self.lost().await;
-                Ok(failed(format!(
-                    "Lost DBForge before it answered ({error}). If DBForge was closed, ask the user to open it; \
-                     the call may or may not have run."
-                )))
+                Ok(failed(self.why_lost().await))
             }
         }
     }
+}
+
+/// Whether the app listens on `port`: a refused connection is the app being
+/// closed, told apart from a server that answers badly.
+async fn listening(port: u16) -> bool {
+    tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).await.is_ok()
 }
 
 /// A tool result the agent reads as failed, saying why.
@@ -285,12 +298,20 @@ mod tests {
         let sessions = Arc::new(SessionFile::load(config.path().join("mcp-sessions.json")).unwrap());
         let router =
             super::super::server::secured(|| Echo, Arc::new(RwLock::new(token)), sessions, port, cancel.child_token());
-        tokio::spawn(axum::serve(listener, router).into_future());
+        let shutdown = cancel.clone();
+        let served = tokio::spawn(async move {
+            axum::serve(listener, router).with_graceful_shutdown(shutdown.cancelled_owned()).await.unwrap()
+        });
 
         let answered = call(&agent, "ping").await;
         assert_eq!((answered.is_error, text(&answered)), (Some(false), "pong".to_owned()));
         assert_eq!(text(&call(&agent, "caller").await), "test-agent", "the app sees the agent, not the bridge");
+
+        // The user quits the app: the very next call says so plainly.
         cancel.cancel();
+        served.await.unwrap();
+        let closed = call(&agent, "ping").await;
+        assert_eq!((closed.is_error, text(&closed)), (Some(true), CLOSED.to_owned()));
     }
 }
 
