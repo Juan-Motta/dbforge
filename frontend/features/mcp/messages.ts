@@ -34,9 +34,18 @@ export const messages = defineMessages({
     stepProfile: 'Put the token in your shell profile (e.g. ~/.zshrc); the agent reads it from there',
     stepConfig: (file: string) => `Add to ${file}`,
     stepConnect: 'Its address and header, for any agent that takes MCP servers over HTTP',
+    stepLaunch: 'Its command, for any agent that starts MCP servers over stdio',
+    transport: 'How the agent reaches DBForge',
+    transportStdio: 'Starts DBForge itself',
+    transportHttp: 'Over HTTP',
+    transportStdioNote:
+      'Recommended. The agent starts DBForge’s executable and keeps it for its whole session, so it reconnects by itself when DBForge opens or restarts. Its settings hold no token.',
+    transportHttpNote:
+      'The agent connects to DBForge while it is open, with the token. If DBForge was closed when the agent started, restart the agent.',
     promptTitle: 'Or let the agent set it up: paste this prompt into it',
     promptHelp:
       'The prompt carries the token; it adds DBForge for every project and notes it in the current one.',
+    promptHelpStdio: 'The prompt adds DBForge for every project and notes it in the current one.',
     noteTitle: (file: string) => `So it uses DBForge in a project: add to its ${file}`,
     accessNote:
       'Agents only see connections you give them access to: open a connection’s settings and choose Agent access. Read only blocks writes, not everything an administrator account can do (ending sessions, server settings); for agents, a database user with only the rights they need is safest.',
@@ -75,8 +84,17 @@ export const messages = defineMessages({
     stepProfile: 'Pon el token en tu perfil de la shell (por ejemplo, ~/.zshrc); el agente lo lee de ahí',
     stepConfig: (file: string) => `Añade a ${file}`,
     stepConnect: 'Su dirección y cabecera, para cualquier agente que acepte servidores MCP por HTTP',
+    stepLaunch: 'Su comando, para cualquier agente que inicie servidores MCP por stdio',
+    transport: 'Cómo llega el agente a DBForge',
+    transportStdio: 'Inicia DBForge él mismo',
+    transportHttp: 'Por HTTP',
+    transportStdioNote:
+      'Recomendado. El agente inicia el ejecutable de DBForge y lo mantiene toda su sesión, así que se reconecta solo cuando DBForge se abre o se reinicia. Su configuración no lleva token.',
+    transportHttpNote:
+      'El agente se conecta a DBForge mientras está abierto, con el token. Si DBForge estaba cerrado cuando el agente arrancó, reinicia el agente.',
     promptTitle: 'O deja que el agente lo configure: pega este prompt en él',
     promptHelp: 'El prompt lleva el token; añade DBForge para todos los proyectos y lo anota en el actual.',
+    promptHelpStdio: 'El prompt añade DBForge para todos los proyectos y lo anota en el actual.',
     noteTitle: (file: string) => `Para que use DBForge en un proyecto: añade a su ${file}`,
     accessNote:
       'Los agentes solo ven las conexiones a las que les des acceso: abre la configuración de una conexión y elige Acceso de agentes. Solo lectura bloquea las escrituras, no todo lo que puede hacer una cuenta de administrador (cerrar sesiones, ajustes del servidor); para agentes, lo más seguro es un usuario con solo los permisos que necesitan.',

@@ -12,6 +12,8 @@ export type McpStatus =
 export interface McpState {
   settings: McpSettings
   status: McpStatus
+  /** The executable agents start to reach DBForge over stdio; `null` when it can't be found. */
+  executable: string | null
 }
 
 /** A change an agent wants to make on a connection whose tag asks before changes. */

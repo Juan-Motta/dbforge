@@ -36,8 +36,20 @@ pub const FLAG: &str = "--mcp-stdio";
 const IDENTIFIER: &str = "dev.dbforge.app";
 
 const CLOSED: &str = "DBForge isn't open. Ask the user to open DBForge, then try again.";
-const OFF: &str = "DBForge's agent server is off. Ask the user to turn on Agents (MCP) in DBForge's settings, \
-                   then try again.";
+const OFF: &str = "DBForge's agent server is off. Ask the user to turn on \"Let AI agents use DBForge\" in \
+                   DBForge's settings (Agents (MCP)), then try again.";
+
+/// The executable agents start the bridge with: this one, where it is installed.
+/// An AppImage runs from a mount that changes on every start, so its own file
+/// (`$APPIMAGE`) is named instead.
+pub fn executable() -> Option<String> {
+    executable_from(std::env::var_os("APPIMAGE"), std::env::current_exe().ok())
+}
+
+fn executable_from(appimage: Option<std::ffi::OsString>, current: Option<PathBuf>) -> Option<String> {
+    let path = appimage.filter(|path| !path.is_empty()).map(PathBuf::from).or(current)?;
+    Some(path.to_string_lossy().into_owned())
+}
 
 /// Serves MCP on stdin and stdout until the agent closes them; the process's exit code.
 pub fn run() -> i32 {
@@ -284,6 +296,23 @@ mod tests {
 
 #[cfg(test)]
 mod identifier {
+    #[test]
+    fn an_appimage_is_named_by_its_own_file_not_its_mount() {
+        let mount = Some(std::path::PathBuf::from("/tmp/.mount_DBForgeX/usr/bin/dbforge"));
+        assert_eq!(
+            super::executable_from(Some("/home/ana/Apps/DBForge.AppImage".into()), mount.clone()).as_deref(),
+            Some("/home/ana/Apps/DBForge.AppImage")
+        );
+        assert_eq!(
+            super::executable_from(None, mount.clone()).as_deref(),
+            Some("/tmp/.mount_DBForgeX/usr/bin/dbforge")
+        );
+        assert_eq!(
+            super::executable_from(Some("".into()), mount).as_deref(),
+            Some("/tmp/.mount_DBForgeX/usr/bin/dbforge")
+        );
+    }
+
     #[test]
     fn matches_the_app_s_bundle_identifier() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();

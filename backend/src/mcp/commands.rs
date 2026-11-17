@@ -14,6 +14,14 @@ use crate::error::Result;
 pub struct McpState {
     pub settings: McpSettings,
     pub status: Status,
+    /// The executable agents start to reach DBForge over stdio; `None` when it can't be found.
+    pub executable: Option<String>,
+}
+
+impl McpState {
+    fn new(settings: McpSettings, status: Status) -> Self {
+        Self { settings, status, executable: super::bridge::executable() }
+    }
 }
 
 /// Starts or stops the server to match `settings`.
@@ -31,7 +39,7 @@ pub async fn apply(app: &AppHandle, settings: McpSettings) -> Status {
 
 #[tauri::command]
 pub fn mcp_state(settings: State<'_, SettingsFile>, server: State<'_, McpServer>) -> McpState {
-    McpState { settings: settings.get(), status: server.status() }
+    McpState::new(settings.get(), server.status())
 }
 
 /// Saves `settings` and starts, restarts or stops the server to match.
@@ -39,7 +47,7 @@ pub fn mcp_state(settings: State<'_, SettingsFile>, server: State<'_, McpServer>
 pub async fn set_mcp_settings(app: AppHandle, settings: McpSettings) -> Result<McpState> {
     app.state::<SettingsFile>().set(settings)?;
     let status = apply(&app, settings).await;
-    Ok(McpState { settings, status })
+    Ok(McpState::new(settings, status))
 }
 
 /// The token agents send, for the user to copy into an agent's settings.

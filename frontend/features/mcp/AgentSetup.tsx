@@ -10,12 +10,17 @@ import {
   projectNote,
   setupSteps,
   type AgentId,
+  type Endpoint,
   type Step,
 } from './setup'
 import styles from './Mcp.module.css'
 
+type Transport = Endpoint['transport']
+
 interface AgentSetupProps {
   url: string
+  /** The executable agents start over stdio; `null` leaves HTTP as the only way. */
+  executable: string | null
   /** `null` until it is read; the blocks can't be copied meanwhile. */
   token: string | null
   /** Shows the token written in; otherwise `<token>` stands for it (copies always carry it). */
@@ -27,22 +32,33 @@ interface AgentSetupProps {
 const PLACEHOLDER = '<token>'
 
 /**
- * Pick an agent, then: the steps that add DBForge to it, a prompt that has
- * the agent do it itself, and the note that has it use DBForge in a project.
+ * Pick an agent and how it reaches DBForge, then: the steps that add DBForge
+ * to it, a prompt that has the agent do it itself, and the note that has it
+ * use DBForge in a project. Over stdio (the default) nothing secret is
+ * written in; over HTTP the token is.
  */
-export function AgentSetup({ url, token, showToken, onCopy, copied }: AgentSetupProps) {
+export function AgentSetup({ url, executable, token, showToken, onCopy, copied }: AgentSetupProps) {
   const m = useMessages(messages)
   const [agent, setAgent] = useState<AgentId>('claude')
-  const shown = showToken && token ? token : PLACEHOLDER
-  const steps = setupSteps(agent, url, shown)
-  const copies = setupSteps(agent, url, token ?? '')
+  const [chosen, setTransport] = useState<Transport>('stdio')
+  const transport: Transport = executable === null ? 'http' : chosen
+  const endpoint = (secret: string): Endpoint =>
+    transport === 'stdio' && executable !== null
+      ? { transport: 'stdio', executable }
+      : { transport: 'http', url, token: secret }
+  const shown = endpoint(showToken && token ? token : PLACEHOLDER)
+  const copyEndpoint = endpoint(token ?? '')
+  const steps = setupSteps(agent, shown)
+  const copies = setupSteps(agent, copyEndpoint)
+  // Over stdio nothing waits on the token, so the blocks copy at once.
+  const ready = transport === 'stdio' || token !== null
 
   const block = (id: string, title: string, text: string, copy: string, tall = false) => (
     <div key={id} className={styles.command}>
       <span className={styles.commandTitle}>{title}</span>
       <div className={styles.row}>
         <code className={tall ? `${styles.value} ${styles.tall}` : styles.value}>{text}</code>
-        <IconButton label={m.copy} disabled={!token} onClick={() => onCopy(id, copy)}>
+        <IconButton label={m.copy} disabled={!ready} onClick={() => onCopy(id, copy)}>
           <Icon name={copied === id ? 'check' : 'duplicate'} />
         </IconButton>
       </div>
@@ -54,7 +70,7 @@ export function AgentSetup({ url, token, showToken, onCopy, copied }: AgentSetup
       <h4 className={styles.sectionTitle} id="mcp-agent">
         {m.addToAgents}
       </h4>
-      <div role="radiogroup" aria-labelledby="mcp-agent" className={styles.agents}>
+      <div role="radiogroup" aria-labelledby="mcp-agent" className={styles.choices}>
         {AGENTS.map((id) => (
           <button
             key={id}
@@ -67,6 +83,28 @@ export function AgentSetup({ url, token, showToken, onCopy, copied }: AgentSetup
           </button>
         ))}
       </div>
+
+      {executable !== null && (
+        <>
+          <span className={styles.commandTitle} id="mcp-transport">
+            {m.transport}
+          </span>
+          <div role="radiogroup" aria-labelledby="mcp-transport" className={styles.choices}>
+            {TRANSPORTS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={transport === id}
+                onClick={() => setTransport(id)}
+              >
+                {id === 'stdio' ? m.transportStdio : m.transportHttp}
+              </button>
+            ))}
+          </div>
+          <p className={styles.note}>{transport === 'stdio' ? m.transportStdioNote : m.transportHttpNote}</p>
+        </>
+      )}
 
       {steps.map((step, index) =>
         block(
@@ -81,16 +119,18 @@ export function AgentSetup({ url, token, showToken, onCopy, copied }: AgentSetup
       {block(
         `${agent}-prompt`,
         m.promptTitle,
-        agentPrompt(agent, url, shown),
-        agentPrompt(agent, url, token ?? ''),
+        agentPrompt(agent, shown),
+        agentPrompt(agent, copyEndpoint),
         true,
       )}
-      <p className={styles.note}>{m.promptHelp}</p>
+      <p className={styles.note}>{transport === 'stdio' ? m.promptHelpStdio : m.promptHelp}</p>
 
       {block(`${agent}-note`, m.noteTitle(instructionsFile(agent)), projectNote(), projectNote(), true)}
     </section>
   )
 }
+
+const TRANSPORTS: Transport[] = ['stdio', 'http']
 
 const AGENT_LABELS: Record<AgentId, 'claudeCode' | 'codex' | 'opencode' | 'pi' | 'otherAgent'> = {
   claude: 'claudeCode',
@@ -110,5 +150,7 @@ function stepTitle(step: Step, m: McpMessages): string {
       return m.stepConfig(step.file ?? '')
     case 'connect':
       return m.stepConnect
+    case 'launch':
+      return m.stepLaunch
   }
 }

@@ -119,6 +119,10 @@ Filter and order rows, edit cells in place, add, duplicate and delete rows, and 
 
 Query history, a log of every statement DBForge sends, PostgreSQL dumps and restores, a backup of your whole setup, and an MCP server so AI agents can read, or with your approval change, the connections you allow.
 
+### Use it from an AI agent
+
+Turn on **Settings → Agents (MCP)**, pick your agent and copy its command. By default the agent starts DBForge's own executable with `--mcp-stdio` and keeps it for its whole session: it reconnects by itself when DBForge opens or restarts, works the same on macOS, Windows and Linux, and its settings hold no token. While DBForge is closed, a tool call answers that the app needs to be open. Agents that only take HTTP servers can use `http://127.0.0.1:7419/mcp` with the token instead.
+
 ## Build from source
 
 You need Node.js 24 with pnpm, and Rust 1.90 or later.

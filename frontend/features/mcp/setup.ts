@@ -12,8 +12,19 @@ export type AgentId = 'claude' | 'codex' | 'opencode' | 'pi' | 'other'
 
 export const AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'pi', 'other']
 
+/** The argument that starts DBForge as an agent's MCP server over stdio, not as the app. */
+export const STDIO_FLAG = '--mcp-stdio'
+
+/**
+ * How an agent reaches DBForge: it starts DBForge's executable itself and
+ * talks to it over stdio, which stays connected while the app is closed or
+ * restarts; or it connects to the open app over HTTP with the token.
+ */
+export type Endpoint =
+  { transport: 'stdio'; executable: string } | { transport: 'http'; url: string; token: string }
+
 /** What a step asks of the user, so the screen can say it in their language. */
-export type StepKind = 'terminal' | 'profile' | 'config' | 'connect'
+export type StepKind = 'terminal' | 'profile' | 'config' | 'connect' | 'launch'
 
 export interface Step {
   kind: StepKind
@@ -35,8 +46,64 @@ export function parsePort(text: string): number | null {
 
 const OPENCODE_CONFIG = '~/.config/opencode/opencode.json'
 
-/** The steps that add DBForge to `agent`, with `token` written in. */
-export function setupSteps(agent: AgentId, url: string, token: string): Step[] {
+/** The query tool may take a minute; OpenCode's default wait is 30 seconds. */
+const OPENCODE_TIMEOUT = 70000
+
+/**
+ * `path` as one argument on its own system's shells: a Windows path in double
+ * quotes (cmd and PowerShell; it can't contain one), any other in single quotes.
+ * Left bare when it has nothing a shell would split or expand.
+ */
+export function shellArgument(path: string): string {
+  if (/^[\w@%+=:,./\\-]+$/.test(path)) return path
+  if (/^[A-Za-z]:\\/.test(path)) return `"${path}"`
+  return `'${path.replaceAll("'", "'\\''")}'`
+}
+
+/** The steps that add DBForge to `agent`, reached through `endpoint`. */
+export function setupSteps(agent: AgentId, endpoint: Endpoint): Step[] {
+  return endpoint.transport === 'stdio'
+    ? stdioSteps(agent, endpoint.executable)
+    : httpSteps(agent, endpoint.url, endpoint.token)
+}
+
+/** Each agent's way of adding a server it starts itself, for every project. */
+function stdioSteps(agent: AgentId, executable: string): Step[] {
+  const command = `${shellArgument(executable)} ${STDIO_FLAG}`
+  switch (agent) {
+    case 'claude':
+      // `--scope user`: the default scope ties the server to the folder the command runs in.
+      return [{ kind: 'terminal', text: `claude mcp add --scope user dbforge -- ${command}` }]
+    case 'codex':
+      return [{ kind: 'terminal', text: `codex mcp add dbforge -- ${command}` }]
+    case 'opencode': {
+      const config = {
+        $schema: 'https://opencode.ai/config.json',
+        mcp: {
+          dbforge: {
+            type: 'local',
+            command: [executable, STDIO_FLAG],
+            enabled: true,
+            timeout: OPENCODE_TIMEOUT,
+          },
+        },
+      }
+      return [{ kind: 'config', file: OPENCODE_CONFIG, text: JSON.stringify(config, null, 2) }]
+    }
+    case 'pi':
+      return [{ kind: 'terminal', text: `pi mcp add dbforge -- ${command}` }]
+    case 'other': {
+      const config = { mcpServers: { dbforge: { command: executable, args: [STDIO_FLAG] } } }
+      return [
+        { kind: 'launch', text: `Command: ${executable}\nArguments: ${STDIO_FLAG}\nTransport: stdio` },
+        { kind: 'config', file: 'mcp.json', text: JSON.stringify(config, null, 2) },
+      ]
+    }
+  }
+}
+
+/** Each agent's way of adding a server it reaches over HTTP, with `token` written in. */
+function httpSteps(agent: AgentId, url: string, token: string): Step[] {
   const bearer = `Bearer ${token}`
   switch (agent) {
     case 'claude':
@@ -58,14 +125,13 @@ export function setupSteps(agent: AgentId, url: string, token: string): Step[] {
     case 'opencode': {
       const config = {
         $schema: 'https://opencode.ai/config.json',
-        // The query tool may take a minute; OpenCode's default wait is 30 seconds.
         mcp: {
           dbforge: {
             type: 'remote',
             url,
             enabled: true,
             oauth: false,
-            timeout: 70000,
+            timeout: OPENCODE_TIMEOUT,
             headers: { Authorization: bearer },
           },
         },
@@ -123,8 +189,8 @@ export function projectNote(): string {
 }
 
 /** A prompt that has `agent` add DBForge itself, then say so in the project's instructions. */
-export function agentPrompt(agent: AgentId, url: string, token: string): string {
-  const steps = setupSteps(agent, url, token)
+export function agentPrompt(agent: AgentId, endpoint: Endpoint): string {
+  const steps = setupSteps(agent, endpoint)
   const check = checkCommand(agent)
   const how = steps
     .map((step) => {
@@ -137,6 +203,8 @@ export function agentPrompt(agent: AgentId, url: string, token: string): string 
           return `Merge this into ${step.file}, keeping what is already there:\n\n${step.text}`
         case 'connect':
           return `Its connection details:\n\n${step.text}`
+        case 'launch':
+          return `How to start it (over stdio):\n\n${step.text}`
       }
     })
     .join('\n\n')
@@ -145,10 +213,11 @@ export function agentPrompt(agent: AgentId, url: string, token: string): string 
       ? 'Add the MCP server "dbforge" (the DBForge database app on this computer) to your MCP configuration, available in every project.'
       : 'Add the MCP server "dbforge" (the DBForge database app on this computer) to your configuration, available in every project.',
     how,
-    check
-      ? `Then check it is connected with \`${check}\` (DBForge must be open), and tell me if it isn't.`
-      : 'Then check it is connected (DBForge must be open), and tell me if it isn’t.',
+    // Over stdio the agent starts DBForge's side itself; over HTTP the app must be open to answer.
+    `Then check it is connected${check ? ` with \`${check}\`` : ''}${endpoint.transport === 'http' ? ' (DBForge must be open)' : ''}, and tell me if it isn’t.`,
     `Finally, add this section to the ${instructionsFile(agent)} of the current project, creating the file if needed:\n\n${projectNote()}`,
-    'The token is a secret: don’t print it back, and don’t put it in the project.',
+    ...(endpoint.transport === 'http'
+      ? ['The token is a secret: don’t print it back, and don’t put it in the project.']
+      : []),
   ].join('\n\n')
 }

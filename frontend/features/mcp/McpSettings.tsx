@@ -150,7 +150,14 @@ export function McpSettings() {
         </div>
       </section>
 
-      <AgentSetup url={url} token={token} showToken={shown} onCopy={copy} copied={copied} />
+      <AgentSetup
+        url={url}
+        executable={state?.executable ?? null}
+        token={token}
+        showToken={shown}
+        onCopy={copy}
+        copied={copied}
+      />
       <p className={styles.note}>{m.accessNote}</p>
     </div>
   )

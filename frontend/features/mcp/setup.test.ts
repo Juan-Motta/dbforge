@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { agentPrompt, instructionsFile, parsePort, projectNote, serverUrl, setupSteps } from './setup'
+import {
+  agentPrompt,
+  instructionsFile,
+  parsePort,
+  projectNote,
+  serverUrl,
+  setupSteps as steps,
+  shellArgument,
+  type AgentId,
+} from './setup'
 
 const url = serverUrl(7419)
+const http = { transport: 'http', url, token: 'abc' } as const
+const setupSteps = (agent: AgentId, _url: string, token: string) => steps(agent, { ...http, token })
+const mac = { transport: 'stdio', executable: '/Applications/DBForge.app/Contents/MacOS/DBForge' } as const
 
 describe('agent setup', () => {
   it('serves on the loopback address and takes only unprivileged ports', () => {
@@ -38,13 +50,56 @@ describe('agent setup', () => {
   })
 
   it('prompts the agent to add the server, check it, and note it in the project’s instructions', () => {
-    const prompt = agentPrompt('codex', url, 'abc')
+    const prompt = agentPrompt('codex', http)
     expect(prompt).toContain(setupSteps('codex', url, 'abc')[0].text)
     expect(prompt).toContain('export DBFORGE_MCP_TOKEN=abc')
     expect(prompt).toContain('codex mcp list')
     expect(prompt).toContain('AGENTS.md')
     expect(prompt).toContain(projectNote())
     expect(instructionsFile('claude')).toBe('CLAUDE.md')
-    expect(agentPrompt('other', url, 'abc')).not.toContain('mcp list')
+    expect(agentPrompt('other', http)).not.toContain('mcp list')
+  })
+
+  it('has each agent start DBForge itself, with no token, on every platform', () => {
+    expect(steps('claude', mac).map((step) => step.text)).toEqual([
+      'claude mcp add --scope user dbforge -- /Applications/DBForge.app/Contents/MacOS/DBForge --mcp-stdio',
+    ])
+    expect(steps('codex', mac).map((step) => step.text)).toEqual([
+      'codex mcp add dbforge -- /Applications/DBForge.app/Contents/MacOS/DBForge --mcp-stdio',
+    ])
+    expect(steps('pi', mac)[0].text).toBe(
+      'pi mcp add dbforge -- /Applications/DBForge.app/Contents/MacOS/DBForge --mcp-stdio',
+    )
+    const [opencode] = steps('opencode', mac)
+    expect(JSON.parse(opencode.text).mcp.dbforge).toMatchObject({
+      type: 'local',
+      command: [mac.executable, '--mcp-stdio'],
+      enabled: true,
+    })
+    const other = steps('other', mac)
+    expect(other[0].kind).toBe('launch')
+    expect(JSON.parse(other[1].text)).toEqual({
+      mcpServers: { dbforge: { command: mac.executable, args: ['--mcp-stdio'] } },
+    })
+    const prompt = agentPrompt('claude', mac)
+    expect(prompt).toContain(steps('claude', mac)[0].text)
+    expect(prompt).not.toContain('token')
+  })
+
+  it('quotes an executable path the way its own system’s shells read it', () => {
+    expect(shellArgument('/usr/bin/dbforge')).toBe('/usr/bin/dbforge')
+    expect(shellArgument('C:\\Program Files\\DBForge\\DBForge.exe')).toBe(
+      '"C:\\Program Files\\DBForge\\DBForge.exe"',
+    )
+    expect(shellArgument("/home/ana/My Apps/DBForge's.AppImage")).toBe(
+      "'/home/ana/My Apps/DBForge'\\''s.AppImage'",
+    )
+    const windows = {
+      transport: 'stdio',
+      executable: 'C:\\Users\\Ana\\AppData\\Local\\DBForge\\DBForge.exe',
+    } as const
+    expect(steps('claude', windows)[0].text).toBe(
+      'claude mcp add --scope user dbforge -- C:\\Users\\Ana\\AppData\\Local\\DBForge\\DBForge.exe --mcp-stdio',
+    )
   })
 })

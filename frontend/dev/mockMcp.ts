@@ -2,7 +2,11 @@ import { emit } from '@tauri-apps/api/event'
 import type { ApprovalRequest, McpState } from '../features/mcp/api'
 
 /** The MCP server as the mock backend runs it: settings only, nothing listens. */
-let state: McpState = { settings: { enabled: false, port: 7419 }, status: { state: 'stopped' } }
+let state: McpState = {
+  settings: { enabled: false, port: 7419 },
+  status: { state: 'stopped' },
+  executable: '/Applications/DBForge.app/Contents/MacOS/DBForge',
+}
 let token = 'f3a9c1d27e4b4c6a8d0e5b7f9a1c3e5d7b9f1a3c5e7d9b1f3a5c7e9d1b3f5a7c'
 
 export function mockMcp(
@@ -15,6 +19,7 @@ export function mockMcp(
     case 'set_mcp_settings': {
       const settings = payload.settings as McpState['settings']
       state = {
+        ...state,
         settings,
         status: settings.enabled
           ? { state: 'running', url: `http://127.0.0.1:${settings.port}/mcp` }
