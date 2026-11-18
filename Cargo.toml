@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/core"]
+resolver = "2"
+
+[workspace.package]
+# DBForge's version: the app's, the MCP server's and the one a backup records.
+version = "0.3.5"
+edition = "2024"
+rust-version = "1.90"

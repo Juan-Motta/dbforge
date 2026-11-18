@@ -1,0 +1,56 @@
+[package]
+name = "dbforge-core"
+description = "DBForge's logic: connections, drivers, queries, exports and the MCP server, without a UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "dbforge_core"
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+dirs = "7"
+chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
+either = "1"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+hmac = "0.13"
+keyring = "4.2"
+mongodb = "3"
+redis = { version = "1.8.1", features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure"] }
+# Cosmos DB's REST API. TLS through rustls with the process-wide provider (`install_crypto`).
+# The MCP server agents connect to (Streamable HTTP, served by axum on localhost).
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+rmcp = { version = "3.9", features = [
+    "server",
+    "macros",
+    "transport-streamable-http-server",
+    # The stdio bridge (`--mcp-stdio`): a server on stdio, a client of the app's HTTP server.
+    "client",
+    "transport-io",
+    "transport-streamable-http-client-reqwest",
+    "reqwest-tls-no-provider",
+] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "http2"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+roxmltree = "0.21.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite"] }
+thiserror = "2.0"
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "chrono"] }
+# `rt-multi-thread`: the runtime the stdio bridge serves on, as Tauri's own was.
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["compat", "rt"] }
+uuid = { version = "1.29", features = ["v4"] }
+tempfile = "3"
+chacha20poly1305 = "0.11"
+hkdf = "0.13"
+machine-uid = "0.6"
+getrandom = "0.3"
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa", "flate2"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "time"] }
