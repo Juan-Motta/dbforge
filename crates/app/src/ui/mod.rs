@@ -1,0 +1,119 @@
+//! The glass building blocks views share: panels, cards, capsules and the
+//! segments inside them, pills and dots. Each takes the theme and returns an
+//! element to finish with its own content.
+
+use gpui::{AnyElement, BoxShadow, Div, FontWeight, Hsla, IntoElement, ParentElement, Styled, div, point, px, svg};
+
+use crate::theme::{Theme, color};
+
+/// A soft drop shadow, `blur` wide and `y` down, in `0xRRGGBBAA`.
+pub fn shadow(blur: f32, y: f32, rgba: u32) -> Vec<BoxShadow> {
+    vec![BoxShadow { color: color(rgba), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(0.) }]
+}
+
+/// An icon from [`crate::assets`], tinted `tint`.
+pub fn icon(name: &str, tint: Hsla, size: f32) -> impl IntoElement + use<> {
+    svg().path(format!("{name}.svg")).size(px(size)).flex_none().text_color(tint)
+}
+
+/// A translucent panel with a light rim and a soft shadow.
+pub fn glass(theme: &Theme) -> Div {
+    div().bg(theme.glass).border_1().border_color(theme.rim).shadow(shadow(24., 10., 0x00000038))
+}
+
+/// A near-opaque card that fills the space left: an editor, a grid, an empty state.
+pub fn card(theme: &Theme) -> Div {
+    div()
+        .bg(theme.card)
+        .border_1()
+        .border_color(theme.rim)
+        .rounded(px(22.))
+        .shadow(shadow(30., 14., 0x00000040))
+        .overflow_hidden()
+        .flex_1()
+        .min_h_0()
+}
+
+/// A row of segments in one glass capsule.
+pub fn group(theme: &Theme, segments: Vec<AnyElement>) -> Div {
+    glass(theme).h(px(34.)).rounded(px(17.)).p(px(3.)).flex().gap(px(2.)).children(segments)
+}
+
+/// One segment of a [`group`]: an icon, a label or both; raised when `on`.
+pub fn segment(theme: &Theme, icon_name: Option<&str>, label: &str, on: bool) -> Div {
+    let tint = if on { theme.text } else { theme.text2 };
+    let mut segment = div()
+        .h(px(26.))
+        .flex()
+        .items_center()
+        .gap(px(7.))
+        .rounded(px(13.))
+        .px(px(if label.is_empty() { 6. } else { 12. }))
+        .text_color(tint)
+        .text_size(px(12.5))
+        .font_weight(FontWeight::MEDIUM);
+    if on {
+        segment = segment.bg(theme.glass_hi).border_1().border_color(theme.rim);
+    }
+    if let Some(name) = icon_name {
+        segment = segment.child(icon(name, tint, 14.));
+    }
+    if !label.is_empty() {
+        segment = segment.child(label.to_owned());
+    }
+    segment
+}
+
+/// A glass capsule for a toolbar control: a picker, a search field.
+pub fn capsule(theme: &Theme) -> Div {
+    glass(theme).h(px(34.)).rounded(px(17.)).px(px(14.)).flex().items_center().gap(px(8.)).text_size(px(13.))
+}
+
+/// A small coloured label: a connection's tag.
+pub fn pill(label: &str, tint: Hsla) -> Div {
+    div()
+        .h(px(18.))
+        .px(px(7.))
+        .flex()
+        .items_center()
+        .rounded(px(9.))
+        .bg(tint.opacity(0.2))
+        .text_color(tint)
+        .text_size(px(10.))
+        .font_weight(FontWeight::BOLD)
+        .child(label.to_owned())
+}
+
+/// A coloured dot: a connection's colour.
+pub fn dot(tint: Hsla) -> Div {
+    div().size(px(8.)).rounded(px(4.)).flex_none().bg(tint)
+}
+
+/// The accent's capsule button: Run, a dialog's main action.
+pub fn primary_button(theme: &Theme, label: &str) -> Div {
+    div()
+        .h(px(32.))
+        .px(px(18.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(8.))
+        .rounded(px(16.))
+        .bg(gpui::linear_gradient(
+            180.,
+            gpui::linear_color_stop(theme.accent_hi, 0.),
+            gpui::linear_color_stop(theme.accent, 1.),
+        ))
+        .border_1()
+        .border_color(color(0xFFFFFF47))
+        .shadow(shadow(20., 8., 0xD4532566))
+        .text_color(gpui::white())
+        .text_size(px(13.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(label.to_owned())
+}
+
+/// Keeps `element` as an [`AnyElement`], for [`group`]'s segments.
+pub fn any(element: impl IntoElement) -> AnyElement {
+    element.into_any_element()
+}

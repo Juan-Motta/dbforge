@@ -31,6 +31,8 @@ pub const TOOLS_FILE: &str = "tools.json";
 pub const MCP_SETTINGS_FILE: &str = "mcp.json";
 pub const MCP_SESSIONS_FILE: &str = "mcp-sessions.json";
 pub const KNOWN_HOSTS_FILE: &str = "known_hosts";
+/// The window's own preferences (theme, language, panel sizes), which the app keeps.
+pub const PREFERENCES_FILE: &str = "preferences.json";
 /// The query history, in the data directory.
 pub const HISTORY_FILE: &str = "history.jsonl";
 
@@ -52,6 +54,11 @@ impl Dirs {
     /// `None` on a system without them.
     pub fn default_for_app() -> Option<Self> {
         Some(Self { config: dirs::config_dir()?.join(IDENTIFIER), data: dirs::data_dir()?.join(IDENTIFIER) })
+    }
+
+    /// Where the app keeps the window's preferences ([`PREFERENCES_FILE`]).
+    pub fn preferences_file(&self) -> PathBuf {
+        self.config.join(PREFERENCES_FILE)
     }
 }
 
@@ -196,6 +203,7 @@ mod tests {
             [CONNECTIONS_FILE, TAGS_FILE, TOOLS_FILE, MCP_SETTINGS_FILE, MCP_SESSIONS_FILE, KNOWN_HOSTS_FILE],
             ["connections.json", "tags.json", "tools.json", "mcp.json", "mcp-sessions.json", "known_hosts"]
         );
+        assert_eq!(dirs.preferences_file(), dirs.config.join("preferences.json"));
         assert_eq!(HISTORY_FILE, "history.jsonl");
     }
 

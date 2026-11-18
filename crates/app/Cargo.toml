@@ -1,0 +1,27 @@
+[package]
+name = "dbforge"
+description = "DBForge's desktop app: the window, drawn with GPUI, over dbforge-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dbforge"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+dbforge-core = { path = "../core" }
+gpui = "=0.2.2"
+# The OS's preferred languages, for the first language DBForge speaks.
+sys-locale = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+
+# Compiles GPUI's Metal shaders at start instead of with Xcode's Metal toolchain at build time.
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "time"] }
