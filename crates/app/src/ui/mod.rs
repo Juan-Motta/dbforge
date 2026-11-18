@@ -2,7 +2,21 @@
 //! segments inside them, pills and dots. Each takes the theme and returns an
 //! element to finish with its own content.
 
-use gpui::{AnyElement, BoxShadow, Div, FontWeight, Hsla, IntoElement, ParentElement, Styled, div, point, px, svg};
+pub mod editing;
+pub mod menu;
+pub mod text_input;
+
+use std::time::Duration;
+
+use dbforge_core::connections::model::Engine;
+use dbforge_core::connections::tags::Tag;
+use gpui::{
+    Animation, AnimationExt, AnyElement, BoxShadow, Div, ElementId, FontWeight, Hsla, IntoElement, ParentElement,
+    Styled, Transformation, div, percentage, point, px, svg,
+};
+
+pub use menu::{MenuItem, PopoverMenu, popover};
+pub use text_input::{TextInput, TextInputEvent};
 
 use crate::theme::{Theme, color};
 
@@ -87,6 +101,26 @@ pub fn pill(label: &str, tint: Hsla) -> Div {
 /// A coloured dot: a connection's colour.
 pub fn dot(tint: Hsla) -> Div {
     div().size(px(8.)).rounded(px(4.)).flex_none().bg(tint)
+}
+
+/// A connection's engine, as a dot in its colour.
+pub fn engine_dot(theme: &Theme, engine: Engine) -> Div {
+    dot(theme.engine(engine))
+}
+
+/// A connection's tag (its environment: PROD, STAGE…) as a badge in the tag's colour.
+pub fn tag_badge(theme: &Theme, tag: &Tag) -> Div {
+    pill(&tag.name, theme.tag(tag.color)).flex_none()
+}
+
+/// A ring turning while something loads; the text beside it says what.
+/// `id` must be unique among the spinners drawn at once.
+pub fn spinner(id: impl Into<ElementId>, tint: Hsla, size: f32) -> impl IntoElement {
+    svg().path("spinner.svg").size(px(size)).flex_none().text_color(tint).with_animation(
+        id,
+        Animation::new(Duration::from_millis(900)).repeat(),
+        |ring, turned| ring.with_transformation(Transformation::rotate(percentage(turned))),
+    )
 }
 
 /// The accent's capsule button: Run, a dialog's main action.

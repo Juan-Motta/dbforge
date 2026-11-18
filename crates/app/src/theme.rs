@@ -2,6 +2,8 @@
 //! OS shows ("system"). The colours are the Liquid Glass look's: a near-solid
 //! wall, translucent panels with a light rim, and the terracotta accent.
 
+use dbforge_core::connections::model::Engine;
+use dbforge_core::connections::tags::TagColor;
 use gpui::{App, Global, Hsla, WindowAppearance, rgba};
 
 use crate::preferences::{Preferences, keys};
@@ -148,6 +150,37 @@ impl Theme {
         }
     }
 
+    /// A tag's colour in this theme: the web UI's palette, lighter on dark.
+    pub fn tag(&self, tag: TagColor) -> Hsla {
+        let dark = self.appearance == Appearance::Dark;
+        let (d, l) = match tag {
+            TagColor::Red => (0xF06A6AFF, 0xC23030FF),
+            TagColor::Orange => (0xF0905AFF, 0xB4531CFF),
+            TagColor::Amber => (0xE8B44CFF, 0x8F6400FF),
+            TagColor::Green => (0x4CC38AFF, 0x1E8553FF),
+            TagColor::Teal => (0x3CC0B4FF, 0x0F7F78FF),
+            TagColor::Blue => (0x6AA9F0FF, 0x2468B8FF),
+            TagColor::Violet => (0xA98BF0FF, 0x6B46C1FF),
+            TagColor::Pink => (0xEC7FB4FF, 0xB02A6CFF),
+            TagColor::Gray => (0x9A9CA3FF, 0x5F6168FF),
+        };
+        color(if dark { d } else { l })
+    }
+
+    /// An engine's colour, from its logo, for the dot beside a connection.
+    pub fn engine(&self, engine: Engine) -> Hsla {
+        color(match engine {
+            Engine::Postgres => 0x4F8CC9FF,
+            Engine::Mysql => 0x00A1C9FF,
+            Engine::Mariadb => 0xC49A6CFF,
+            Engine::Sqlite => 0x5FB0E3FF,
+            Engine::Sqlserver => 0xD8463BFF,
+            Engine::Mongodb => 0x4DB33DFF,
+            Engine::Redis => 0xE5473BFF,
+            Engine::Cosmosdb => 0x2F9BE8FF,
+        })
+    }
+
     /// Sets the theme the saved preference shows while the OS shows `system`;
     /// whether it changed, so the caller redraws only then.
     pub fn sync(system: Appearance, cx: &mut App) -> bool {
@@ -196,6 +229,16 @@ mod tests {
         assert_eq!(Appearance::resolve(ThemePreference::Dark, Light), Dark);
         assert_eq!(Appearance::from(WindowAppearance::VibrantDark), Dark);
         assert_eq!(Appearance::from(WindowAppearance::VibrantLight), Light);
+    }
+
+    #[test]
+    fn tags_read_in_both_themes_as_the_web_ui_drew_them() {
+        assert_eq!(Theme::new(Appearance::Dark).tag(TagColor::Red), color(0xF06A6AFF));
+        assert_eq!(Theme::new(Appearance::Light).tag(TagColor::Red), color(0xC23030FF));
+        assert_eq!(
+            Theme::new(Appearance::Light).engine(Engine::Sqlite),
+            Theme::new(Appearance::Dark).engine(Engine::Sqlite)
+        );
     }
 
     #[test]

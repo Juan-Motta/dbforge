@@ -2,7 +2,7 @@
 //! and the main area on the right; and a dialog over them when one is open.
 //! Each part is its own view, which its feature grows.
 
-mod explorer;
+pub mod explorer;
 pub mod set_aside;
 mod toolbar;
 mod workspace;
@@ -12,7 +12,7 @@ use gpui::{
     deferred, div, linear_color_stop, linear_gradient, px,
 };
 
-pub use explorer::Explorer;
+pub use explorer::{Explorer, ExplorerEvent, OpenObject};
 pub use set_aside::SetAsideDialog;
 pub use toolbar::Toolbar;
 pub use workspace::Workspace;
@@ -53,13 +53,21 @@ impl Shell {
             }),
         ];
         Theme::sync(window.appearance().into(), cx);
-        let mut shell = Self {
-            explorer: cx.new(Explorer::new),
-            toolbar: cx.new(|_| Toolbar),
-            workspace: cx.new(|_| Workspace),
-            dialog: None,
-            _subscriptions: subscriptions,
-        };
+        let explorer = cx.new(|cx| Explorer::new(window, cx));
+        let toolbar = cx.new(|_| Toolbar::default());
+        let mut subscriptions = subscriptions;
+        // The toolbar shows the connection selected in the explorer.
+        subscriptions.push(cx.subscribe(&explorer, |this, explorer, event: &ExplorerEvent, cx| {
+            let ExplorerEvent::Selected { connection_id, .. } = event;
+            let connection =
+                explorer.read(cx).connection(connection_id).map(|(connection, tag)| (connection.clone(), tag.cloned()));
+            this.toolbar.update(cx, |toolbar, cx| toolbar.show(connection, cx));
+        }));
+        // A selection made before this subscription (development builds open a tree at start).
+        let selected = explorer.read(cx).selected_connection();
+        toolbar.update(cx, |toolbar, cx| toolbar.show(selected, cx));
+        let mut shell =
+            Self { explorer, toolbar, workspace: cx.new(|_| Workspace), dialog: None, _subscriptions: subscriptions };
         shell.tell_of_set_aside_files(window, cx);
         shell
     }
@@ -92,6 +100,9 @@ impl Render for Shell {
             .p(px(GAP))
             .bg(linear_gradient(180., linear_color_stop(theme.wall_top, 0.), linear_color_stop(theme.wall_bottom, 1.)))
             .text_color(theme.text)
+            .on_action(cx.listener(|this, action: &OpenObject, window, cx| {
+                this.workspace.update(cx, |workspace, cx| workspace.open(action, window, cx));
+            }))
             .child(self.explorer.clone())
             .child(
                 div()

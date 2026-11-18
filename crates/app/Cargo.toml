@@ -16,6 +16,8 @@ gpui = "=0.2.2"
 # The OS's preferred languages, for the first language DBForge speaks.
 sys-locale = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+# Grapheme boundaries, so the caret steps over a whole "é" or emoji.
+unicode-segmentation = "1"
 
 # Compiles GPUI's Metal shaders at start instead of with Xcode's Metal toolchain at build time.
 [target.'cfg(target_os = "macos")'.dependencies]

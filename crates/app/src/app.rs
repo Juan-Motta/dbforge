@@ -82,6 +82,9 @@ fn bind_keys(cx: &mut App) {
     let quit = if cfg!(target_os = "macos") { "cmd-q" } else { "ctrl-q" };
     cx.bind_keys([KeyBinding::new(quit, Quit, None)]);
     cx.bind_keys(shell::set_aside::key_bindings());
+    cx.bind_keys(shell::explorer::key_bindings());
+    cx.bind_keys(crate::ui::text_input::key_bindings());
+    cx.bind_keys(crate::ui::menu::key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
     // The app menu: on macOS the menu bar's DBForge menu, with Quit.
     cx.set_menus(vec![Menu { name: "DBForge".into(), items: vec![MenuItem::action("Quit DBForge", Quit)] }]);

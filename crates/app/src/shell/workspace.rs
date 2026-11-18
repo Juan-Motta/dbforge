@@ -9,6 +9,12 @@ use crate::ui::{any, card, group, segment};
 
 pub struct Workspace;
 
+impl Workspace {
+    /// Opens a table, view or Redis database the explorer asked for. The
+    /// table and key-browser tabs come with their features; until then, nothing.
+    pub fn open(&mut self, _object: &super::OpenObject, _window: &mut Window, _cx: &mut Context<Self>) {}
+}
+
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();

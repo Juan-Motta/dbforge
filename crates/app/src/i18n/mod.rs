@@ -66,6 +66,17 @@ pub struct Messages {
     pub refresh: &'static str,
     pub filter_placeholder: &'static str,
     pub no_connections: &'static str,
+    pub collapse_all: &'static str,
+    /// Under a node whose listing came back empty.
+    pub no_objects: &'static str,
+    /// When the filter hides every node.
+    pub no_matches: fn(&str) -> String,
+    /// The folders tables and views are grouped in.
+    pub tables: &'static str,
+    pub views: &'static str,
+    pub copy_name: &'static str,
+    pub refresh_connection: &'static str,
+    pub resize_explorer: &'static str,
     // Toolbar
     pub no_connection: &'static str,
     pub search_everywhere: &'static str,
