@@ -1,4 +1,5 @@
 import { EngineLogo } from '../../components/EngineLogo'
+import { Spinner } from '../../components/Spinner'
 import { Icon, type IconName } from '../../components/Icon'
 import { TagBadge } from '../tags/TagBadge'
 import { tagOf } from '../tags/tags'
@@ -79,6 +80,7 @@ export function TreeItem({
       )}
 
       <span className={styles.name}>{node.name}</span>
+      {node.loading && <Spinner size={11} />}
       {tag && <TagBadge tag={tag} />}
       {node.meta && <span className={styles.meta}>{node.meta}</span>}
     </div>

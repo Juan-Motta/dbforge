@@ -17,6 +17,7 @@ interface BaseNode {
   expandable: boolean
   /** `undefined` until loaded. */
   children?: TreeNode[]
+  /** Its children are being listed; any shown meanwhile are the last list. */
   loading?: boolean
   error?: string
 }
@@ -33,6 +34,7 @@ const SEP = '\u001f'
 
 export function connectionNode(connection: Connection): TreeNode {
   return {
+    // The connection's own id, so a refresh can name a connection's node by it.
     id: connection.id,
     name: connection.name,
     kind: 'connection',
@@ -102,10 +104,11 @@ export function visibleRows(
       row,
       { type: 'message', id: node.id + SEP + '#message', depth: depth + 1, text, tone },
     ]
-    if (node.loading) return message(m.loading, 'muted')
     if (node.error !== undefined) return message(node.error, 'error')
-    if (node.children!.length === 0) return message(m.noObjects, 'muted')
-    return [row, ...visibleRows(node.children!, isExpanded, m, depth + 1)]
+    // Still being listed: the row's spinner says so; nothing to show under it yet.
+    if (node.children === undefined) return [row]
+    if (node.children.length === 0) return message(m.noObjects, 'muted')
+    return [row, ...visibleRows(node.children, isExpanded, m, depth + 1)]
   })
 }
 
@@ -123,6 +126,23 @@ export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
     const children = filterTree(node.children ?? [], needle)
     return children.length > 0 ? [{ ...node, children }] : []
   })
+}
+
+/** What is known of a node's children. The listed objects are kept, not their nodes, so folder names follow the language. */
+export type ChildState =
+  /** Being listed; `objects` is the last list, shown meanwhile. */
+  | { status: 'loading'; objects?: DbObject[] }
+  | { status: 'loaded'; objects: DbObject[] }
+  | { status: 'error'; message: string }
+
+/**
+ * A node's children as a (re)load starts: what is listed stays on screen until
+ * the new list replaces it, so the tree never empties and refills.
+ */
+export function startLoading(current: ChildState | undefined): ChildState {
+  return current?.status === 'loaded'
+    ? { status: 'loading', objects: current.objects }
+    : { status: 'loading' }
 }
 
 /** A node whose children come from the backend (folders arrive pre-loaded). */

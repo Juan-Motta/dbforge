@@ -18,7 +18,7 @@ import { useConnections } from '../features/connections/useConnections'
 import type { MenuItem } from '../components/ContextMenu'
 import { ResizeHandle } from '../components/ResizeHandle'
 import { usePanelSize } from '../components/usePanelSize'
-import { Explorer } from '../features/explorer/Explorer'
+import { Explorer, type RefreshScope } from '../features/explorer/Explorer'
 import type { TreeNode } from '../features/explorer/tree'
 import { CommandPalette, type Command } from '../features/palette/CommandPalette'
 import { SettingsDialog } from '../features/settings/SettingsDialog'
@@ -224,7 +224,7 @@ export function App() {
   ]
 
   /** A tree node's right-click menu: a connection's actions, or a database's export and import. */
-  const menuOf = (node: TreeNode, refresh: () => void): MenuItem[] => {
+  const menuOf = (node: TreeNode, refresh: (scope?: RefreshScope) => void): MenuItem[] => {
     const connection = connections.find((c) => c.id === node.connectionId)
     if (!connection) return []
     const actions: MenuActions = {
@@ -232,7 +232,7 @@ export function App() {
       duplicateConnection: (c) =>
         void duplicate(c.id, m.duplicateName(c.name)).catch((error) => notify(errorMessage(error), 'error')),
       deleteConnection: setDeleting,
-      newObject: (c, kind) => setCreating({ connection: c, kind, refresh }),
+      newObject: (c, kind) => setCreating({ connection: c, kind, refresh: () => refresh('connection') }),
       newQuery: (c, database, sql, container) =>
         setTabs((state) => newQueryTab(state, m, c.id, database, sql, container)),
       openTable: (c, table, view) => setTabs((state) => openTableTab(state, c.id, table, undefined, view)),
@@ -241,15 +241,17 @@ export function App() {
       exportTable: (c, table) =>
         setExporting({ kind: 'table', connectionId: c.id, table, filter: NO_FILTER }),
       importRows: (connection, table) => setImporting({ connection, table }),
-      dump: (mode, c, database) => setDump({ mode, connection: c, database, refresh }),
-      dropDatabase: (c, database) => setDropping({ connection: c, database, refresh }),
+      dump: (mode, c, database) => setDump({ mode, connection: c, database, refresh: () => refresh() }),
+      // The connection lists its databases, so it is what changes when one goes.
+      dropDatabase: (c, database) =>
+        setDropping({ connection: c, database, refresh: () => refresh('connection') }),
       copy: (text) =>
         void copyText(text).then(
           () => notify(m.copied),
           (error) => notify(errorMessage(error), 'error'),
         ),
       structure: (c, table) => structureApi.get(c.id, table),
-      refresh,
+      refresh: () => refresh(),
     }
     return explorerMenu(node, connection, actions, m, adminM)
   }

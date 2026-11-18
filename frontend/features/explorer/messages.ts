@@ -13,7 +13,6 @@ export const messages = defineMessages({
     noMatches: (query: string) => `No objects match “${query}”.`,
     tables: 'Tables',
     views: 'Views',
-    loading: 'Loading…',
     noObjects: 'No objects',
   },
   es: {
@@ -28,7 +27,6 @@ export const messages = defineMessages({
     noMatches: (query: string) => `Ningún objeto coincide con “${query}”.`,
     tables: 'Tablas',
     views: 'Vistas',
-    loading: 'Cargando…',
     noObjects: 'Sin objetos',
   },
 })

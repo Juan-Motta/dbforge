@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Spinner } from './Spinner'
 import { Icon, type IconName } from './Icon'
 import styles from './Callout.module.css'
 
@@ -34,11 +35,7 @@ export function Callout({ tone, title, detail, mono, oneLine, aside }: CalloutPr
     .join(' ')
   return (
     <div className={`${styles.callout} ${styles[tone]}`} role={tone === 'failed' ? 'alert' : 'status'}>
-      {tone === 'progress' ? (
-        <span className={styles.spinner} aria-hidden />
-      ) : (
-        <Icon name={ICONS[tone]} size={15} />
-      )}
+      {tone === 'progress' ? <Spinner className={styles.spinner} /> : <Icon name={ICONS[tone]} size={15} />}
       <span className={styles.text}>
         <span className={styles.title}>
           {title}

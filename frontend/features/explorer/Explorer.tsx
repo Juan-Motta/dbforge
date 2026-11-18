@@ -10,14 +10,20 @@ import { INDENT_PX, TreeItem } from './TreeItem'
 import { useExplorerTree } from './useExplorerTree'
 import styles from './Explorer.module.css'
 
+/** What a refresh from a node's menu lists again: the node, or the connection it belongs to. */
+export type RefreshScope = 'node' | 'connection'
+
 interface ExplorerProps {
   connections: Connection[]
   onSelect: (node: TreeNode) => void
   /** Double-click on a table or view. */
   onOpen: (node: TreeNode) => void
   onNewConnection: () => void
-  /** A node's right-click menu; `refresh` reloads that node's part of the tree, e.g. once a database was created. */
-  menuOf: (node: TreeNode, refresh: () => void) => MenuItem[]
+  /**
+   * A node's right-click menu. `refresh` reloads that node's part of the tree,
+   * or with `'connection'` its whole connection, e.g. once a database was dropped.
+   */
+  menuOf: (node: TreeNode, refresh: (scope?: RefreshScope) => void) => MenuItem[]
 }
 
 export function Explorer({ connections, onSelect, onOpen, onNewConnection, menuOf }: ExplorerProps) {
@@ -77,7 +83,9 @@ export function Explorer({ connections, onSelect, onOpen, onNewConnection, menuO
               onToggle={toggle}
               onOpen={onOpen}
               onMenu={(node, x, y) => {
-                const items = menuOf(node, () => refresh(node))
+                const items = menuOf(node, (scope = 'node') =>
+                  refresh(scope === 'node' ? node.id : node.connectionId),
+                )
                 setMenu(items.length > 0 ? { x, y, items } : null)
               }}
             />

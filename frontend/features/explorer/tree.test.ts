@@ -6,6 +6,7 @@ import {
   connectionNode,
   filterTree,
   nodesToReload,
+  startLoading,
   toChildNodes as toNodes,
   visibleRows as rowsOf,
   type TreeNode,
@@ -117,9 +118,14 @@ describe('visibleRows', () => {
     ])
   })
 
-  it('shows loading, error and empty states under an expanded node', () => {
+  it('shows error and empty states under an expanded node; loading is the row’s own spinner', () => {
     const root = connectionNode(connection)
-    expect(labels(visibleRows([{ ...root, loading: true }], () => true))).toEqual(['0:local', '1:(Loading…)'])
+    expect(labels(visibleRows([{ ...root, loading: true }], () => true))).toEqual(['0:local'])
+    const [shop] = toChildNodes(root, [object('shop', 'database')])
+    expect(labels(visibleRows([{ ...root, loading: true, children: [shop] }], () => true))).toEqual([
+      '0:local',
+      '1:shop',
+    ])
     expect(labels(visibleRows([{ ...root, error: 'refused' }], () => true))).toEqual([
       '0:local',
       '1:(refused)',
@@ -202,5 +208,18 @@ describe('nodesToReload', () => {
 
   it('reloads nothing for a node that is gone', () => {
     expect(nodesToReload(twoConnections(), everyExpanded, 'missing')).toEqual([])
+  })
+})
+
+describe('startLoading', () => {
+  const objects = [object('shop', 'database')]
+
+  it('starts with nothing listed when nothing was, or the last try failed', () => {
+    expect(startLoading(undefined)).toEqual({ status: 'loading' })
+    expect(startLoading({ status: 'error', message: 'refused' })).toEqual({ status: 'loading' })
+  })
+
+  it('keeps what is listed while it reloads', () => {
+    expect(startLoading({ status: 'loaded', objects })).toEqual({ status: 'loading', objects })
   })
 })
