@@ -1,20 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- DBForge's app icon: the explorer's database mark on the accent colour, flat.
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <!-- DBForge's app icon: a database cylinder opened on its right side by a four-point
+       spark (the agents' MCP access), in white on a terracotta gradient.
        macOS layout: an 824 px rounded square centred on the 1024 px canvas,
        the margin left for the shadow the Dock expects. Source of every size:
        `pnpm tauri icon backend/icons/app-icon.svg -o backend/icons`. -->
   <defs>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
+    <linearGradient id="background" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D45325"/>
+      <stop offset="100%" stop-color="#BA3E16"/>
+    </linearGradient>
+    <!-- The glass rim just inside the square's edge. -->
+    <linearGradient id="rim" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+    </linearGradient>
+    <filter id="shadow" x="50" y="60" width="924" height="924" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000000" flood-opacity="0.22"/>
     </filter>
   </defs>
-  <g filter="url(#shadow)">
-    <rect x="100" y="100" width="824" height="824" rx="186" fill="#e06a2e"/>
-  </g>
-  <!-- The database: three stacked discs, drawn with the same strokes as the in-app mark. -->
-  <g fill="none" stroke="#ffffff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
-    <ellipse cx="512" cy="330" rx="210" ry="78"/>
-    <path d="M302 330v364c0 43 94 78 210 78s210-35 210-78V330"/>
-    <path d="M302 512c0 43 94 78 210 78s210-35 210-78"/>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#background)" filter="url(#shadow)"/>
+  <rect x="122" y="122" width="780" height="780" rx="165" stroke="url(#rim)" stroke-width="5"/>
+
+  <g stroke="#FFFFFF" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+    <!-- The cylinder: its top, its left wall, and its right wall broken where the spark sits. -->
+    <ellipse cx="492" cy="316" rx="172" ry="48"/>
+    <path d="M 320 316 L 320 676"/>
+    <path d="M 664 316 L 664 388"/>
+    <!-- Its two dividers, stopping short of the spark. -->
+    <path d="M 320 442 C 320 468.5 397 490 492 490 C 546 490 594 483 625 472"/>
+    <path d="M 320 562 C 320 588.5 397 610 492 610 C 546 610 594 603 625 592"/>
+    <!-- Its base, rising back up the right wall. -->
+    <path d="M 320 676 C 320 702.5 397 724 492 724 C 587 724 664 702.5 664 676 L 664 654"/>
+    <!-- The spark. -->
+    <path d="M 672 426 Q 672 528 774 528 Q 672 528 672 630 Q 672 528 570 528 Q 672 528 672 426 Z"/>
   </g>
 </svg>
