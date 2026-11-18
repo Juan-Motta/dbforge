@@ -1,6 +1,8 @@
 //! The main area: the tab strip and the open tab under it. With no tab open,
 //! it says how to open one. Tabs that aren't shown keep their state (a
-//! console's text and results) until they close.
+//! console's text and results, a table's page and pending changes) until
+//! they close. A dialog a tab opens (a table's PROD question) goes to the
+//! window as a [`WorkspaceEvent`].
 
 mod strip;
 pub mod tabs;
@@ -8,15 +10,20 @@ pub mod tabs;
 use std::collections::HashMap;
 
 use dbforge_core::connections::model::{Connection, Engine};
+use dbforge_core::drivers::{RowFilter, TableRef};
 use gpui::{
-    AppContext, Context, Entity, FontWeight, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, px,
+    AnyView, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, div, px,
 };
 
-use self::tabs::{TabKind, Tabs};
+use self::tabs::{TabKind, TableName, Tabs};
 use crate::backend::Backend;
 use crate::i18n::Translate;
 use crate::query::{ConsoleEvent, QueryConsole};
 use crate::shell::OpenObject;
+use crate::shell::explorer::tree::NodeKind;
+use crate::sql::snippets::table_ref;
+use crate::table::{TablePage, TablePageEvent};
 use crate::theme::ActiveTheme;
 use crate::ui::card;
 
@@ -35,13 +42,29 @@ struct OpenConsole {
     _events: Subscription,
 }
 
+/// An open table and what the workspace hears from it.
+struct OpenTable {
+    page: Entity<TablePage>,
+    _events: Subscription,
+}
+
+/// What the workspace asks of the window.
+#[derive(Debug, Clone)]
+pub enum WorkspaceEvent {
+    /// Show this dialog over the window, or close the one shown.
+    Dialog(Option<AnyView>),
+}
+
 #[derive(Default)]
 pub struct Workspace {
     tabs: Tabs,
     consoles: HashMap<String, OpenConsole>,
+    tables: HashMap<String, OpenTable>,
     /// The connection selected in the explorer, and where in it: what "New query" queries.
     target: Option<(Connection, Vec<String>)>,
 }
+
+impl EventEmitter<WorkspaceEvent> for Workspace {}
 
 impl Workspace {
     pub fn tabs(&self) -> &Tabs {
@@ -87,7 +110,7 @@ impl Workspace {
             return None;
         }
         let tab = self.tabs.new_query(cx.messages().query.query_tab, connection_id, database, sql).clone();
-        let TabKind::Query { database, initial_sql } = tab.kind;
+        let TabKind::Query { database, initial_sql } = tab.kind else { return None };
         let console = cx.new(|cx| {
             QueryConsole::new(tab.id.clone(), tab.connection_id.clone(), connection.engine, database, initial_sql, cx)
         });
@@ -102,11 +125,55 @@ impl Workspace {
         Some(console)
     }
 
-    /// Shows tab `id`, its console taking the keyboard.
+    /// The table page of tab `id`, if it is one.
+    pub fn table(&self, id: &str) -> Option<&Entity<TablePage>> {
+        self.tables.get(id).map(|open| &open.page)
+    }
+
+    /// Opens `table` of `connection_id` (filtered when following a foreign
+    /// key), or shows its tab when it is open; its rows take the keyboard.
+    pub fn open_table(
+        &mut self,
+        connection_id: &str,
+        table: TableRef,
+        filter: Option<RowFilter>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<TablePage>> {
+        let connection = Backend::global(cx).core().connections().list().into_iter().find(|c| c.id == connection_id)?;
+        let name =
+            TableName { database: table.database.clone(), schema: table.schema.clone(), name: table.name.clone() };
+        let condition = filter.as_ref().map(|filter| filter.filter.clone());
+        let tab = self.tabs.open_table(connection_id, name, condition).clone();
+        if !self.tables.contains_key(&tab.id) {
+            let (id, engine) = (connection_id.to_owned(), connection.engine);
+            let page = cx.new(|cx| TablePage::new(id, engine, table, filter.unwrap_or_default(), window, cx));
+            let source = connection_id.to_owned();
+            let events =
+                cx.subscribe_in(&page, window, move |this, _, event: &TablePageEvent, window, cx| match event {
+                    TablePageEvent::OpenTable { table, filter } => {
+                        this.open_table(&source, table.clone(), Some(filter.clone()), window, cx);
+                    }
+                    TablePageEvent::Dialog(dialog) => cx.emit(WorkspaceEvent::Dialog(dialog.clone())),
+                });
+            self.tables.insert(tab.id.clone(), OpenTable { page, _events: events });
+        }
+        let page = self.table(&tab.id).cloned();
+        if let Some(page) = &page {
+            page.read(cx).focus(window, cx);
+        }
+        cx.notify();
+        page
+    }
+
+    /// Shows tab `id`, its console or its rows taking the keyboard.
     pub fn activate(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.tabs.activate(id);
         if let Some(console) = self.console(id) {
             console.read(cx).focus(window, cx);
+        }
+        if let Some(page) = self.table(id) {
+            page.read(cx).focus(window, cx);
         }
         cx.notify();
     }
@@ -131,15 +198,23 @@ impl Workspace {
     }
 
     fn forget(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.tables.remove(id);
         if let Some(open) = self.consoles.remove(id) {
             let session = open.console.read(cx).session_id().to_owned();
             QueryConsole::close_session(session, cx);
         }
     }
 
-    /// Opens a table, view or Redis database the explorer asked for. The
-    /// table and key-browser tabs come with their features; until then, nothing.
-    pub fn open(&mut self, _object: &OpenObject, _window: &mut Window, _cx: &mut Context<Self>) {}
+    /// Opens a table or view the explorer asked for. Redis databases open
+    /// in the key browser, which comes with its feature; until then, nothing.
+    pub fn open(&mut self, object: &OpenObject, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(object.kind, NodeKind::Table | NodeKind::View) {
+            return;
+        }
+        if let Some(table) = table_ref(&object.path) {
+            self.open_table(&object.connection_id, table, None, window, cx);
+        }
+    }
 
     fn empty(&self, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
@@ -161,10 +236,14 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.tabs.active_id().and_then(|id| self.console(id)).cloned();
-        div().flex_1().min_h_0().flex().flex_col().gap(px(GAP)).child(self.strip(cx)).child(match active {
-            Some(console) => div().flex_1().min_h_0().flex().flex_col().child(console).into_any_element(),
-            None => self.empty(cx).into_any_element(),
-        })
+        let id = self.tabs.active_id();
+        let console = id.and_then(|id| self.console(id)).cloned();
+        let table = id.and_then(|id| self.table(id)).cloned();
+        let content = match (console, table) {
+            (Some(console), _) => div().flex_1().min_h_0().flex().flex_col().child(console).into_any_element(),
+            (_, Some(table)) => div().flex_1().min_h_0().flex().flex_col().child(table).into_any_element(),
+            _ => self.empty(cx).into_any_element(),
+        };
+        div().flex_1().min_h_0().flex().flex_col().gap(px(GAP)).child(self.strip(cx)).child(content)
     }
 }

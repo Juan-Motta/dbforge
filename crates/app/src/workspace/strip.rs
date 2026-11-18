@@ -24,7 +24,11 @@ impl Workspace {
         let tabs = self.tabs.tabs().iter().enumerate().map(|(index, tab)| {
             let shown = active.as_deref() == Some(tab.id.as_str());
             let (select, middle, close) = (tab.id.clone(), tab.id.clone(), tab.id.clone());
-            any(segment(&theme, Some("code"), &tab.title, shown)
+            let kind_icon = match tab.kind {
+                super::tabs::TabKind::Query { .. } => "code",
+                super::tabs::TabKind::Table { .. } => "table",
+            };
+            any(segment(&theme, Some(kind_icon), &tab.title, shown)
                 .id(("tab", index))
                 .flex_none()
                 .pr(px(6.))

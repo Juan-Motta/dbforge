@@ -205,6 +205,12 @@ impl TextInput {
         cx.notify();
     }
 
+    /// Selects the whole text, so typing replaces it.
+    pub fn select_all(&mut self, cx: &mut Context<Self>) {
+        self.state.select_all();
+        cx.notify();
+    }
+
     /// Takes the keyboard.
     pub fn focus(&self, window: &mut Window) {
         window.focus(&self.focus);

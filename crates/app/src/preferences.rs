@@ -147,6 +147,13 @@ impl Preferences {
     }
 }
 
+/// Preferences kept in `dir`, for tests that draw views reading them.
+#[cfg(test)]
+pub fn test_preferences(cx: &mut App, dir: &Path) {
+    let file = PreferenceFile::load(dir.join("preferences.json")).expect("a preferences file");
+    cx.set_global(Preferences::new(file));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

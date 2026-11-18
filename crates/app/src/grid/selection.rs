@@ -133,6 +133,15 @@ impl Selection {
         Some(target)
     }
 
+    /// The same cells after the rows moved: `row` maps each row to where it
+    /// is now, `None` for a row gone (new rows were added or removed above).
+    pub fn remap(&mut self, row: impl Fn(usize) -> Option<usize>) {
+        let moved = |cell: Cell| row(cell.row).map(|row| Cell::new(row, cell.column));
+        self.cells = self.cells.iter().filter_map(|cell| moved(*cell)).collect();
+        self.anchor = self.anchor.and_then(moved);
+        self.cursor = self.cursor.and_then(moved);
+    }
+
     /// The rows with a selected cell, in order.
     pub fn rows(&self) -> Vec<usize> {
         let mut rows: Vec<usize> = self.cells.iter().map(|cell| cell.row).collect();
@@ -223,6 +232,19 @@ mod tests {
         selection.step(9, 9, false, 5, 3);
         assert_eq!(keys(&selection), [(4, 2)], "clamped to the last cell");
         assert_eq!(Selection::default().step(1, 0, false, 0, 3), None);
+    }
+
+    #[test]
+    fn follows_its_rows_when_rows_are_added_or_removed_above() {
+        let mut selection = Selection::default();
+        selection.select(Cell::new(1, 0), Mode::Single, 2, false);
+        selection.select(Cell::new(2, 1), Mode::Range, 2, false);
+        selection.remap(|row| Some(row + 1));
+        assert_eq!(keys(&selection), [(2, 0), (2, 1), (3, 0), (3, 1)]);
+        assert_eq!(selection.cursor(), Some(Cell::new(3, 1)));
+        selection.remap(|row| (row != 3).then_some(row));
+        assert_eq!(keys(&selection), [(2, 0), (2, 1)]);
+        assert_eq!(selection.cursor(), None, "the cursor's row is gone");
     }
 
     #[test]

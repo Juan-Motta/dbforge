@@ -16,6 +16,8 @@ pub mod preferences;
 pub mod query;
 pub mod shell;
 pub mod sql;
+pub mod table;
+pub mod tags;
 pub mod theme;
 pub mod ui;
 pub mod workspace;

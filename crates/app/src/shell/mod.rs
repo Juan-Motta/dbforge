@@ -23,6 +23,7 @@ use crate::connections::{ConnectionDialog, ConnectionDialogEvent, DeleteConnecti
 use crate::i18n::Locale;
 use crate::preferences::Preferences;
 use crate::theme::{ActiveTheme, Theme};
+use crate::workspace::WorkspaceEvent;
 
 /// Space between the window's panels and around them.
 const GAP: f32 = 10.;
@@ -65,13 +66,13 @@ impl Shell {
         let toolbar = cx.new(|_| Toolbar::default());
         let mut subscriptions = subscriptions;
         subscriptions.push(cx.subscribe_in(&explorer, window, Self::on_explorer));
-        let mut shell = Self {
-            explorer,
-            toolbar,
-            workspace: cx.new(|_| Workspace::default()),
-            dialog: None,
-            _subscriptions: subscriptions,
-        };
+        let workspace = cx.new(|_| Workspace::default());
+        // A tab's dialog (a table's PROD question): its owner closes it and takes the keyboard back.
+        subscriptions.push(cx.subscribe(&workspace, |this, _, WorkspaceEvent::Dialog(dialog), cx| {
+            this.dialog = dialog.clone().map(|view| OpenDialog { view, _subscriptions: Vec::new() });
+            cx.notify();
+        }));
+        let mut shell = Self { explorer, toolbar, workspace, dialog: None, _subscriptions: subscriptions };
         // A selection made before this subscription (development builds open a tree at start).
         shell.show_selected_connection(cx);
         shell.tell_of_set_aside_files(window, cx);
@@ -179,6 +180,12 @@ impl Shell {
     /// `query:<id>` (or `query:<id>/<database>`) opens a query console on
     /// that connection, with `DBFORGE_SQL`'s script in it, run at once when
     /// there is one; `#history` opens the console's history too.
+    /// `table:<id>/<path>` opens a table's rows, its path as the explorer
+    /// names it (`table:<id>/orders` for SQLite, `<database>/<schema>/<table>`
+    /// elsewhere). For screenshots, `#edits` adds pending edits once the rows
+    /// load, `#review` shows their SQL, `#prod` applies them (asking first on
+    /// a connection tagged PROD), `#inspect` opens the cell inspector,
+    /// `#menu` a cell's menu, `#edit`/`#date` a cell's editor (text, date).
     #[cfg(debug_assertions)]
     fn open_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::connections::form::Section;
@@ -193,6 +200,11 @@ impl Shell {
         };
         let saved = |id: &str| cx.global::<Backend>().core().connections().list().into_iter().find(|c| c.id == id);
         match wanted.split_once(':') {
+            Some(("table", target)) => {
+                let section =
+                    std::env::var("DBFORGE_OPEN").ok().and_then(|open| open.split_once('#').map(|(_, s)| s.to_owned()));
+                return self.open_table_for_development(target, section, window, cx);
+            }
             Some(("query", target)) => {
                 return self.open_query_for_development(target, wanted_history, window, cx);
             }
@@ -239,6 +251,30 @@ impl Shell {
                 console.toggle_history(window, cx);
             }
         });
+    }
+
+    /// `DBFORGE_OPEN=table:…`: a table's rows, with what `seed` asks for once they load.
+    #[cfg(debug_assertions)]
+    fn open_table_for_development(
+        &mut self,
+        target: &str,
+        seed: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut parts = target.split('/').map(str::to_owned);
+        let Some(connection_id) = parts.next() else { return };
+        let path: Vec<String> = parts.collect();
+        let Some(table) = crate::sql::snippets::table_ref(&path) else {
+            return eprintln!("DBFORGE_OPEN: no table in {target}");
+        };
+        let page =
+            self.workspace.update(cx, |workspace, cx| workspace.open_table(&connection_id, table, None, window, cx));
+        let Some(page) = page else { return eprintln!("DBFORGE_OPEN: no connection {connection_id}") };
+        if let Some(seed) = seed {
+            let data = page.read(cx).data().clone();
+            data.update(cx, |data, _| data.seed_for_development(seed));
+        }
     }
 
     /// Opens the notice of settings files that couldn't be read, once, when there are any.

@@ -1803,6 +1803,7 @@ dependencies = [
  "tokio",
  "unicode-segmentation",
  "url",
+ "uuid",
 ]
 
 [[package]]

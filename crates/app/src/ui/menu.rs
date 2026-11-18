@@ -53,12 +53,25 @@ pub struct MenuItem {
     pub group: Option<SharedString>,
     /// The current choice, as a dropdown marks it.
     pub checked: bool,
+    /// Shown but not choosable now (Revert on a cell with no change).
+    pub disabled: bool,
+    /// A faint note after the label: the value a choice is written as.
+    pub detail: Option<SharedString>,
     pub handler: MenuHandler,
 }
 
 impl MenuItem {
     pub fn new(label: impl Into<SharedString>, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        Self { label: label.into(), icon: None, swatch: None, group: None, checked: false, handler: Rc::new(handler) }
+        Self {
+            label: label.into(),
+            icon: None,
+            swatch: None,
+            group: None,
+            checked: false,
+            disabled: false,
+            detail: None,
+            handler: Rc::new(handler),
+        }
     }
 
     /// An icon from [`crate::assets`] before the label.
@@ -79,6 +92,16 @@ impl MenuItem {
 
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub fn detail(mut self, detail: Option<impl Into<SharedString>>) -> Self {
+        self.detail = detail.map(Into::into);
         self
     }
 }
@@ -114,7 +137,8 @@ impl PopoverMenu {
     pub fn new(items: Vec<MenuItem>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus);
-        let highlighted = items.iter().position(|item| item.checked).or((!items.is_empty()).then_some(0));
+        let highlighted =
+            items.iter().position(|item| item.checked).or_else(|| items.iter().position(|item| !item.disabled));
         Self { highlighted, items, width: None, focus }
     }
 
@@ -129,17 +153,26 @@ impl PopoverMenu {
         if count == 0 {
             return;
         }
-        self.highlighted = Some(match self.highlighted {
-            Some(index) if forward => (index + 1) % count,
-            Some(index) => (index + count - 1) % count,
-            None if forward => 0,
-            None => count - 1,
-        });
+        // Disabled items are stepped over; with every item disabled nothing is highlighted.
+        let mut index = self.highlighted;
+        for _ in 0..count {
+            let next = match index {
+                Some(index) if forward => (index + 1) % count,
+                Some(index) => (index + count - 1) % count,
+                None if forward => 0,
+                None => count - 1,
+            };
+            index = Some(next);
+            if !self.items[next].disabled {
+                self.highlighted = Some(next);
+                break;
+            }
+        }
         cx.notify();
     }
 
     fn choose(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.items.get(index) else { return };
+        let Some(item) = self.items.get(index).filter(|item| !item.disabled) else { return };
         let handler = item.handler.clone();
         cx.emit(DismissEvent);
         handler(window, cx);
@@ -148,6 +181,22 @@ impl PopoverMenu {
     fn render_item(&self, index: usize, item: &MenuItem, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let highlighted = self.highlighted == Some(index);
+        if item.disabled {
+            return div()
+                .id(("menu-item", index))
+                .h(px(28.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_size(px(13.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text3)
+                .opacity(0.6)
+                .when(item.icon.is_some(), |row| row.child(div().w(px(14.)).flex_none()))
+                .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
+                .into_any_element();
+        }
         div()
             .id(("menu-item", index))
             .h(px(28.))
@@ -182,6 +231,14 @@ impl PopoverMenu {
                 )
             })
             .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
+            .children(item.detail.clone().map(|detail| {
+                div()
+                    .flex_none()
+                    .text_size(px(11.5))
+                    .text_color(theme.text3)
+                    .font_family(crate::theme::MONO)
+                    .child(detail)
+            }))
             .when(item.checked, |row| row.child(icon("check", theme.accent, 13.)))
             .into_any_element()
     }
@@ -210,6 +267,10 @@ impl Render for PopoverMenu {
             if item.group.is_some() && item.group.as_ref() != group {
                 group = item.group.as_ref();
                 items.push(self.render_heading(index, item.group.clone().unwrap_or_default(), cx));
+            } else if item.group.is_none() && group.is_some() {
+                // An item after a group stands apart from it.
+                group = None;
+                items.push(separator(index, cx));
             }
             items.push(self.render_item(index, item, cx));
         }
@@ -235,6 +296,11 @@ impl Render for PopoverMenu {
             .flex_col()
             .children(items)
     }
+}
+
+/// A thin line between a group and what follows it.
+fn separator(index: usize, cx: &mut Context<PopoverMenu>) -> AnyElement {
+    div().id(("menu-separator", index)).h(px(1.)).mx(px(8.)).my(px(4.)).bg(cx.theme().line).into_any_element()
 }
 
 /// `menu` at `position` (window coordinates), kept inside the window and

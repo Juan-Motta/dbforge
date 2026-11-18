@@ -4,23 +4,27 @@
 //! header with each column's type, row numbers, columns that resize by
 //! dragging their edge, NULLs set apart, numbers aligned right, a selection
 //! of cells (click, ⌘/Ctrl-click, Shift-click or drag, the arrows) that
-//! copies as tab-separated text, and scrolling both ways.
+//! copies as tab-separated text, and scrolling both ways. A table's tab
+//! draws its pending changes over it ([`marks::GridMarks`]) and hears what
+//! the mouse asks of a cell ([`GridEvent`]).
 
 pub mod columns;
 mod element;
+pub mod marks;
 pub mod selection;
 
 use std::rc::Rc;
 
 use dbforge_core::drivers::Column;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollWheelEvent,
-    Styled, Window, actions, div, point, px,
+    App, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render,
+    ScrollWheelEvent, Styled, Window, actions, div, point, px, size,
 };
 
 use self::columns::{MIN_DRAG_WIDTH, is_numeric_type};
 use self::element::GridElement;
+use self::marks::GridMarks;
 use self::selection::{Cell, Mode, Selection};
 
 actions!(
@@ -78,6 +82,23 @@ pub fn key_bindings() -> Vec<KeyBinding> {
 /// The rows a grid shows: values as text, `None` for NULL.
 pub type Rows = Rc<Vec<Vec<Option<String>>>>;
 
+/// What the mouse asks of the grid's owner. The cell is already picked.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GridEvent {
+    /// A double click on a cell: edit it.
+    Edit(Cell),
+    /// A right click on a cell, at this point in the window: its menu.
+    Menu(Cell, Point<Pixels>),
+    /// A click on a column's header: sort by it.
+    Sort(usize),
+    /// A click on a cell's link: open the row its foreign key points to.
+    Follow(Cell),
+}
+
+/// A cell's link, at its right end.
+const LINK_SIZE: f32 = 18.;
+const LINK_MARGIN: f32 = 6.;
+
 /// What the mouse is dragging.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
@@ -112,7 +133,10 @@ pub struct DataGrid {
     reveal: Option<Cell>,
     layout: GridLayout,
     drag: Option<Drag>,
+    marks: Option<Rc<GridMarks>>,
 }
+
+impl EventEmitter<GridEvent> for DataGrid {}
 
 impl Focusable for DataGrid {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -133,6 +157,7 @@ impl DataGrid {
             reveal: None,
             layout: GridLayout::default(),
             drag: None,
+            marks: None,
         }
     }
 
@@ -146,6 +171,60 @@ impl DataGrid {
         self.scroll = point(px(0.), px(0.));
         self.reveal = None;
         cx.notify();
+    }
+
+    /// Shows `rows` in place of the rows shown, with `marks`: the same
+    /// columns, their widths and the scroll kept (a reload, an edit). The
+    /// selection is the owner's to keep, move ([`Selection::remap`]) or clear.
+    pub fn update_rows(&mut self, rows: Rows, marks: Option<Rc<GridMarks>>, cx: &mut Context<Self>) {
+        self.rows = rows;
+        self.marks = marks;
+        cx.notify();
+    }
+
+    /// Back to the first row and column.
+    pub fn scroll_to_top(&mut self, cx: &mut Context<Self>) {
+        self.scroll = point(px(0.), px(0.));
+        self.reveal = None;
+        cx.notify();
+    }
+
+    pub fn marks(&self) -> Option<&GridMarks> {
+        self.marks.as_deref()
+    }
+
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    pub fn selection_mut(&mut self, cx: &mut Context<Self>) -> &mut Selection {
+        cx.notify();
+        &mut self.selection
+    }
+
+    /// Picks `cell` alone and scrolls it into view.
+    pub fn pick(&mut self, cell: Cell, cx: &mut Context<Self>) {
+        self.selection.select(cell, Mode::Single, self.columns.len(), false);
+        self.reveal = Some(cell);
+        cx.notify();
+    }
+
+    /// Where `cell` was last drawn, in window coordinates; `None` while it is out of view.
+    pub fn cell_bounds(&self, cell: Cell) -> Option<Bounds<Pixels>> {
+        let left = *self.layout.lefts.get(cell.column)?;
+        let width = px(*self.widths.get(cell.column)?);
+        let top = self.layout.bounds.top() + px(HEADER_HEIGHT) + px(ROW_HEIGHT * cell.row as f32) - self.scroll.y;
+        let bounds = Bounds::new(point(left, top), size(width, px(ROW_HEIGHT)));
+        let body = Bounds::from_corners(
+            point(self.layout.gutter, self.layout.bounds.top() + px(HEADER_HEIGHT)),
+            self.layout.bounds.bottom_right(),
+        );
+        (cell.row < self.rows.len() && bounds.intersects(&body)).then_some(bounds)
+    }
+
+    /// Where the grid was last drawn, in window coordinates.
+    pub fn bounds(&self) -> Bounds<Pixels> {
+        self.layout.bounds
     }
 
     pub fn row_count(&self) -> usize {
@@ -181,8 +260,14 @@ impl DataGrid {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        // One cell left to its DEFAULT copies as that, as its text says.
+        let one = self.selection.cells().iter().next().copied().filter(|_| self.selection.cells().len() == 1);
+        let text = match (one, self.marks()) {
+            (Some(cell), Some(marks)) if marks.cell(cell).unset => "DEFAULT".to_owned(),
+            _ => self.selection_as_tsv(),
+        };
         if !self.selection.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.selection_as_tsv()));
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
@@ -215,6 +300,27 @@ impl DataGrid {
         })
     }
 
+    /// The cell whose link is under `position`.
+    fn link_at(&self, position: Point<Pixels>) -> Option<Cell> {
+        let marks = self.marks.as_ref()?;
+        let (row, Some(column)) = self.cell_at(position)? else { return None };
+        let cell = Cell::new(row, column);
+        let bounds = self.cell_bounds(cell)?;
+        let link = bounds.right() - px(LINK_MARGIN);
+        (marks.links.contains(&cell) && position.x <= link && position.x >= link - px(LINK_SIZE)).then_some(cell)
+    }
+
+    /// The column whose header is under `position`, edges aside.
+    fn header_at(&self, position: Point<Pixels>) -> Option<usize> {
+        let header = self.layout.bounds.top()..self.layout.bounds.top() + px(HEADER_HEIGHT);
+        if !header.contains(&position.y) || position.x < self.layout.gutter || self.columns.is_empty() {
+            return None;
+        }
+        let column = self.layout.lefts.iter().rposition(|left| *left <= position.x)?;
+        let right = self.layout.lefts[column] + px(*self.widths.get(column)?);
+        (position.x < right).then_some(column)
+    }
+
     fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.focus(window);
         if let Some(column) = self.edge_at(event.position) {
@@ -223,9 +329,30 @@ impl DataGrid {
             return;
         }
         if event.position.y < self.layout.bounds.top() + px(HEADER_HEIGHT) {
+            let sortable = self.marks.as_ref().is_some_and(|marks| marks.sortable);
+            if let Some(column) = self.header_at(event.position).filter(|_| sortable) {
+                cx.emit(GridEvent::Sort(column));
+            }
+            return;
+        }
+        if let Some(cell) = self.link_at(event.position) {
+            self.pick(cell, cx);
+            cx.emit(GridEvent::Follow(cell));
             return;
         }
         let Some((row, column)) = self.cell_at(event.position) else { return };
+        // Only an editing owner (one that marks its rows) edits on a double click.
+        if event.click_count == 2
+            && self.marks.is_some()
+            && let Some(column) = column
+        {
+            let cell = Cell::new(row, column);
+            if !self.selection.contains(cell) {
+                self.pick(cell, cx);
+            }
+            cx.emit(GridEvent::Edit(cell));
+            return;
+        }
         let mode = Mode::of(event.modifiers.shift, event.modifiers.secondary());
         let width = self.columns.len();
         self.selection.select(Cell::new(row, column.unwrap_or(0)), mode, width, column.is_none());
@@ -255,6 +382,25 @@ impl DataGrid {
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.drag = None;
+    }
+
+    /// A right click picks the cell (keeping a selection it is part of) and asks for its menu.
+    fn on_right_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // A read-only result has no cell menu yet.
+        if self.marks.is_none() {
+            return;
+        }
+        self.focus(window);
+        if event.position.y < self.layout.bounds.top() + px(HEADER_HEIGHT) {
+            return;
+        }
+        let Some((row, Some(column))) = self.cell_at(event.position) else { return };
+        let cell = Cell::new(row, column);
+        if !self.selection.contains(cell) {
+            self.selection.select(cell, Mode::Single, self.columns.len(), false);
+        }
+        cx.emit(GridEvent::Menu(cell, event.position));
+        cx.notify();
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -292,6 +438,7 @@ impl Render for DataGrid {
             }))
             .on_action(cx.listener(Self::copy))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))

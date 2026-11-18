@@ -6,11 +6,13 @@ mod connection;
 mod en;
 mod es;
 mod query;
+mod table;
 
 use gpui::{App, Global};
 
 pub use self::connection::ConnectionMessages;
 pub use self::query::{HistoryMessages, QueryMessages, thousands};
+pub use self::table::TableMessages;
 use crate::preferences::{Preferences, keys};
 
 /// The languages DBForge speaks.
@@ -79,6 +81,8 @@ pub struct Messages {
     pub tables: &'static str,
     pub views: &'static str,
     pub copy_name: &'static str,
+    /// A table's or view's menu: open its rows.
+    pub open_data: &'static str,
     pub refresh_connection: &'static str,
     pub copy_connection_url: &'static str,
     pub duplicate_connection: &'static str,
@@ -103,6 +107,8 @@ pub struct Messages {
     pub connection: ConnectionMessages,
     /// The query console, its results and the history.
     pub query: QueryMessages,
+    /// A table's tab: its rows, their pending changes, the cell inspector.
+    pub table: TableMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

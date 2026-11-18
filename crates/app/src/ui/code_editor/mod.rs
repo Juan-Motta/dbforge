@@ -188,6 +188,8 @@ pub struct CodeEditor {
     autoscroll: bool,
     layout: Layout,
     selecting: bool,
+    /// Shows its text, which can be selected and copied but not changed.
+    read_only: bool,
 }
 
 impl EventEmitter<CodeEditorEvent> for CodeEditor {}
@@ -212,6 +214,7 @@ impl CodeEditor {
             autoscroll: true,
             layout: Layout::default(),
             selecting: false,
+            read_only: false,
         };
         editor.document.caret(|state| state.end());
         editor.restyle();
@@ -247,6 +250,12 @@ impl CodeEditor {
         cx.notify();
     }
 
+    /// A read-only editor takes no typing, pasting or undo; the owner may still set its text.
+    pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        self.read_only = read_only;
+        cx.notify();
+    }
+
     /// The database's names to complete, besides keywords.
     pub fn set_completion_names(&mut self, names: Option<Rc<CompletionNames>>, cx: &mut Context<Self>) {
         self.names = names;
@@ -276,6 +285,9 @@ impl CodeEditor {
 
     /// Runs an edit, keeping what to undo.
     fn edit(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Document) -> bool) {
+        if self.read_only {
+            return;
+        }
         if edit(&mut self.document) {
             self.changed(cx);
         }

@@ -29,6 +29,12 @@ pub fn is_numeric_type(data_type: &str) -> bool {
         .is_match(data_type)
 }
 
+/// UUIDs: PostgreSQL's `uuid`, SQL Server's `uniqueidentifier`.
+pub fn is_uuid_type(data_type: &str) -> bool {
+    let name = data_type.trim();
+    name.eq_ignore_ascii_case("uuid") || name.eq_ignore_ascii_case("uniqueidentifier")
+}
+
 /// Shortens long server type names for the header: `character varying(80)` → `varchar(80)`.
 pub fn short_type_name(data_type: &str) -> String {
     static RULES: OnceLock<Vec<(Regex, &str)>> = OnceLock::new();
@@ -85,6 +91,12 @@ mod tests {
         for other in ["text", "character varying(20)", "uuid", "text[]", "jsonb", "interval", "nvarchar(40)", "bit"] {
             assert!(!is_numeric_type(other), "{other}");
         }
+    }
+
+    #[test]
+    fn knows_uuid_types() {
+        assert!(is_uuid_type("uuid") && is_uuid_type(" UNIQUEIDENTIFIER "));
+        assert!(!is_uuid_type("uuid[]") && !is_uuid_type("text"));
     }
 
     #[test]

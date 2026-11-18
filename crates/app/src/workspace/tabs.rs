@@ -1,7 +1,8 @@
 //! The open tabs, apart from drawing them: which are open, which one shows,
 //! and how opening and closing change that. Query consoles are numbered
-//! "Query 1", "Query 2"… for as long as the app runs; tables, diagrams and
-//! key browsers join as their features arrive.
+//! "Query 1", "Query 2"… for as long as the app runs. A table opens once
+//! (opening it again shows its tab), or filtered in a tab of its own (a
+//! foreign key followed); diagrams and key browsers join as their features arrive.
 
 /// What a tab shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +10,16 @@ pub enum TabKind {
     /// A query console on `database` (the connection's own when `None`),
     /// starting with `initial_sql` (a query reopened from the history).
     Query { database: Option<String>, initial_sql: Option<String> },
+    /// A table's or view's rows, opened with `filter` (a `WHERE` condition) when it has one.
+    Table { table: TableName, filter: Option<String> },
+}
+
+/// A table as a tab names it: its database, schema and name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableName {
+    pub database: String,
+    pub schema: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +70,18 @@ impl Tabs {
             kind: TabKind::Query { database, initial_sql },
         };
         self.open(tab)
+    }
+
+    /// Opens a table, or shows its tab when it is open already. With a
+    /// `filter` (following a foreign key) it opens in a tab of its own,
+    /// titled with the filter.
+    pub fn open_table(&mut self, connection_id: &str, table: TableName, filter: Option<String>) -> &Tab {
+        let base = format!("table:{connection_id}:{}.{}.{}", table.database, table.schema, table.name);
+        let (id, title) = match &filter {
+            Some(filter) => (format!("{base}?{filter}"), format!("{} · {filter}", table.name)),
+            None => (base, table.name.clone()),
+        };
+        self.open(Tab { id, title, connection_id: connection_id.to_owned(), kind: TabKind::Table { table, filter } })
     }
 
     /// Shows `tab`, adding it unless a tab with its id is open already.
@@ -170,6 +193,33 @@ mod tests {
         assert_eq!(tabs.active_id(), Some("query:2"));
         tabs.activate("nope");
         assert_eq!(tabs.active().map(|tab| tab.title.as_str()), Some("Query 2"));
+    }
+
+    fn orders() -> TableName {
+        TableName { database: "shop".into(), schema: "public".into(), name: "orders".into() }
+    }
+
+    #[test]
+    fn opens_a_table_once_and_shows_its_tab_again() {
+        let mut tabs = Tabs::default();
+        tabs.open_table("pg", orders(), None);
+        tabs.new_query(en, "pg", None, None);
+        let tab = tabs.open_table("pg", orders(), None).clone();
+        assert_eq!((tab.id.as_str(), tab.title.as_str()), ("table:pg:shop.public.orders", "orders"));
+        assert_eq!(titles(&tabs), ["orders", "Query 1"]);
+        assert_eq!(tabs.active_id(), Some("table:pg:shop.public.orders"));
+        tabs.open_table("other", orders(), None);
+        assert_eq!(tabs.tabs().len(), 3, "the same table of another connection is another tab");
+    }
+
+    #[test]
+    fn opens_a_filtered_table_in_a_tab_of_its_own() {
+        let mut tabs = Tabs::default();
+        tabs.open_table("pg", orders(), None);
+        let tab = tabs.open_table("pg", orders(), Some("\"id\" = '7'".into())).clone();
+        assert_eq!(tab.id, "table:pg:shop.public.orders?\"id\" = '7'");
+        assert_eq!(tab.title, "orders · \"id\" = '7'");
+        assert_eq!(tabs.tabs().len(), 2);
     }
 
     #[test]

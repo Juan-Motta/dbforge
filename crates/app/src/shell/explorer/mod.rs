@@ -474,7 +474,15 @@ impl Explorer {
             .into_iter()
             .map(|command| {
                 let (this, node) = (this.clone(), node.clone());
-                MenuItem::new(command.label(m), move |_, cx| match command {
+                MenuItem::new(command.label(m), move |window, cx| match command {
+                    NodeCommand::OpenData => {
+                        let open = OpenObject {
+                            connection_id: node.connection_id.clone(),
+                            kind: node.kind,
+                            path: node.path.clone(),
+                        };
+                        window.dispatch_action(Box::new(open), cx);
+                    }
                     NodeCommand::NewQuery => {
                         let _ = this.update(cx, |this, cx| {
                             if let Some(event) = this.new_query(&node) {

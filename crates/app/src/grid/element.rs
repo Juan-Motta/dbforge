@@ -4,13 +4,14 @@
 
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FontStyle, FontWeight, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine, SharedString, Style, TextRun, Window,
-    fill, font, point, px, relative, size,
+    HitboxBehavior, Hsla, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine, SharedString, StrikethroughStyle,
+    Style, TextRun, TransformationMatrix, Window, fill, font, point, px, relative, size,
 };
 
-use super::columns::{CELL_PADDING, initial_width, short_type_name};
+use super::columns::{CELL_PADDING, MAX_WIDTH, initial_width, short_type_name};
+use super::marks::{RowState, SortMark};
 use super::selection::Cell;
-use super::{DataGrid, GridLayout, HEADER_HEIGHT, RESIZE_REACH, ROW_HEIGHT};
+use super::{DataGrid, GridLayout, HEADER_HEIGHT, LINK_MARGIN, LINK_SIZE, RESIZE_REACH, ROW_HEIGHT};
 use crate::theme::{ActiveTheme, MONO};
 
 const FONT_SIZE: f32 = 12.5;
@@ -38,6 +39,20 @@ impl IntoElement for GridElement {
     }
 }
 
+/// An icon and where it goes, clipped to `clip`.
+struct Icon {
+    path: &'static str,
+    bounds: Bounds<Pixels>,
+    color: Hsla,
+    clip: Bounds<Pixels>,
+}
+
+/// Room a header's marks take besides its name and type: the key, the
+/// computed badge and the sort arrow.
+const KEY_ROOM: f32 = 18.;
+const BADGE_ROOM: f32 = 34.;
+const SORT_ROOM: f32 = 18.;
+
 /// A line of text and where it goes, clipped to `clip`.
 struct Text {
     line: ShapedLine,
@@ -55,6 +70,10 @@ pub struct Prepainted {
     numbers: Vec<Text>,
     header: Vec<PaintQuad>,
     headings: Vec<Text>,
+    /// Links in the cells, under the body's clip.
+    links: Vec<Icon>,
+    /// The header's marks, drawn with its texts.
+    header_icons: Vec<Icon>,
     bars: Vec<PaintQuad>,
     edges: Vec<Hitbox>,
 }
@@ -130,15 +149,35 @@ impl Element for GridElement {
                     .map(|(index, column)| {
                         let values =
                             grid.rows.iter().take(SAMPLE_ROWS).map(|row| row.get(index).and_then(|v| v.as_deref()));
-                        initial_width(&column.name, &column.data_type, values, char_width)
+                        let width = initial_width(&column.name, &column.data_type, values, char_width);
+                        // The header's marks get room of their own, so the name isn't cut short by them.
+                        let marks = grid.marks.as_ref().map_or(0., |marks| {
+                            let mark = marks.column(index);
+                            SORT_ROOM
+                                + if mark.key { KEY_ROOM } else { 0. }
+                                + if mark.generated { BADGE_ROOM } else { 0. }
+                        });
+                        (width + marks).min(MAX_WIDTH + marks)
                     })
                     .collect();
             });
         }
 
         let grid = self.grid.read(cx);
+        let marks = grid.marks.clone();
         let rows = grid.rows.len();
-        let digits = rows.max(1).to_string().len();
+        // The gutter fits the longest label, the same whatever is pending, so nothing shifts.
+        let digits = match &marks {
+            Some(marks) => marks
+                .row_labels
+                .iter()
+                .map(|label| label.chars().count())
+                .max()
+                .unwrap_or(1)
+                .max(marks.gutter_chars)
+                .max(1),
+            None => rows.max(1).to_string().len(),
+        };
         let gutter_width = px(char_width * digits as f32 + 21.);
         let gutter = bounds.left() + gutter_width;
         let body = Bounds::from_corners(point(gutter, bounds.top() + px(HEADER_HEIGHT)), bounds.bottom_right());
@@ -185,9 +224,24 @@ impl Element for GridElement {
         let mut lines = Vec::new();
         let mut gutter_quads = Vec::new();
         let mut numbers = Vec::new();
+        let mut links = Vec::new();
         for row in visible_rows.clone() {
             let top = row_top(row);
             let row_bounds = Bounds::from_corners(point(gutter, top), point(bounds.right(), top + px(ROW_HEIGHT)));
+            let state = marks.as_ref().map_or(RowState::Loaded, |marks| marks.row(row));
+            let gutter_bounds =
+                Bounds::from_corners(point(bounds.left(), top), point(gutter - px(1.), top + px(ROW_HEIGHT)));
+            match state {
+                RowState::Inserted => {
+                    body_quads.push(fill(row_bounds, theme.ok.opacity(0.08)));
+                    gutter_quads.push(fill(gutter_bounds, theme.ok.opacity(0.08)));
+                }
+                RowState::Deleted => {
+                    body_quads.push(fill(row_bounds, theme.err.opacity(0.07)));
+                    gutter_quads.push(fill(gutter_bounds, theme.err.opacity(0.07)));
+                }
+                RowState::Loaded => {}
+            }
             if cursor.is_some_and(|cell| cell.row == row) {
                 body_quads.push(fill(row_bounds, theme.sel));
             }
@@ -198,6 +252,10 @@ impl Element for GridElement {
             for &column in &visible_columns {
                 let width = px(grid.widths[column]);
                 let cell = Bounds::new(point(lefts[column], top), size(width, px(ROW_HEIGHT)));
+                let mark = marks.as_ref().map(|marks| marks.cell(Cell::new(row, column))).unwrap_or_default();
+                if mark.edited {
+                    body_quads.push(fill(cell, theme.warn.opacity(0.14)));
+                }
                 if grid.selection.contains(Cell::new(row, column)) {
                     let mut quad = fill(cell, theme.accent.opacity(0.18));
                     if cursor == Some(Cell::new(row, column)) {
@@ -210,31 +268,52 @@ impl Element for GridElement {
                     body_quads.push(quad.corner_radii(px(4.)));
                 }
                 let max_chars = (f32::from(width) / (char_width * 0.5)).ceil() as usize + 1;
-                let (text, style) = match grid.rows[row].get(column).and_then(|value| value.as_deref()) {
+                let (text, mut style) = match grid.rows[row].get(column).and_then(|value| value.as_deref()) {
+                    None if mark.unset => {
+                        ("DEFAULT".to_owned(), run(0, UI_FONT, FontWeight::NORMAL, FontStyle::Italic, theme.text3))
+                    }
                     None => ("NULL".to_owned(), run(0, UI_FONT, FontWeight::NORMAL, FontStyle::Italic, theme.text3)),
                     Some(value) if grid.numeric[column] => {
                         (one_line(value, max_chars), run(0, MONO, FontWeight::NORMAL, FontStyle::Normal, theme.text))
                     }
                     Some(value) => (one_line(value, max_chars), plain.clone()),
                 };
+                if state == RowState::Deleted {
+                    style.color = theme.text3;
+                    style.strikethrough = Some(StrikethroughStyle { thickness: px(1.), color: Some(theme.text3) });
+                }
+                let linked = marks.as_ref().is_some_and(|marks| marks.links.contains(&Cell::new(row, column)));
+                let link_room = if linked { px(LINK_SIZE + LINK_MARGIN) } else { px(0.) };
+                if linked {
+                    let link = Bounds::new(
+                        point(cell.right() - px(LINK_MARGIN + LINK_SIZE / 2. + 6.), top + px((ROW_HEIGHT - 12.) / 2.)),
+                        size(px(12.), px(12.)),
+                    );
+                    links.push(Icon { path: "external.svg", bounds: link, color: theme.text3, clip: body });
+                }
                 let line = shape(text, FONT_SIZE, style);
-                let inner = width - px(CELL_PADDING * 2.);
+                let inner = width - px(CELL_PADDING * 2.) - link_room;
                 let x = if grid.numeric[column] && line.width < inner {
-                    cell.right() - px(CELL_PADDING) - line.width
+                    cell.right() - px(CELL_PADDING) - link_room - line.width
                 } else {
                     cell.left() + px(CELL_PADDING)
                 };
                 let clip = Bounds::from_corners(
                     point((cell.left() + px(CELL_PADDING / 2.)).max(gutter), cell.top()),
-                    point(cell.right() - px(CELL_PADDING / 2.), cell.bottom()),
+                    point(cell.right() - px(CELL_PADDING / 2.) - link_room, cell.bottom()),
                 );
                 cells.push(Text { line, origin: point(x, top + px((ROW_HEIGHT - 18.) / 2.)), clip });
             }
-            let number = shape(
-                (row + 1).to_string(),
-                FONT_SIZE - 1.,
-                run(0, MONO, FontWeight::NORMAL, FontStyle::Normal, theme.text3),
-            );
+            let label = marks
+                .as_ref()
+                .and_then(|marks| marks.row_labels.get(row).cloned())
+                .unwrap_or_else(|| (row + 1).to_string());
+            let number_style = match state {
+                RowState::Loaded => run(0, MONO, FontWeight::NORMAL, FontStyle::Normal, theme.text3),
+                RowState::Inserted => run(0, MONO, FontWeight::BOLD, FontStyle::Normal, theme.ok),
+                RowState::Deleted => run(0, MONO, FontWeight::BOLD, FontStyle::Normal, theme.err),
+            };
+            let number = shape(label, FONT_SIZE - 1., number_style);
             let origin = point(gutter - px(10.) - number.width, top + px((ROW_HEIGHT - 18.) / 2.));
             numbers.push(Text {
                 line: number,
@@ -252,6 +331,7 @@ impl Element for GridElement {
             theme.line,
         )];
         let mut headings = Vec::new();
+        let mut header_icons = Vec::new();
         let mut edges = Vec::new();
         let header_clip = Bounds::from_corners(point(gutter, header.top()), header.bottom_right());
         for &column in &visible_columns {
@@ -277,9 +357,41 @@ impl Element for GridElement {
                 point(right - px(CELL_PADDING / 2.), header.bottom()),
             );
             let y = header.top() + px((HEADER_HEIGHT - 18.) / 2.);
-            let type_x = left + px(CELL_PADDING) + name.width + px(6.);
-            headings.push(Text { line: name, origin: point(left + px(CELL_PADDING), y), clip });
-            headings.push(Text { line: type_name, origin: point(type_x, y + px(2.)), clip });
+            let icon_top = header.top() + px((HEADER_HEIGHT - 13.) / 2.);
+            let mark = marks.as_ref().map(|marks| marks.column(column)).unwrap_or_default();
+            let mut x = left + px(CELL_PADDING);
+            if mark.key {
+                let bounds = Bounds::new(point(x, icon_top), size(px(13.), px(13.)));
+                header_icons.push(Icon { path: "key.svg", bounds, color: theme.num, clip });
+                x += px(KEY_ROOM);
+            }
+            let name_width = name.width;
+            headings.push(Text { line: name, origin: point(x, y), clip });
+            x += name_width + px(6.);
+            if mark.generated {
+                let badge = shape(
+                    marks.as_ref().map_or("", |marks| marks.computed_badge).to_uppercase(),
+                    TYPE_FONT_SIZE - 0.5,
+                    run(0, UI_FONT, FontWeight::SEMIBOLD, FontStyle::Normal, theme.text3),
+                );
+                let badge_bounds = Bounds::new(point(x, icon_top), size(badge.width + px(8.), px(14.)));
+                header_quads.push(fill(badge_bounds, theme.sel).corner_radii(px(3.)));
+                let badge_width = badge.width;
+                headings.push(Text { line: badge, origin: point(x + px(4.), y), clip });
+                x += badge_width + px(14.);
+            }
+            headings.push(Text { line: type_name, origin: point(x, y + px(2.)), clip });
+            if marks.is_some() {
+                // The arrow stays while unsorted, faint, so the column keeps its width.
+                let (path, color) = match mark.sort {
+                    Some(SortMark::Asc) => ("up.svg", theme.accent),
+                    Some(SortMark::Desc) => ("down.svg", theme.accent),
+                    None => ("sortable.svg", theme.text3.opacity(0.6)),
+                };
+                let bounds =
+                    Bounds::new(point(right - px(CELL_PADDING + 12.), icon_top + px(0.5)), size(px(12.), px(12.)));
+                header_icons.push(Icon { path, bounds, color, clip });
+            }
             if right > gutter {
                 let reach = Bounds::new(
                     point(right - px(RESIZE_REACH), header.top()),
@@ -329,6 +441,8 @@ impl Element for GridElement {
             numbers,
             header: header_quads,
             headings,
+            links,
+            header_icons,
             bars,
             edges,
         }
@@ -345,6 +459,15 @@ impl Element for GridElement {
         cx: &mut App,
     ) {
         let line_height = px(18.);
+        let paint_icons = |icons: &[Icon], window: &mut Window, cx: &mut App| {
+            for icon in icons {
+                window.with_content_mask(Some(ContentMask { bounds: icon.clip }), |window| {
+                    // An icon that can't be drawn is left out.
+                    let _ =
+                        window.paint_svg(icon.bounds, icon.path.into(), TransformationMatrix::unit(), icon.color, cx);
+                });
+            }
+        };
         let paint_texts = |texts: &[Text], window: &mut Window, cx: &mut App| {
             for text in texts {
                 window.with_content_mask(Some(ContentMask { bounds: text.clip }), |window| {
@@ -363,6 +486,7 @@ impl Element for GridElement {
                 window.paint_quad(quad);
             }
             paint_texts(&prepainted.cells, window, cx);
+            paint_icons(&prepainted.links, window, cx);
             for quad in prepainted.gutter.drain(..) {
                 window.paint_quad(quad);
             }
@@ -371,6 +495,7 @@ impl Element for GridElement {
                 window.paint_quad(quad);
             }
             paint_texts(&prepainted.headings, window, cx);
+            paint_icons(&prepainted.header_icons, window, cx);
             for quad in prepainted.bars.drain(..) {
                 window.paint_quad(quad);
             }
