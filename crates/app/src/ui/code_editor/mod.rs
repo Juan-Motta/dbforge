@@ -250,6 +250,16 @@ impl CodeEditor {
         cx.notify();
     }
 
+    /// Shows `text` from its top, the caret at its start: a read-only
+    /// script (a table's DDL) read again.
+    pub fn show_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.set_text(text, cx);
+        self.document.caret(|state| state.move_to(0));
+        self.scroll = point(px(0.), px(0.));
+        self.autoscroll = false;
+        cx.notify();
+    }
+
     /// A read-only editor takes no typing, pasting or undo; the owner may still set its text.
     pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
         self.read_only = read_only;

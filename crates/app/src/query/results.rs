@@ -1,8 +1,9 @@
 //! A console's last run: a tab per statement, the last one shown first, each
 //! with its row count and how long the run took. A script that stopped
 //! partway shows its error last, after the statements that ran (and took
-//! effect) before it. While the next run goes, the last one stays, dimmed,
-//! with the time running in place of the timing, so nothing jumps.
+//! effect) before it. An explained statement shows its plan instead. While
+//! the next run goes, the last one stays, dimmed, with the time running in
+//! place of the timing, so nothing jumps.
 
 use std::rc::Rc;
 use std::time::Instant;
@@ -12,7 +13,9 @@ use gpui::{
     AnyElement, AppContext, ClipboardItem, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
     Render, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
+use serde_json::Value;
 
+use super::plan_view::PlanView;
 use super::shortcuts;
 use crate::grid::DataGrid;
 use crate::history::format::format_duration;
@@ -27,6 +30,8 @@ const BAR_HEIGHT: f32 = 44.;
 #[derive(Debug, Clone, PartialEq)]
 pub enum LastRun {
     Outcome(QueryOutcome),
+    /// An explained statement's plan, as the server returned it.
+    Plan(Rc<Value>),
     Failed(String),
 }
 
@@ -35,6 +40,8 @@ pub struct ResultsPanel {
     /// The tab shown: a statement's result, or (one past them) the error.
     selected: usize,
     grid: Entity<DataGrid>,
+    /// The plan shown, when the last run was an explain.
+    plan: Option<Entity<PlanView>>,
     /// When the run going now started.
     running: Option<Instant>,
     copied: bool,
@@ -53,7 +60,7 @@ pub fn summary(result: &StatementResult, m: &QueryMessages) -> String {
 
 impl ResultsPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        Self { last: None, selected: 0, grid: cx.new(DataGrid::new), running: None, copied: false }
+        Self { last: None, selected: 0, grid: cx.new(DataGrid::new), plan: None, running: None, copied: false }
     }
 
     pub fn grid(&self) -> &Entity<DataGrid> {
@@ -62,6 +69,10 @@ impl ResultsPanel {
 
     pub fn last(&self) -> Option<&LastRun> {
         self.last.as_ref()
+    }
+
+    pub fn plan(&self) -> Option<&Entity<PlanView>> {
+        self.plan.as_ref()
     }
 
     /// A run started at `started`, or none is going.
@@ -76,7 +87,12 @@ impl ResultsPanel {
             LastRun::Outcome(outcome) => {
                 (outcome.results.len() + usize::from(outcome.error.is_some())).saturating_sub(1)
             }
-            LastRun::Failed(_) => 0,
+            LastRun::Plan(_) | LastRun::Failed(_) => 0,
+        };
+        // Each plan starts on its costliest node.
+        self.plan = match &run {
+            LastRun::Plan(json) => Some(cx.new(|cx| PlanView::new(json.clone(), cx))),
+            _ => None,
         };
         self.last = Some(run);
         self.running = None;
@@ -217,6 +233,10 @@ impl ResultsPanel {
                 Self::placeholder(text, cx)
             }
             Some(LastRun::Failed(error)) => self.error(None, error, cx),
+            Some(LastRun::Plan(_)) => match &self.plan {
+                Some(plan) => plan.clone().into_any_element(),
+                None => Self::placeholder(String::new(), cx),
+            },
             Some(LastRun::Outcome(outcome)) => match outcome.results.get(self.selected) {
                 Some(result) if !result.columns.is_empty() => self.grid.clone().into_any_element(),
                 Some(_) => Self::placeholder(m.statement_executed.into(), cx),
@@ -235,12 +255,14 @@ impl ResultsPanel {
 impl Render for ResultsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.running.is_some() && self.last.is_some();
+        // A plan takes the whole panel, its totals where the bar would be.
+        let plan = matches!(self.last, Some(LastRun::Plan(_)));
         div()
             .size_full()
             .flex()
             .flex_col()
             .font_weight(FontWeight::NORMAL)
-            .child(self.bar(cx))
+            .when(!plan, |panel| panel.child(self.bar(cx)))
             .child(div().flex_1().min_h_0().when(busy, |body| body.opacity(0.6)).child(self.body(cx)))
     }
 }

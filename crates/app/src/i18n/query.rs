@@ -15,6 +15,11 @@ pub struct QueryMessages {
     pub cancelling: &'static str,
     pub run: &'static str,
     pub running: &'static str,
+    /// The Analyze checkbox's tooltip.
+    pub analyze_title: &'static str,
+    pub analyze: &'static str,
+    pub explain: &'static str,
+    pub explaining: &'static str,
     /// With nothing run yet, given the shortcut that runs the query.
     pub placeholder: fn(&str) -> String,
     pub rows_affected: fn(u64) -> String,
@@ -26,6 +31,30 @@ pub struct QueryMessages {
     pub stopped_after: fn(usize) -> String,
     pub statement_executed: &'static str,
     pub history_panel: HistoryMessages,
+    pub plan: PlanMessages,
+}
+
+/// An explained statement's plan: its totals, nodes and warnings.
+pub struct PlanMessages {
+    pub execution: &'static str,
+    pub planning: &'static str,
+    pub rows_returned: &'static str,
+    pub estimate_only: &'static str,
+    pub turn_on_analyze: &'static str,
+    pub warnings: &'static str,
+    pub none: &'static str,
+    pub plan_nodes: &'static str,
+    pub node: &'static str,
+    pub rows_column: &'static str,
+    pub estimated_rows: &'static str,
+    pub self_time: &'static str,
+    pub self_cost: &'static str,
+    pub share: &'static str,
+    pub has_warnings: &'static str,
+    pub node_details: &'static str,
+    pub using_index: fn(&str) -> String,
+    pub stale_statistics: fn(&str, &str) -> String,
+    pub discarded_rows: fn(&str) -> String,
 }
 
 /// The history panel's texts in one language.

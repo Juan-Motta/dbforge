@@ -1,4 +1,5 @@
-//! The main area: the tab strip and the open tab under it. With no tab open,
+//! The main area: the tab strip and the open tab under it (a query console,
+//! a table, a schema's diagram). With no tab open,
 //! it says how to open one. Tabs that aren't shown keep their state (a
 //! console's text and results, a table's page and pending changes) until
 //! they close. A dialog a tab opens (a table's PROD question) goes to the
@@ -18,12 +19,13 @@ use gpui::{
 
 use self::tabs::{TabKind, TableName, Tabs};
 use crate::backend::Backend;
+use crate::diagram::DiagramView;
 use crate::i18n::Translate;
 use crate::query::{ConsoleEvent, QueryConsole};
 use crate::shell::OpenObject;
 use crate::shell::explorer::tree::NodeKind;
 use crate::sql::snippets::table_ref;
-use crate::table::{TablePage, TablePageEvent};
+use crate::table::{TablePage, TablePageEvent, TableTabView};
 use crate::theme::ActiveTheme;
 use crate::ui::card;
 
@@ -60,6 +62,7 @@ pub struct Workspace {
     tabs: Tabs,
     consoles: HashMap<String, OpenConsole>,
     tables: HashMap<String, OpenTable>,
+    diagrams: HashMap<String, Entity<DiagramView>>,
     /// The connection selected in the explorer, and where in it: what "New query" queries.
     target: Option<(Connection, Vec<String>)>,
 }
@@ -131,12 +134,14 @@ impl Workspace {
     }
 
     /// Opens `table` of `connection_id` (filtered when following a foreign
-    /// key), or shows its tab when it is open; its rows take the keyboard.
+    /// key), or shows its tab when it is open, on `view` when one is asked
+    /// for (its structure, from the explorer); its rows take the keyboard.
     pub fn open_table(
         &mut self,
         connection_id: &str,
         table: TableRef,
         filter: Option<RowFilter>,
+        view: Option<TableTabView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<TablePage>> {
@@ -152,7 +157,10 @@ impl Workspace {
             let events =
                 cx.subscribe_in(&page, window, move |this, _, event: &TablePageEvent, window, cx| match event {
                     TablePageEvent::OpenTable { table, filter } => {
-                        this.open_table(&source, table.clone(), Some(filter.clone()), window, cx);
+                        this.open_table(&source, table.clone(), Some(filter.clone()), None, window, cx);
+                    }
+                    TablePageEvent::OpenSchemaDiagram { database, schema } => {
+                        this.open_diagram(&source, database, schema, window, cx);
                     }
                     TablePageEvent::Dialog(dialog) => cx.emit(WorkspaceEvent::Dialog(dialog.clone())),
                 });
@@ -160,10 +168,42 @@ impl Workspace {
         }
         let page = self.table(&tab.id).cloned();
         if let Some(page) = &page {
+            if let Some(view) = view {
+                page.update(cx, |page, cx| page.set_view(view, window, cx));
+            }
             page.read(cx).focus(window, cx);
         }
         cx.notify();
         page
+    }
+
+    /// The diagram of tab `id`, if it is one.
+    pub fn diagram(&self, id: &str) -> Option<&Entity<DiagramView>> {
+        self.diagrams.get(id)
+    }
+
+    /// Opens the ER diagram of `schema` in `database` of `connection_id`, or
+    /// shows its tab when it is open.
+    pub fn open_diagram(
+        &mut self,
+        connection_id: &str,
+        database: &str,
+        schema: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<DiagramView>> {
+        let exists = Backend::global(cx).core().connections().list().iter().any(|c| c.id == connection_id);
+        if !exists {
+            return None;
+        }
+        let tab = self.tabs.open_diagram(cx.messages().diagram.tab, connection_id, database, schema).clone();
+        if !self.diagrams.contains_key(&tab.id) {
+            let (connection, database, schema) = (connection_id.to_owned(), database.to_owned(), schema.to_owned());
+            let diagram = cx.new(|cx| DiagramView::new(connection, database, schema, None, window, cx));
+            self.diagrams.insert(tab.id.clone(), diagram);
+        }
+        cx.notify();
+        self.diagram(&tab.id).cloned()
     }
 
     /// Shows tab `id`, its console or its rows taking the keyboard.
@@ -199,20 +239,22 @@ impl Workspace {
 
     fn forget(&mut self, id: &str, cx: &mut Context<Self>) {
         self.tables.remove(id);
+        self.diagrams.remove(id);
         if let Some(open) = self.consoles.remove(id) {
             let session = open.console.read(cx).session_id().to_owned();
             QueryConsole::close_session(session, cx);
         }
     }
 
-    /// Opens a table or view the explorer asked for. Redis databases open
-    /// in the key browser, which comes with its feature; until then, nothing.
+    /// Opens a table or view the explorer asked for, on its rows or on
+    /// `view`. Redis databases open in the key browser, which comes with its
+    /// feature; until then, nothing.
     pub fn open(&mut self, object: &OpenObject, window: &mut Window, cx: &mut Context<Self>) {
         if !matches!(object.kind, NodeKind::Table | NodeKind::View) {
             return;
         }
         if let Some(table) = table_ref(&object.path) {
-            self.open_table(&object.connection_id, table, None, window, cx);
+            self.open_table(&object.connection_id, table, None, object.view, window, cx);
         }
     }
 
@@ -239,9 +281,12 @@ impl Render for Workspace {
         let id = self.tabs.active_id();
         let console = id.and_then(|id| self.console(id)).cloned();
         let table = id.and_then(|id| self.table(id)).cloned();
-        let content = match (console, table) {
-            (Some(console), _) => div().flex_1().min_h_0().flex().flex_col().child(console).into_any_element(),
-            (_, Some(table)) => div().flex_1().min_h_0().flex().flex_col().child(table).into_any_element(),
+        let diagram = id.and_then(|id| self.diagram(id)).cloned();
+        let theme = *cx.theme();
+        let content = match (console, table, diagram) {
+            (Some(console), _, _) => div().flex_1().min_h_0().flex().flex_col().child(console).into_any_element(),
+            (_, Some(table), _) => div().flex_1().min_h_0().flex().flex_col().child(table).into_any_element(),
+            (_, _, Some(diagram)) => card(&theme).child(diagram).into_any_element(),
             _ => self.empty(cx).into_any_element(),
         };
         div().flex_1().min_h_0().flex().flex_col().gap(px(GAP)).child(self.strip(cx)).child(content)

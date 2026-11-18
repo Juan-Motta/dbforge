@@ -1,7 +1,10 @@
-//! The SQL console: an editor, the results of its runs and the history.
+//! The SQL console: an editor, the results of its runs or the plan of an
+//! explained statement, and the history.
 //! MongoDB's and Cosmos DB's consoles come with their own features.
 
 mod console;
+pub mod plan;
+pub mod plan_view;
 pub mod results;
 
 pub use console::{ConsoleEvent, QueryConsole, Run, ToggleHistory, key_bindings};

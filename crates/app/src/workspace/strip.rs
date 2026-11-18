@@ -27,6 +27,7 @@ impl Workspace {
             let kind_icon = match tab.kind {
                 super::tabs::TabKind::Query { .. } => "code",
                 super::tabs::TabKind::Table { .. } => "table",
+                super::tabs::TabKind::Diagram { .. } => "diagram",
             };
             any(segment(&theme, Some(kind_icon), &tab.title, shown)
                 .id(("tab", index))

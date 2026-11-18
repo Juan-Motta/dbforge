@@ -3,7 +3,9 @@
 //! A disabled button is dimmed and takes no clicks; its owner leaves out the
 //! click handler.
 
-use gpui::{Div, FontWeight, ParentElement, Styled, div, prelude::FluentBuilder, px};
+use gpui::{
+    Div, ElementId, FontWeight, InteractiveElement, ParentElement, Stateful, Styled, div, prelude::FluentBuilder, px,
+};
 
 use super::{icon, shadow};
 use crate::theme::Theme;
@@ -49,4 +51,30 @@ pub fn ghost_button(theme: &Theme, label: &str) -> Div {
 /// Dims a button that can't be pressed now; pressable ones show the pointer.
 pub fn enabled(button: Div, enabled: bool) -> Div {
     if enabled { button.cursor_pointer() } else { button.opacity(0.45) }
+}
+
+/// A round icon button for a bar's actions (add a row, reload): dimmed and
+/// deaf while `on` is false, raised while `active` (a panel it opens shows).
+/// The owner adds the tooltip and the click.
+pub fn icon_button(
+    theme: &Theme,
+    id: impl Into<ElementId>,
+    icon_name: &'static str,
+    on: bool,
+    active: bool,
+) -> Stateful<Div> {
+    enabled(
+        div()
+            .size(px(30.))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(15.))
+            .when(active, |button| button.bg(theme.glass_hi).border_1().border_color(theme.rim))
+            .child(icon(icon_name, if active { theme.text } else { theme.text2 }, 15.)),
+        on,
+    )
+    .id(id)
+    .when(on, |button| button.hover(|button| button.bg(theme.sel)))
 }

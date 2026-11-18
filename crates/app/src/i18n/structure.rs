@@ -1,0 +1,41 @@
+//! The texts of a table's structure: its sections and their tables.
+
+/// A table structure's texts in one language.
+pub struct StructureMessages {
+    pub section_columns: &'static str,
+    pub section_indexes: &'static str,
+    pub section_foreign_keys: &'static str,
+    pub section_triggers: &'static str,
+    pub section_ddl: &'static str,
+    pub name: &'static str,
+    pub data_type: &'static str,
+    pub nullable: &'static str,
+    pub not_nullable: &'static str,
+    pub default: &'static str,
+    pub key: &'static str,
+    pub comment: &'static str,
+    pub no_indexes: &'static str,
+    pub index: &'static str,
+    pub method: &'static str,
+    pub unique: &'static str,
+    pub columns: &'static str,
+    pub condition: &'static str,
+    pub size: &'static str,
+    pub primary: &'static str,
+    pub yes: &'static str,
+    pub no: &'static str,
+    pub no_foreign_keys: &'static str,
+    pub constraint: &'static str,
+    pub references: &'static str,
+    pub on_update: &'static str,
+    pub on_delete: &'static str,
+    pub no_triggers: &'static str,
+    pub triggers_help: &'static str,
+    pub trigger: &'static str,
+    pub enabled: &'static str,
+    pub definition: &'static str,
+    /// The table page's button that reads the structure again.
+    pub reload_structure: &'static str,
+    /// The table page's view of the table's diagram.
+    pub diagram: &'static str,
+}

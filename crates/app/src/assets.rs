@@ -8,6 +8,7 @@ use gpui::{AssetSource, SharedString};
 /// Each icon's path, drawn with a round 1.5px stroke.
 const STROKED: &[(&str, &str)] = &[
     ("plus", "M8 3v10M3 8h10"),
+    ("minus", "M3 8h10"),
     ("refresh", "M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"),
     ("search", "M11.2 7a4.2 4.2 0 1 1-8.4 0a4.2 4.2 0 1 1 8.4 0M10.5 10.5 14 14"),
     ("down", "M4 6l4 4 4-4"),
@@ -51,6 +52,15 @@ const STROKED: &[(&str, &str)] = &[
     ("edit", "M10.5 3 13 5.5 6 12.5H3.5V10z"),
     ("trash", "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"),
     ("external", "M6.5 4h5.5v5.5M12 4l-7.5 7.5"),
+    ("warning", "M8 2.5 14 13H2zM8 6.5v3M8 11.3v.2"),
+    (
+        "column",
+        "M5.7 2.5h4.6a1.2 1.2 0 0 1 1.2 1.2v8.6a1.2 1.2 0 0 1-1.2 1.2h-4.6a1.2 1.2 0 0 1-1.2-1.2v-8.6a1.2 1.2 0 0 1 1.2-1.2M4.5 6h7",
+    ),
+    (
+        "diagram",
+        "M3 2.5h3a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1M10 9.5h3a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1M4.5 6.5v5H9",
+    ),
 ];
 
 /// Icons filled rather than stroked.

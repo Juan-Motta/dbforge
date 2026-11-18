@@ -17,12 +17,14 @@ use gpui::{
     KeyBinding, Pixels, Point, ScrollStrategy, Subscription, UniformListScrollHandle, Window, actions,
 };
 
-use self::menu::{NodeCommand, commands};
+use self::menu::{NodeCommand, commands, diagram_target};
 use self::tree::{ChildState, Node, NodeKind, TreeNode, TreeRow};
 use crate::backend::Backend;
 use crate::connections::url::connection_url;
 use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
+use crate::structure::sections::Section;
+use crate::table::TableTabView;
 use crate::ui::{MenuItem, PopoverMenu, TextInput, TextInputEvent};
 
 actions!(explorer, [SelectPrevious, SelectNext, Expand, Collapse, Activate]);
@@ -35,6 +37,8 @@ pub struct OpenObject {
     pub connection_id: String,
     pub kind: NodeKind,
     pub path: Vec<String>,
+    /// What a table's tab shows: its rows when `None`.
+    pub view: Option<TableTabView>,
 }
 
 /// What the explorer tells the window.
@@ -52,6 +56,8 @@ pub enum ExplorerEvent {
     DeleteConnection(Connection),
     /// Open a query console on this connection and database, starting with `sql`.
     NewQuery { connection_id: String, database: Option<String>, sql: Option<String> },
+    /// Open the ER diagram of this schema.
+    OpenDiagram { connection_id: String, database: String, schema: String },
 }
 
 const CONTEXT: &str = "Explorer";
@@ -431,6 +437,7 @@ impl Explorer {
                     connection_id: node.connection_id.clone(),
                     kind: node.kind,
                     path: node.path.clone(),
+                    view: None,
                 }),
                 cx,
             );
@@ -475,13 +482,24 @@ impl Explorer {
             .map(|command| {
                 let (this, node) = (this.clone(), node.clone());
                 MenuItem::new(command.label(m), move |window, cx| match command {
-                    NodeCommand::OpenData => {
+                    NodeCommand::OpenData | NodeCommand::ViewStructure => {
+                        let view =
+                            (command == NodeCommand::ViewStructure).then_some(TableTabView::Section(Section::Columns));
                         let open = OpenObject {
                             connection_id: node.connection_id.clone(),
                             kind: node.kind,
                             path: node.path.clone(),
+                            view,
                         };
                         window.dispatch_action(Box::new(open), cx);
+                    }
+                    NodeCommand::ShowDiagram => {
+                        if let Some((database, schema)) = diagram_target(&node) {
+                            let _ = this.update(cx, |_, cx| {
+                                let connection_id = node.connection_id.clone();
+                                cx.emit(ExplorerEvent::OpenDiagram { connection_id, database, schema });
+                            });
+                        }
                     }
                     NodeCommand::NewQuery => {
                         let _ = this.update(cx, |this, cx| {

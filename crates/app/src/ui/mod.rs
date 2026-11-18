@@ -12,6 +12,7 @@ pub mod field;
 pub mod file_field;
 pub mod menu;
 pub mod select;
+pub mod sheet;
 pub mod tabs;
 pub mod text_input;
 
@@ -24,7 +25,7 @@ use gpui::{
     Styled, Transformation, div, percentage, point, px, svg,
 };
 
-pub use button::{button, enabled, ghost_button};
+pub use button::{button, enabled, ghost_button, icon_button};
 pub use checkbox::Checkbox;
 pub use code_editor::{CodeEditor, CodeEditorEvent};
 pub use file_field::FileField;

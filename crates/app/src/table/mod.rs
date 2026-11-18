@@ -18,7 +18,6 @@ pub mod inspector;
 pub mod links;
 pub mod markdown;
 pub mod page;
-pub mod summary;
 pub mod temporal;
 #[cfg(test)]
 mod tests;
@@ -26,7 +25,7 @@ pub mod view;
 
 use gpui::{KeyBinding, actions};
 
-pub use page::{TablePage, TablePageEvent};
+pub use page::{TablePage, TablePageEvent, TableTabView};
 pub use view::{TableEvent, TableView};
 
 actions!(table, [Apply, Inspect, Paste, Deselect]);

@@ -4,7 +4,9 @@
 //! transaction or a `SET` carries over); closing its tab closes it.
 //!
 //! ⌘↵ (Ctrl+Enter) and the Run button run the selection, or the whole
-//! script, as the web console did.
+//! script, as the web console did. Explain shows the plan of the same text
+//! instead; with Analyze it runs the statement to measure it, inside a
+//! transaction the core rolls back.
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -13,13 +15,14 @@ use dbforge_core::connections::model::Engine;
 use dbforge_core::drivers::ObjectKind;
 use dbforge_core::explorer::{completion_schema, list_objects};
 use dbforge_core::history::HistoryEntry;
-use dbforge_core::query::{QueryScope, cancel_query, close_session, run_query};
+use dbforge_core::query::{QueryScope, cancel_query, close_session, explain_query, run_query};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
     IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, StatefulInteractiveElement, Styled, Subscription,
     Window, actions, div, linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px,
 };
 
+use super::plan::parse_plan;
 use super::results::{LastRun, ResultsPanel};
 use super::shortcuts;
 use crate::backend::Backend;
@@ -31,7 +34,8 @@ use crate::sql::statements::changes_structure;
 use crate::theme::{ActiveTheme, color};
 use crate::ui::field::Tooltip;
 use crate::ui::{
-    CodeEditor, MenuItem, PopoverMenu, any, button, capsule, card, enabled, group, icon, popover, segment, shadow,
+    Checkbox, CodeEditor, MenuItem, PopoverMenu, any, button, capsule, card, enabled, group, icon, popover, segment,
+    shadow,
 };
 
 actions!(query_console, [Run, ToggleHistory]);
@@ -75,6 +79,10 @@ pub struct QueryConsole {
     results: Entity<ResultsPanel>,
     history: Option<Entity<HistoryPanel>>,
     running: Option<Running>,
+    /// An explain going now.
+    explaining: bool,
+    /// Explain runs the statement to measure it (in a transaction rolled back).
+    analyze: bool,
     cancel_error: Option<String>,
     database_menu: Option<(Entity<PopoverMenu>, Point<Pixels>, Subscription)>,
     /// Counts completion-name loads, so a stale one is dropped.
@@ -115,6 +123,8 @@ impl QueryConsole {
             results: cx.new(ResultsPanel::new),
             history: None,
             running: None,
+            explaining: false,
+            analyze: false,
             cancel_error: None,
             database_menu: None,
             names_generation: 0,
@@ -144,6 +154,20 @@ impl QueryConsole {
 
     pub fn is_running(&self) -> bool {
         self.running.is_some()
+    }
+
+    pub fn is_explaining(&self) -> bool {
+        self.explaining
+    }
+
+    /// A run or an explain is going: neither starts another.
+    fn busy(&self) -> bool {
+        self.running.is_some() || self.explaining
+    }
+
+    pub fn set_analyze(&mut self, analyze: bool, cx: &mut Context<Self>) {
+        self.analyze = analyze;
+        cx.notify();
     }
 
     /// The editor takes the keyboard.
@@ -218,7 +242,7 @@ impl QueryConsole {
     /// new ones arrive; a script that may have changed the tables reads
     /// their names again.
     pub fn run(&mut self, sql: String, cx: &mut Context<Self>) {
-        if sql.trim().is_empty() || self.running.is_some() {
+        if sql.trim().is_empty() || self.busy() {
             return;
         }
         let started = Instant::now();
@@ -261,6 +285,38 @@ impl QueryConsole {
                 if changes_structure(&sql) {
                     this.load_names(cx);
                 }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Shows the plan of `sql` in place of the results. It runs only with
+    /// Analyze, inside a transaction the core rolls back; a plan that can't
+    /// be read shows as an error.
+    pub fn explain(&mut self, sql: String, cx: &mut Context<Self>) {
+        if sql.trim().is_empty() || self.busy() {
+            return;
+        }
+        self.explaining = true;
+        self.results.update(cx, |results, cx| results.set_running(Some(Instant::now()), cx));
+        let (connection, scope, analyze) = (self.connection_id.clone(), self.scope(), self.analyze);
+        let explaining = Backend::global(cx).spawn(cx, move |core| async move {
+            explain_query(core.connections(), core.statement_log(), connection, scope, sql, analyze).await
+        });
+        cx.spawn(async move |this, cx| {
+            let plan = explaining.await;
+            let _ = this.update(cx, |this, cx| {
+                this.explaining = false;
+                let last = match plan {
+                    Ok(json) => match parse_plan(&json, &cx.messages().query.plan) {
+                        Ok(_) => LastRun::Plan(Rc::new(json)),
+                        Err(error) => LastRun::Failed(error),
+                    },
+                    Err(error) => LastRun::Failed(error.to_string()),
+                };
+                this.results.update(cx, |results, cx| results.show(last, cx));
                 cx.notify();
             });
         })
@@ -391,7 +447,7 @@ impl QueryConsole {
         let m = &cx.messages().query;
         let name = self.database.clone().unwrap_or_else(|| m.default_database.to_owned());
         let pickable = self.engine != Engine::Sqlite
-            && self.running.is_none()
+            && !self.busy()
             && self.databases.as_ref().is_some_and(|databases| !databases.is_empty() || self.database.is_some());
         let picker = capsule(&theme)
             .id("database-picker")
@@ -436,7 +492,7 @@ impl QueryConsole {
             }
             None => slot
                 .child(
-                    div()
+                    enabled(div(), !self.explaining)
                         .id("run")
                         .h(px(32.))
                         .px(px(16.))
@@ -455,11 +511,12 @@ impl QueryConsole {
                         .text_color(gpui::white())
                         .text_size(px(13.))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .cursor_pointer()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let sql = this.text_to_run(cx);
-                            this.run(sql, cx);
-                        }))
+                        .when(!self.explaining, |run| {
+                            run.on_click(cx.listener(|this, _, _, cx| {
+                                let sql = this.text_to_run(cx);
+                                this.run(sql, cx);
+                            }))
+                        })
                         .child(icon("play", gpui::white(), 14.))
                         .child(m.run)
                         .child(
@@ -468,6 +525,26 @@ impl QueryConsole {
                 )
                 .into_any_element(),
         }
+    }
+
+    /// Explain, or Explaining… while it goes; both the same width, so nothing moves.
+    fn explain_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = *cx.theme();
+        let m = &cx.messages().query;
+        let label = if self.explaining { m.explaining } else { m.explain };
+        let on = !self.busy();
+        group(
+            &theme,
+            vec![any(enabled(segment(&theme, Some("chart"), label, false).min_w(px(112.)).justify_center(), on)
+                .id("explain")
+                .when(on, |explain| {
+                    explain.on_click(cx.listener(|this, _, _, cx| {
+                        let sql = this.text_to_run(cx);
+                        this.explain(sql, cx);
+                    }))
+                }))],
+        )
+        .into_any_element()
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -501,6 +578,13 @@ impl QueryConsole {
                     .tooltip(Tooltip::text((m.history_title)(shortcuts::HISTORY)))
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_history(window, cx))))],
             ))
+            .child(
+                div().id("analyze").tooltip(Tooltip::text(m.analyze_title)).child(
+                    Checkbox::new("analyze-checkbox", m.analyze, self.analyze)
+                        .on_change(cx.listener(|this, analyze: &bool, _, cx| this.set_analyze(*analyze, cx))),
+                ),
+            )
+            .child(self.explain_button(cx))
             .child(self.run_slot(cx))
             .into_any_element()
     }
@@ -605,6 +689,49 @@ mod tests {
         console.read_with(cx, |console, cx| {
             assert_eq!(console.results.read(cx).grid().read(cx).row_count(), 1000);
             assert!(console.history.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn draws_an_explained_statement_s_plan_starting_on_its_costliest_node(cx: &mut TestAppContext) {
+        let _dir = cx.update(|cx| {
+            cx.set_global(Theme::new(Appearance::Light));
+            cx.set_global(Locale(Language::Es));
+            test_backend(cx)
+        });
+        let (console, cx) = cx.add_window_view(|_, cx| {
+            QueryConsole::new("query:1".into(), "gone".into(), Engine::Sqlite, None, Some("SELECT 1".into()), cx)
+        });
+        let plan = serde_json::json!([{
+            "Plan": {
+                "Node Type": "Hash Join", "Total Cost": 300, "Plan Rows": 500,
+                "Actual Total Time": 30, "Actual Rows": 480, "Actual Loops": 1,
+                "Plans": [
+                    { "Node Type": "Seq Scan", "Relation Name": "orders", "Alias": "o", "Total Cost": 200,
+                      "Plan Rows": 10, "Actual Total Time": 24, "Actual Rows": 480, "Actual Loops": 1,
+                      "Filter": "(total > 100)", "Rows Removed by Filter": 50000 },
+                    { "Node Type": "Index Scan", "Relation Name": "customers", "Index Name": "customers_pkey",
+                      "Total Cost": 40, "Plan Rows": 1, "Actual Total Time": 0.002, "Actual Rows": 1,
+                      "Actual Loops": 480 }
+                ]
+            },
+            "Planning Time": 0.9, "Execution Time": 30.5
+        }]);
+        console.update(cx, |console, cx| {
+            console.set_analyze(true, cx);
+            console.results.update(cx, |results, cx| results.show(LastRun::Plan(Rc::new(plan)), cx));
+        });
+        cx.update(|window, cx| window.draw(cx).clear());
+        let view = console.read_with(cx, |console, cx| console.results.read(cx).plan().cloned().expect("a plan"));
+        assert_eq!(view.read_with(cx, |view, _| view.selected()), 1, "the scan takes 80% of the time");
+        view.update(cx, |view, cx| view.select(2, cx));
+        cx.update(|window, cx| window.draw(cx).clear());
+        // Nothing to explain while the editor is empty, and nothing runs twice.
+        console.update(cx, |console, cx| {
+            console.editor().update(cx, |editor, cx| editor.set_text("  ", cx));
+            let sql = console.text_to_run(cx);
+            console.explain(sql, cx);
+            assert!(!console.is_explaining());
         });
     }
 }

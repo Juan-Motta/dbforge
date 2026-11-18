@@ -17,6 +17,7 @@ pub struct Checkbox {
     id: ElementId,
     label: SharedString,
     help: Option<(SharedString, Option<Hsla>)>,
+    icon: Option<&'static str>,
     checked: bool,
     disabled: bool,
     on_change: Option<ChangeHandler>,
@@ -24,12 +25,18 @@ pub struct Checkbox {
 
 impl Checkbox {
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>, checked: bool) -> Self {
-        Self { id: id.into(), label: label.into(), help: None, checked, disabled: false, on_change: None }
+        Self { id: id.into(), label: label.into(), help: None, icon: None, checked, disabled: false, on_change: None }
     }
 
     /// What it does, under the label; in `tint` when given (a warning).
     pub fn help(mut self, help: impl Into<SharedString>, tint: Option<Hsla>) -> Self {
         self.help = Some((help.into(), tint));
+        self
+    }
+
+    /// An icon between the box and the label: what the row stands for (a table).
+    pub fn icon(mut self, name: &'static str) -> Self {
+        self.icon = Some(name);
         self
     }
 
@@ -78,8 +85,23 @@ impl RenderOnce for Checkbox {
                 row.cursor_pointer().on_click(move |_, window, cx| on_change(&!checked, window, cx))
             })
             .child(mark)
-            .child(div().flex().flex_col().min_w_0().child(self.label).children(self.help.map(|(help, tint)| {
-                div().mt(px(2.)).text_size(px(12.)).text_color(tint.unwrap_or(theme.text3)).child(help)
-            })))
+            .children(self.icon.map(|name| div().mt(px(1.)).child(icon(name, theme.text3, 14.))))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .map(|text| {
+                        // A row with an icon is a list's: one line, cut short.
+                        if self.icon.is_some() {
+                            text.child(div().truncate().child(self.label))
+                        } else {
+                            text.child(self.label)
+                        }
+                    })
+                    .children(self.help.map(|(help, tint)| {
+                        div().mt(px(2.)).text_size(px(12.)).text_color(tint.unwrap_or(theme.text3)).child(help)
+                    })),
+            )
     }
 }

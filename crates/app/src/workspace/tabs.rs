@@ -2,7 +2,8 @@
 //! and how opening and closing change that. Query consoles are numbered
 //! "Query 1", "Query 2"… for as long as the app runs. A table opens once
 //! (opening it again shows its tab), or filtered in a tab of its own (a
-//! foreign key followed); diagrams and key browsers join as their features arrive.
+//! foreign key followed); a schema's diagram opens once too. Key browsers
+//! join with their feature.
 
 /// What a tab shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,8 @@ pub enum TabKind {
     Query { database: Option<String>, initial_sql: Option<String> },
     /// A table's or view's rows, opened with `filter` (a `WHERE` condition) when it has one.
     Table { table: TableName, filter: Option<String> },
+    /// A schema's ER diagram.
+    Diagram { database: String, schema: String },
 }
 
 /// A table as a tab names it: its database, schema and name.
@@ -82,6 +85,23 @@ impl Tabs {
             None => (base, table.name.clone()),
         };
         self.open(Tab { id, title, connection_id: connection_id.to_owned(), kind: TabKind::Table { table, filter } })
+    }
+
+    /// Opens a schema's ER diagram, titled by `title` from the schema's
+    /// name, or shows its tab when it is open already.
+    pub fn open_diagram(
+        &mut self,
+        title: fn(&str) -> String,
+        connection_id: &str,
+        database: &str,
+        schema: &str,
+    ) -> &Tab {
+        self.open(Tab {
+            id: format!("diagram:{connection_id}:{database}.{schema}"),
+            title: title(schema),
+            connection_id: connection_id.to_owned(),
+            kind: TabKind::Diagram { database: database.to_owned(), schema: schema.to_owned() },
+        })
     }
 
     /// Shows `tab`, adding it unless a tab with its id is open already.
@@ -220,6 +240,20 @@ mod tests {
         assert_eq!(tab.id, "table:pg:shop.public.orders?\"id\" = '7'");
         assert_eq!(tab.title, "orders · \"id\" = '7'");
         assert_eq!(tabs.tabs().len(), 2);
+    }
+
+    #[test]
+    fn opens_a_schema_diagram_once_titled_in_the_interface_language() {
+        let mut tabs = Tabs::default();
+        let es = Language::Es.messages().diagram.tab;
+        let tab = tabs.open_diagram(Language::En.messages().diagram.tab, "pg", "shop", "public").clone();
+        assert_eq!((tab.id.as_str(), tab.title.as_str()), ("diagram:pg:shop.public", "public diagram"));
+        assert_eq!(tab.kind, TabKind::Diagram { database: "shop".into(), schema: "public".into() });
+        tabs.new_query(en, "pg", None, None);
+        tabs.open_diagram(es, "pg", "shop", "public");
+        assert_eq!(titles(&tabs), ["public diagram", "Query 1"], "opening it again shows its tab");
+        assert_eq!(tabs.active_id(), Some("diagram:pg:shop.public"));
+        assert_eq!(tabs.open_diagram(es, "pg", "shop", "sales").title, "Diagrama de sales");
     }
 
     #[test]

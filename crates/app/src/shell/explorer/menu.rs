@@ -2,9 +2,12 @@
 //! behaviour exists are listed; features that open tabs or dialogs add theirs.
 //! A connection's own commands follow the web UI's order: a new query first,
 //! then copy its URL, duplicate, edit, delete. A table's or view's start
-//! with opening its rows, then a new query, as the web UI's do.
+//! with opening its rows, its structure, then a new query, as the web UI's
+//! do; a schema's (or a database that is its own schema) offer its ER
+//! diagram after the new query.
 
 use super::tree::{Node, NodeKind};
+use crate::connections::engine::is_relational;
 use crate::i18n::Messages;
 use crate::workspace::has_sql_console;
 
@@ -12,6 +15,10 @@ use crate::workspace::has_sql_console;
 pub enum NodeCommand {
     /// Opens a table's or view's rows in a tab.
     OpenData,
+    /// Opens a table's or view's tab on its structure's columns.
+    ViewStructure,
+    /// Opens the ER diagram of a schema, or of a database that is its own schema.
+    ShowDiagram,
     /// Opens a query console on the node's database (a table's starts with its first rows).
     NewQuery,
     /// Lists the node's part of the tree again.
@@ -34,6 +41,8 @@ impl NodeCommand {
     pub fn label(self, m: &Messages) -> &'static str {
         match self {
             Self::OpenData => m.open_data,
+            Self::ViewStructure => m.view_structure,
+            Self::ShowDiagram => m.show_diagram,
             Self::NewQuery => m.new_query,
             Self::Refresh => m.refresh,
             Self::RefreshConnection => m.refresh_connection,
@@ -48,6 +57,8 @@ impl NodeCommand {
     pub fn icon(self) -> &'static str {
         match self {
             Self::OpenData => "table",
+            Self::ViewStructure => "column",
+            Self::ShowDiagram => "diagram",
             Self::NewQuery => "code",
             Self::Refresh | Self::RefreshConnection => "refresh",
             Self::CopyName => "copy",
@@ -64,9 +75,13 @@ impl NodeCommand {
 pub fn commands(node: &Node) -> Vec<NodeCommand> {
     use NodeCommand::*;
     let query = has_sql_console(node.engine) && node.kind != NodeKind::Folder;
-    let mut commands = if matches!(node.kind, NodeKind::Table | NodeKind::View) { vec![OpenData] } else { Vec::new() };
+    let mut commands =
+        if matches!(node.kind, NodeKind::Table | NodeKind::View) { vec![OpenData, ViewStructure] } else { Vec::new() };
     if query {
         commands.push(NewQuery);
+    }
+    if diagram_target(node).is_some() {
+        commands.push(ShowDiagram);
     }
     commands.extend(match node.kind {
         // A connection's own refresh is its whole connection already.
@@ -79,6 +94,23 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
         }
     });
     commands
+}
+
+/// The database and schema a node's ER diagram shows: a schema's, or a
+/// database's that is its own schema (MySQL); `None` when it has none.
+pub fn diagram_target(node: &Node) -> Option<(String, String)> {
+    if !is_relational(node.engine) {
+        return None;
+    }
+    match (node.kind, node.path.as_slice()) {
+        (NodeKind::Schema, [database, schema, ..]) => Some((database.clone(), schema.clone())),
+        // Where the database is its own default schema: MySQL's and MariaDB's.
+        (NodeKind::Database, [database]) => {
+            let default_schema = crate::sql::Dialect::of(node.engine)?.default_schema().unwrap_or(database);
+            (default_schema == database).then(|| (database.clone(), database.clone()))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -139,14 +171,42 @@ mod tests {
         for kind in [NodeKind::Table, NodeKind::View] {
             assert_eq!(
                 commands(&sql_node(kind)),
-                [OpenData, NewQuery, Refresh, RefreshConnection, CopyName],
+                [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName],
                 "{kind:?}"
             );
             let mongo = Node { engine: Engine::Mongodb, ..sql_node(kind) };
-            assert_eq!(commands(&mongo), [OpenData, Refresh, RefreshConnection, CopyName], "{kind:?}");
+            assert_eq!(commands(&mongo), [OpenData, ViewStructure, Refresh, RefreshConnection, CopyName], "{kind:?}");
         }
         assert_eq!(OpenData.label(Language::En.messages()), "Open data");
         assert_eq!(OpenData.label(Language::Es.messages()), "Abrir datos");
+        assert_eq!(ViewStructure.label(Language::En.messages()), "View structure");
+        assert_eq!(ViewStructure.label(Language::Es.messages()), "Ver estructura");
+    }
+
+    fn at(kind: NodeKind, engine: Engine, path: &[&str]) -> Node {
+        Node { engine, path: path.iter().map(|part| part.to_string()).collect(), ..sql_node(kind) }
+    }
+
+    #[test]
+    fn offers_a_schema_s_er_diagram_after_the_new_query() {
+        use NodeCommand::*;
+        let schema = at(NodeKind::Schema, Engine::Postgres, &["shop", "public"]);
+        assert_eq!(commands(&schema), [NewQuery, ShowDiagram, Refresh, RefreshConnection, CopyName]);
+        assert_eq!(diagram_target(&schema), Some(("shop".into(), "public".into())));
+        // A MySQL database is its own schema; a PostgreSQL one has schemas inside.
+        let mysql = at(NodeKind::Database, Engine::Mysql, &["app"]);
+        assert_eq!(commands(&mysql)[..2], [NewQuery, ShowDiagram]);
+        assert_eq!(diagram_target(&mysql), Some(("app".into(), "app".into())));
+        assert_eq!(diagram_target(&at(NodeKind::Database, Engine::Postgres, &["shop"])), None);
+        assert_eq!(
+            diagram_target(&at(NodeKind::Schema, Engine::Sqlserver, &["sales", "dbo"])),
+            Some(("sales".into(), "dbo".into()))
+        );
+        // Documents and keys have no relations to draw.
+        assert_eq!(diagram_target(&at(NodeKind::Database, Engine::Mongodb, &["catalog"])), None);
+        assert_eq!(diagram_target(&at(NodeKind::Table, Engine::Postgres, &["shop", "public", "orders"])), None);
+        assert_eq!(ShowDiagram.label(Language::En.messages()), "Show ER diagram");
+        assert_eq!(ShowDiagram.label(Language::Es.messages()), "Mostrar diagrama ER");
     }
 
     #[test]

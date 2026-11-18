@@ -11,7 +11,7 @@ use std::rc::Rc;
 use dbforge_core::connections::model::Engine;
 use dbforge_core::drivers::{ApplySummary, CellValue, Column, RowFilter, TableRef, TableStructure};
 use dbforge_core::edit::{apply_changes, preview_changes};
-use dbforge_core::explorer::{fetch_rows, table_structure};
+use dbforge_core::explorer::fetch_rows;
 use gpui::{
     AnyElement, AnyView, AppContext, ClipboardItem, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render, StatefulInteractiveElement,
@@ -26,7 +26,6 @@ use super::filter::{Direction, is_filtered, sort_by, sort_of};
 use super::filter_bar::{ApplyFilter, FilterBar};
 use super::inspector::{CellInspector, InspectedCell, InspectorEvent};
 use super::links::link_filter;
-use super::summary::summary;
 use super::{Apply, Deselect, Inspect, Paste};
 use crate::backend::Backend;
 use crate::grid::marks::{CellMark, ColumnMark, GridMarks, RowState, SortMark};
@@ -34,11 +33,14 @@ use crate::grid::selection::Cell;
 use crate::grid::{DataGrid, GridEvent};
 use crate::i18n::Translate;
 use crate::sql::Dialect;
+use crate::structure::StructureSource;
+use crate::structure::format::summary;
 use crate::tags::confirming_tag;
 use crate::theme::ActiveTheme;
 use crate::ui::field::Tooltip;
 use crate::ui::{
-    PopoverMenu, Select, SelectEvent, SelectOption, button, enabled, ghost_button, icon, pill, popover, primary_button,
+    PopoverMenu, Select, SelectEvent, SelectOption, button, enabled, ghost_button, icon, icon_button, pill, popover,
+    primary_button,
 };
 
 /// Rows per page the footer offers; the core reads at most 1000.
@@ -117,6 +119,7 @@ impl TableView {
         engine: Engine,
         table: TableRef,
         filter: RowFilter,
+        structure: Entity<StructureSource>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -126,6 +129,7 @@ impl TableView {
         let options = PAGE_SIZES.iter().map(|size| SelectOption::new(*size, (m.per_page)(*size))).collect();
         let page_sizes = cx.new(|cx| Select::new(options, Some(DEFAULT_PAGE_SIZE), cx));
         let subscriptions = vec![
+            cx.observe(&structure, Self::follow_structure),
             cx.subscribe_in(&grid, window, Self::on_grid),
             // The footer and the inspector follow the selection.
             cx.observe_in(&grid, window, |this, _, window, cx| {
@@ -168,7 +172,7 @@ impl TableView {
             _subscriptions: subscriptions,
         };
         view.load(false, cx);
-        view.load_structure(cx);
+        view.follow_structure(structure, cx);
         view
     }
 
@@ -248,22 +252,16 @@ impl TableView {
         cx.notify();
     }
 
-    /// The table's structure: which columns take NULL or have a DEFAULT,
-    /// enum values, foreign keys and the size for the footer.
-    fn load_structure(&mut self, cx: &mut Context<Self>) {
-        let (connection, table) = (self.connection_id.clone(), self.table.clone());
-        let reading = Backend::global(cx).spawn(cx, move |core| async move {
-            table_structure(core.connections(), core.statement_log(), connection, table).await
-        });
-        cx.spawn(async move |this, cx| {
-            // Without it, NULL is offered everywhere and the server has the last word.
-            let Ok(structure) = reading.await else { return };
-            let _ = this.update(cx, |this, cx| {
-                this.structure = Some(Rc::new(structure));
-                this.refresh_grid(None, cx);
-            });
-        })
-        .detach();
+    /// The table's structure arrived (or was read again): which columns take
+    /// NULL or have a DEFAULT, enum values, foreign keys and the size for the
+    /// footer. Until it does, NULL is offered everywhere and the server has
+    /// the last word.
+    fn follow_structure(&mut self, source: Entity<StructureSource>, cx: &mut Context<Self>) {
+        let structure = source.read(cx).structure().cloned();
+        if structure.is_some() && structure != self.structure {
+            self.structure = structure;
+            self.refresh_grid(None, cx);
+        }
     }
 
     /// A page arrived: the grid shows it, nothing picked, the editor closed.
@@ -796,21 +794,7 @@ impl TableView {
         let pending = self.edits.has_edits();
         let has_selection = !self.grid.read(cx).selection().is_empty();
         let action = |id: &'static str, name: &'static str, label: &'static str, on: bool, active: bool| {
-            enabled(
-                div()
-                    .size(px(30.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(15.))
-                    .when(active, |button| button.bg(theme.glass_hi).border_1().border_color(theme.rim))
-                    .child(icon(name, if active { theme.text } else { theme.text2 }, 15.)),
-                on,
-            )
-            .id(id)
-            .tooltip(Tooltip::text(label))
-            .when(on, |button| button.hover(|button| button.bg(theme.sel)))
+            icon_button(&theme, id, name, on, active).tooltip(Tooltip::text(label))
         };
         let label = |text: &'static str| if editable { text } else { m.no_key };
         let add = action("add-row", "plus", label(m.add_row), editable && !self.applying(), false);

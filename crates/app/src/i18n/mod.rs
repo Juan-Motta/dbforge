@@ -3,15 +3,19 @@
 //! The language is the user's choice, or the OS's when DBForge speaks it.
 
 mod connection;
+mod diagram;
 mod en;
 mod es;
 mod query;
+mod structure;
 mod table;
 
 use gpui::{App, Global};
 
 pub use self::connection::ConnectionMessages;
-pub use self::query::{HistoryMessages, QueryMessages, thousands};
+pub use self::diagram::DiagramMessages;
+pub use self::query::{HistoryMessages, PlanMessages, QueryMessages, thousands};
+pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
 use crate::preferences::{Preferences, keys};
 
@@ -83,6 +87,10 @@ pub struct Messages {
     pub copy_name: &'static str,
     /// A table's or view's menu: open its rows.
     pub open_data: &'static str,
+    /// A table's or view's menu: open its structure.
+    pub view_structure: &'static str,
+    /// A schema's (or a database that is its own schema) menu: open its ER diagram.
+    pub show_diagram: &'static str,
     pub refresh_connection: &'static str,
     pub copy_connection_url: &'static str,
     pub duplicate_connection: &'static str,
@@ -109,6 +117,10 @@ pub struct Messages {
     pub query: QueryMessages,
     /// A table's tab: its rows, their pending changes, the cell inspector.
     pub table: TableMessages,
+    /// A table's structure: its columns, indexes, keys, triggers and DDL.
+    pub structure: StructureMessages,
+    /// An ER diagram.
+    pub diagram: DiagramMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

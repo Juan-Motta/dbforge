@@ -193,6 +193,76 @@ fn applies_without_asking_on_a_connection_whose_tag_does_not_ask(cx: &mut TestAp
 }
 
 /// Draws a view filling a window, as the workspace or the dialog layer would.
+/// A structure with every section filled: keys, a partial index, a foreign key, a trigger.
+fn orders_structure() -> dbforge_core::drivers::TableStructure {
+    use crate::structure::format::tests::{foreign_key, index, structure};
+    use dbforge_core::drivers::{ColumnInfo, ObjectKind, TriggerInfo};
+    let column =
+        |name: &str, data_type: &str, nullable: bool, default: Option<&str>, comment: Option<&str>| ColumnInfo {
+            name: name.into(),
+            data_type: data_type.into(),
+            nullable,
+            default: default.map(str::to_owned),
+            comment: comment.map(str::to_owned),
+            options: Vec::new(),
+        };
+    let mut orders = structure(ObjectKind::Table, Some(48_213));
+    orders.columns = vec![
+        column("id", "INTEGER", false, None, Some("Surrogate key")),
+        column("customer", "TEXT", false, None, None),
+        column("note", "TEXT", true, Some("''"), Some("Free text,\nas the customer wrote it")),
+        column("placed_at", "datetime", false, Some("CURRENT_TIMESTAMP"), None),
+    ];
+    orders.indexes = vec![
+        index("orders_pkey", &["id"], true, false, None),
+        index("orders_open", &["customer"], false, true, Some("note IS NULL")),
+    ];
+    orders.foreign_keys = vec![foreign_key("orders_customer_fkey", "customer", "customers")];
+    orders.triggers = vec![TriggerInfo {
+        name: "orders_touch".into(),
+        enabled: true,
+        definition: "CREATE TRIGGER orders_touch AFTER UPDATE ON orders\nBEGIN\n  UPDATE orders SET placed_at = CURRENT_TIMESTAMP WHERE id = NEW.id;\nEND".into(),
+    }];
+    orders.ddl =
+        "CREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  customer TEXT NOT NULL REFERENCES customers (id)\n);"
+            .into();
+    orders
+}
+
+#[gpui::test]
+fn draws_each_section_of_the_structure_and_keeps_the_rows_loaded(cx: &mut TestAppContext) {
+    use super::page::TableTabView;
+    use crate::structure::sections::Section;
+    let _dir = setup(cx);
+    let (page, data, cx) = open("gone", cx);
+    let source = page.read_with(cx, |page, _| page.source().clone());
+    source.update(cx, |source, cx| source.show(orders_structure(), cx));
+    cx.update(|window, cx| window.draw(cx).clear());
+    for section in Section::ALL {
+        page.update_in(cx, |page, window, cx| page.set_view(TableTabView::Section(section), window, cx));
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    page.read_with(cx, |page, cx| {
+        let structure = page.structure_view().expect("the structure's view").read(cx);
+        assert_eq!(structure.section(), Section::Ddl);
+        let ddl = structure.ddl().read(cx);
+        assert!(ddl.text().starts_with("CREATE TABLE orders ("));
+        assert_eq!(ddl.caret(), 0, "the DDL reads from its top");
+    });
+    // A reload keeps the structure shown until the next one arrives.
+    source.update(cx, |source, cx| source.reload(cx));
+    source.read_with(cx, |source, _| {
+        assert!(source.is_loading());
+        assert!(source.structure().is_some());
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
+    // The rows stayed loaded while the structure showed.
+    page.update_in(cx, |page, window, cx| page.set_view(TableTabView::Data, window, cx));
+    cx.update(|window, cx| window.draw(cx).clear());
+    data.read_with(cx, |data, cx| assert_eq!(data.grid().read(cx).row_count(), 500));
+    page.read_with(cx, |page, _| assert!(page.has_diagram(), "SQLite draws a table's diagram"));
+}
+
 struct Host(AnyView);
 
 impl gpui::Render for Host {

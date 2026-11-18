@@ -110,6 +110,11 @@ impl Shell {
                     workspace.new_query(connection_id, database.clone(), sql.clone(), window, cx);
                 });
             }
+            ExplorerEvent::OpenDiagram { connection_id, database, schema } => {
+                self.workspace.update(cx, |workspace, cx| {
+                    workspace.open_diagram(connection_id, database, schema, window, cx);
+                });
+            }
         }
     }
 
@@ -185,7 +190,12 @@ impl Shell {
     /// elsewhere). For screenshots, `#edits` adds pending edits once the rows
     /// load, `#review` shows their SQL, `#prod` applies them (asking first on
     /// a connection tagged PROD), `#inspect` opens the cell inspector,
-    /// `#menu` a cell's menu, `#edit`/`#date` a cell's editor (text, date).
+    /// `#menu` a cell's menu, `#edit`/`#date` a cell's editor (text, date);
+    /// `#columns`, `#indexes`, `#foreign-keys`, `#triggers`, `#ddl` or
+    /// `#diagram` open the table's tab on that view instead of its rows.
+    /// `diagram:<id>/<database>/<schema>` opens a schema's ER diagram.
+    /// `query:<id>#explain` explains `DBFORGE_SQL`'s statement instead of
+    /// running it, and `#analyze` explains it with Analyze on.
     #[cfg(debug_assertions)]
     fn open_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::connections::form::Section;
@@ -193,6 +203,11 @@ impl Shell {
         let (wanted, section) = wanted.split_once('#').unwrap_or((wanted.as_str(), ""));
         let wanted_menu = section == "engines";
         let wanted_history = section == "history";
+        let wanted_explain = match section {
+            "explain" => Some(false),
+            "analyze" => Some(true),
+            _ => None,
+        };
         let section = match section {
             "ssl" => Section::Ssl,
             "ssh" => Section::Ssh,
@@ -206,7 +221,20 @@ impl Shell {
                 return self.open_table_for_development(target, section, window, cx);
             }
             Some(("query", target)) => {
-                return self.open_query_for_development(target, wanted_history, window, cx);
+                return self.open_query_for_development(target, wanted_history, wanted_explain, window, cx);
+            }
+            Some(("diagram", target)) => {
+                let parts: Vec<&str> = target.split('/').collect();
+                let [connection_id, database, schema] = parts[..] else {
+                    return eprintln!("DBFORGE_OPEN: diagram:<id>/<database>/<schema>, not {target}");
+                };
+                let opened = self
+                    .workspace
+                    .update(cx, |workspace, cx| workspace.open_diagram(connection_id, database, schema, window, cx));
+                if opened.is_none() {
+                    eprintln!("DBFORGE_OPEN: no connection {connection_id}");
+                }
+                return;
             }
             None if wanted == "new-connection" => self.open_connection_dialog(None, window, cx),
             Some(("edit", id)) => match saved(id) {
@@ -231,7 +259,14 @@ impl Shell {
 
     /// `DBFORGE_OPEN=query:…`: a console, its script run, its history shown.
     #[cfg(debug_assertions)]
-    fn open_query_for_development(&mut self, target: &str, history: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_query_for_development(
+        &mut self,
+        target: &str,
+        history: bool,
+        explain: Option<bool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let (connection_id, database) = match target.split_once('/') {
             Some((id, database)) => (id, Some(database.to_owned())),
             None => (target, None),
@@ -244,8 +279,13 @@ impl Shell {
             return eprintln!("DBFORGE_OPEN: no SQL connection {connection_id}");
         };
         console.update(cx, |console, cx| {
-            if let Some(sql) = sql {
-                console.run(sql, cx);
+            match (sql, explain) {
+                (Some(sql), Some(analyze)) => {
+                    console.set_analyze(analyze, cx);
+                    console.explain(sql, cx);
+                }
+                (Some(sql), None) => console.run(sql, cx),
+                (None, _) => {}
             }
             if history {
                 console.toggle_history(window, cx);
@@ -268,10 +308,22 @@ impl Shell {
         let Some(table) = crate::sql::snippets::table_ref(&path) else {
             return eprintln!("DBFORGE_OPEN: no table in {target}");
         };
-        let page =
-            self.workspace.update(cx, |workspace, cx| workspace.open_table(&connection_id, table, None, window, cx));
+        use crate::structure::sections::Section;
+        use crate::table::TableTabView;
+        let view = match seed.as_deref() {
+            Some("columns") => Some(TableTabView::Section(Section::Columns)),
+            Some("indexes") => Some(TableTabView::Section(Section::Indexes)),
+            Some("foreign-keys") => Some(TableTabView::Section(Section::ForeignKeys)),
+            Some("triggers") => Some(TableTabView::Section(Section::Triggers)),
+            Some("ddl") => Some(TableTabView::Section(Section::Ddl)),
+            Some("diagram") => Some(TableTabView::Diagram),
+            _ => None,
+        };
+        let page = self
+            .workspace
+            .update(cx, |workspace, cx| workspace.open_table(&connection_id, table, None, view, window, cx));
         let Some(page) = page else { return eprintln!("DBFORGE_OPEN: no connection {connection_id}") };
-        if let Some(seed) = seed {
+        if let Some(seed) = seed.filter(|_| view.is_none()) {
             let data = page.read(cx).data().clone();
             data.update(cx, |data, _| data.seed_for_development(seed));
         }
