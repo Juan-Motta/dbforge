@@ -20,6 +20,7 @@ use gpui::{
 use self::menu::{NodeCommand, commands};
 use self::tree::{ChildState, Node, NodeKind, TreeNode, TreeRow};
 use crate::backend::Backend;
+use crate::connections::url::connection_url;
 use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
 use crate::ui::{MenuItem, PopoverMenu, TextInput, TextInputEvent};
@@ -41,6 +42,14 @@ pub struct OpenObject {
 pub enum ExplorerEvent {
     /// A node was selected: the connection (and where in it) now in use.
     Selected { connection_id: String, path: Vec<String> },
+    /// The connection list changed (a duplicate was added): the selected connection may have.
+    ConnectionsChanged,
+    /// The "+" button: open the dialog for a new connection.
+    NewConnection,
+    /// Open the dialog on this connection.
+    EditConnection(Connection),
+    /// Ask before deleting this connection.
+    DeleteConnection(Connection),
 }
 
 const CONTEXT: &str = "Explorer";
@@ -265,6 +274,55 @@ impl Explorer {
         self.rebuild(cx);
     }
 
+    /// Reads the saved connections and tags again, after one was saved,
+    /// duplicated or deleted. Open connections stay open and keep their
+    /// listings; a deleted one's are dropped. `changed` (a saved connection)
+    /// is listed again where it is open, as its server may have; `select` is
+    /// selected (a new connection).
+    pub fn reload_connections(&mut self, changed: Option<&str>, select: Option<&str>, cx: &mut Context<Self>) {
+        let core = Backend::global(cx).core();
+        self.connections = core.connections().list();
+        self.tags = core.tags().list();
+        let present: HashSet<String> = self.connections.iter().map(|connection| connection.id.clone()).collect();
+        let kept = |id: &String| present.contains(tree::connection_of(id));
+        self.expanded.retain(kept);
+        self.children.retain(|id, _| kept(id));
+        self.loads.retain(|id, _| kept(id));
+        self.auto_expand.retain(kept);
+        if self.selected.as_ref().is_some_and(|id| !kept(id)) {
+            self.selected = None;
+        }
+        self.rebuild(cx);
+        if let Some(id) = changed.filter(|id| self.expanded.contains(*id)) {
+            self.refresh(Some(id), cx);
+        }
+        if let Some(node) = select.and_then(|id| self.find(id)).map(|tree| tree.node.clone()) {
+            self.select(&node, cx);
+        }
+    }
+
+    /// Saves a copy of `connection`, its secrets included, then selects it.
+    fn duplicate(&mut self, connection: &Connection, cx: &mut Context<Self>) {
+        let (id, name) = (connection.id.clone(), (cx.messages().duplicate_name)(&connection.name));
+        // The core copies the secrets, which may wait on the keychain.
+        let duplicating = Backend::global(cx).spawn_blocking(cx, move |core| {
+            dbforge_core::connections::commands::duplicate_connection(core.connections(), id, name)
+                .map_err(|error| error.to_string())
+        });
+        cx.spawn(async move |this, cx| {
+            let duplicated = duplicating.await;
+            let _ = this.update(cx, |this, cx| match duplicated {
+                Ok(copy) => {
+                    this.reload_connections(None, Some(&copy.id), cx);
+                    cx.emit(ExplorerEvent::ConnectionsChanged);
+                }
+                // Until the app has notifications, the reason goes to the log.
+                Err(message) => eprintln!("DBForge could not duplicate the connection: {message}"),
+            });
+        })
+        .detach();
+    }
+
     /// Lists again every open node, or with `scope` (a node's id) only that node's part of the tree.
     pub fn refresh(&mut self, scope: Option<&str>, cx: &mut Context<Self>) {
         let nodes = tree::nodes_to_reload(&self.tree, &|id| self.expanded.contains(id), scope);
@@ -374,6 +432,8 @@ impl Explorer {
                     self.rebuild(cx);
                 }
             }
+            // The filter inserts its pastes itself.
+            TextInputEvent::Pasted(_) => {}
         }
     }
 
@@ -393,6 +453,32 @@ impl Explorer {
                         let _ = this.update(cx, |this, cx| this.refresh(Some(&node.connection_id), cx));
                     }
                     NodeCommand::CopyName => cx.write_to_clipboard(ClipboardItem::new_string(node.name.clone())),
+                    NodeCommand::CopyConnectionUrl => {
+                        let _ = this.update(cx, |this, cx| {
+                            if let Some((connection, _)) = this.connection(&node.connection_id) {
+                                cx.write_to_clipboard(ClipboardItem::new_string(connection_url(connection)));
+                            }
+                        });
+                    }
+                    NodeCommand::DuplicateConnection => {
+                        let _ = this.update(cx, |this, cx| {
+                            if let Some((connection, _)) = this.connection(&node.connection_id) {
+                                let connection = connection.clone();
+                                this.duplicate(&connection, cx);
+                            }
+                        });
+                    }
+                    NodeCommand::EditConnection | NodeCommand::DeleteConnection => {
+                        let _ = this.update(cx, |this, cx| {
+                            let Some((connection, _)) = this.connection(&node.connection_id) else { return };
+                            let connection = connection.clone();
+                            cx.emit(if command == NodeCommand::EditConnection {
+                                ExplorerEvent::EditConnection(connection)
+                            } else {
+                                ExplorerEvent::DeleteConnection(connection)
+                            });
+                        });
+                    }
                 })
                 .icon(command.icon())
             })

@@ -1,15 +1,17 @@
 //! The window's layout: the explorer on the left; the toolbar, the tab strip
-//! and the main area on the right; and a dialog over them when one is open.
-//! Each part is its own view, which its feature grows.
+//! and the main area on the right; and a dialog over them when one is open
+//! (the connection dialogs, the notice of unreadable settings). Each part is
+//! its own view, which its feature grows.
 
 pub mod explorer;
 pub mod set_aside;
 mod toolbar;
 mod workspace;
 
+use dbforge_core::connections::model::Connection;
 use gpui::{
-    AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Subscription, Window,
-    deferred, div, linear_color_stop, linear_gradient, px,
+    AnyView, AppContext, Context, DismissEvent, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
+    Render, Styled, Subscription, Window, div, linear_color_stop, linear_gradient, px,
 };
 
 pub use explorer::{Explorer, ExplorerEvent, OpenObject};
@@ -18,6 +20,7 @@ pub use toolbar::Toolbar;
 pub use workspace::Workspace;
 
 use crate::backend::Backend;
+use crate::connections::{ConnectionDialog, ConnectionDialogEvent, DeleteConnectionDialog, DeleteConnectionEvent};
 use crate::i18n::Locale;
 use crate::preferences::Preferences;
 use crate::theme::{ActiveTheme, Theme};
@@ -25,12 +28,18 @@ use crate::theme::{ActiveTheme, Theme};
 /// Space between the window's panels and around them.
 const GAP: f32 = 10.;
 
+/// The dialog over the window, and what listens to it until it closes.
+struct OpenDialog {
+    view: AnyView,
+    _subscriptions: Vec<Subscription>,
+}
+
 /// The window's root view.
 pub struct Shell {
     explorer: Entity<Explorer>,
     toolbar: Entity<Toolbar>,
     workspace: Entity<Workspace>,
-    dialog: Option<Entity<SetAsideDialog>>,
+    dialog: Option<OpenDialog>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -56,20 +65,134 @@ impl Shell {
         let explorer = cx.new(|cx| Explorer::new(window, cx));
         let toolbar = cx.new(|_| Toolbar::default());
         let mut subscriptions = subscriptions;
-        // The toolbar shows the connection selected in the explorer.
-        subscriptions.push(cx.subscribe(&explorer, |this, explorer, event: &ExplorerEvent, cx| {
-            let ExplorerEvent::Selected { connection_id, .. } = event;
-            let connection =
-                explorer.read(cx).connection(connection_id).map(|(connection, tag)| (connection.clone(), tag.cloned()));
-            this.toolbar.update(cx, |toolbar, cx| toolbar.show(connection, cx));
-        }));
+        subscriptions.push(cx.subscribe_in(&explorer, window, Self::on_explorer));
         // A selection made before this subscription (development builds open a tree at start).
         let selected = explorer.read(cx).selected_connection();
         toolbar.update(cx, |toolbar, cx| toolbar.show(selected, cx));
         let mut shell =
             Self { explorer, toolbar, workspace: cx.new(|_| Workspace), dialog: None, _subscriptions: subscriptions };
         shell.tell_of_set_aside_files(window, cx);
+        #[cfg(debug_assertions)]
+        shell.open_for_development(window, cx);
         shell
+    }
+
+    fn on_explorer(
+        &mut self,
+        explorer: &Entity<Explorer>,
+        event: &ExplorerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            // The toolbar shows the connection selected in the explorer.
+            ExplorerEvent::Selected { connection_id, .. } => {
+                let connection = explorer
+                    .read(cx)
+                    .connection(connection_id)
+                    .map(|(connection, tag)| (connection.clone(), tag.cloned()));
+                self.toolbar.update(cx, |toolbar, cx| toolbar.show(connection, cx));
+            }
+            ExplorerEvent::ConnectionsChanged => self.show_selected_connection(cx),
+            ExplorerEvent::NewConnection => self.open_connection_dialog(None, window, cx),
+            ExplorerEvent::EditConnection(connection) => {
+                self.open_connection_dialog(Some(connection.clone()), window, cx)
+            }
+            ExplorerEvent::DeleteConnection(connection) => self.open_delete_dialog(connection.clone(), window, cx),
+        }
+    }
+
+    /// The toolbar follows the explorer's selection, which a save or delete may have changed.
+    fn show_selected_connection(&mut self, cx: &mut Context<Self>) {
+        let selected = self.explorer.read(cx).selected_connection();
+        self.toolbar.update(cx, |toolbar, cx| toolbar.show(selected, cx));
+    }
+
+    /// Opens the connection dialog on `connection`, or for a new one.
+    pub fn open_connection_dialog(
+        &mut self,
+        connection: Option<Connection>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog = cx.new(|cx| ConnectionDialog::new(connection, window, cx));
+        dialog.read(cx).focus(window, cx);
+        let saved = cx.subscribe(&dialog, |this, _, event: &ConnectionDialogEvent, cx| {
+            let ConnectionDialogEvent::Saved(connection) = event;
+            let id = connection.id.clone();
+            let is_new = this.explorer.read(cx).connection(&id).is_none();
+            this.explorer
+                .update(cx, |explorer, cx| explorer.reload_connections(Some(&id), is_new.then_some(id.as_str()), cx));
+            this.show_selected_connection(cx);
+        });
+        self.show_dialog(dialog, vec![saved], window, cx);
+    }
+
+    /// Asks before deleting `connection`.
+    pub fn open_delete_dialog(&mut self, connection: Connection, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = cx.new(|cx| DeleteConnectionDialog::new(connection, cx));
+        dialog.read(cx).focus(window);
+        let deleted =
+            cx.subscribe(&dialog, |this, _, DeleteConnectionEvent::Deleted(_): &DeleteConnectionEvent, cx| {
+                this.explorer.update(cx, |explorer, cx| explorer.reload_connections(None, None, cx));
+                this.show_selected_connection(cx);
+            });
+        self.show_dialog(dialog, vec![deleted], window, cx);
+    }
+
+    /// Shows `dialog` over the window until it closes; the explorer then takes the keyboard back.
+    fn show_dialog<V: Render + gpui::EventEmitter<DismissEvent>>(
+        &mut self,
+        dialog: Entity<V>,
+        mut subscriptions: Vec<Subscription>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        subscriptions.push(cx.subscribe_in(&dialog, window, |this, _, _: &DismissEvent, window, cx| {
+            this.dialog = None;
+            window.focus(&this.explorer.focus_handle(cx));
+            cx.notify();
+        }));
+        self.dialog = Some(OpenDialog { view: dialog.into(), _subscriptions: subscriptions });
+        cx.notify();
+    }
+
+    /// `DBFORGE_OPEN`, in development builds: a dialog to open at start, for
+    /// screenshots without clicking: `new-connection`, `edit:<id>` or
+    /// `delete:<id>`, and for the connection dialog `#ssl` or `#ssh` to show
+    /// that section (`edit:<id>#ssh`), or `#engines` to open its engine list.
+    #[cfg(debug_assertions)]
+    fn open_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::connections::form::Section;
+        let Ok(wanted) = std::env::var("DBFORGE_OPEN") else { return };
+        let (wanted, section) = wanted.split_once('#').unwrap_or((wanted.as_str(), ""));
+        let wanted_menu = section == "engines";
+        let section = match section {
+            "ssl" => Section::Ssl,
+            "ssh" => Section::Ssh,
+            _ => Section::General,
+        };
+        let saved = |id: &str| cx.global::<Backend>().core().connections().list().into_iter().find(|c| c.id == id);
+        match wanted.split_once(':') {
+            None if wanted == "new-connection" => self.open_connection_dialog(None, window, cx),
+            Some(("edit", id)) => match saved(id) {
+                Some(connection) => self.open_connection_dialog(Some(connection), window, cx),
+                None => return eprintln!("DBFORGE_OPEN: no connection {id}"),
+            },
+            Some(("delete", id)) => match saved(id) {
+                Some(connection) => return self.open_delete_dialog(connection, window, cx),
+                None => return eprintln!("DBFORGE_OPEN: no connection {id}"),
+            },
+            _ => return eprintln!("DBFORGE_OPEN: unknown dialog {wanted}"),
+        }
+        if let Some(open) = &self.dialog
+            && let Ok(dialog) = open.view.clone().downcast::<ConnectionDialog>()
+        {
+            dialog.update(cx, |dialog, cx| dialog.show_section(section, cx));
+            if wanted_menu {
+                dialog.update(cx, |dialog, cx| dialog.open_engines(window, cx));
+            }
+        }
     }
 
     /// Opens the notice of settings files that couldn't be read, once, when there are any.
@@ -81,12 +204,25 @@ impl Shell {
         }
         let dialog = cx.new(|cx| SetAsideDialog::new(files, cx));
         dialog.read(cx).focus(window);
-        self._subscriptions.push(cx.subscribe(&dialog, |this, _, _: &gpui::DismissEvent, cx| {
-            this.dialog = None;
-            cx.notify();
-        }));
-        self.dialog = Some(dialog);
+        self.show_dialog(dialog, Vec::new(), window, cx);
     }
+}
+
+/// A dialog over the window, on its scrim. Render it as the window's last
+/// child, so it paints over the rest. It must not be deferred: a dialog's
+/// dropdowns are, and GPUI panics on a deferred draw inside another
+/// ("cannot call defer_draw during deferred drawing").
+fn dialog_layer(theme: &Theme, view: AnyView) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("dialog-scrim")
+        .absolute()
+        .inset_0()
+        .occlude()
+        .bg(theme.scrim)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(view)
 }
 
 impl Render for Shell {
@@ -114,21 +250,44 @@ impl Render for Shell {
                     .child(self.toolbar.clone())
                     .child(self.workspace.clone()),
             )
-            // Deferred, so the dialog and its scrim paint over everything else.
-            .children(self.dialog.clone().map(|dialog| {
-                deferred(
-                    div()
-                        .id("dialog-scrim")
-                        .absolute()
-                        .inset_0()
-                        .occlude()
-                        .bg(theme.scrim)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(dialog),
-                )
-                .with_priority(1)
-            }))
+            .children(self.dialog.as_ref().map(|dialog| dialog_layer(theme, dialog.view.clone())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+    use crate::theme::Appearance;
+    use crate::ui::{Select, SelectOption};
+
+    /// A window holding a dropdown in the dialog layer, as a dialog's would be.
+    struct DialogHost {
+        select: Entity<Select<u8>>,
+    }
+
+    impl Render for DialogHost {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = *cx.theme();
+            div().size_full().relative().child(dialog_layer(&theme, self.select.clone().into()))
+        }
+    }
+
+    #[gpui::test]
+    fn a_dropdown_opens_inside_a_dialog(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(Theme::new(Appearance::Dark));
+        });
+        let (host, cx) = cx.add_window_view(|_, cx| DialogHost {
+            select: cx
+                .new(|cx| Select::new(vec![SelectOption::new(1, "One"), SelectOption::new(2, "Two")], Some(1), cx)),
+        });
+        cx.run_until_parked();
+        host.update_in(cx, |host, window, cx| host.select.update(cx, |select, cx| select.open(window, cx)));
+        // Drawing the open list inside the dialog layer must not panic.
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear());
+        assert!(host.read_with(cx, |host, cx| host.select.read(cx).is_open()));
     }
 }

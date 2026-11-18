@@ -9,7 +9,7 @@ use gpui::{
 };
 
 use super::tree::{NodeKind, Tone, TreeRow};
-use super::{Activate, CONTEXT, Collapse, Expand, Explorer, SelectNext, SelectPrevious, width};
+use super::{Activate, CONTEXT, Collapse, Expand, Explorer, ExplorerEvent, SelectNext, SelectPrevious, width};
 use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
 use crate::theme::{ActiveTheme, MONO, Theme};
@@ -137,7 +137,10 @@ impl Explorer {
         div().h(px(52.)).flex().items_center().justify_end().px(px(12.)).child(group(
             theme,
             vec![
-                any(segment(theme, Some("plus"), "", false)),
+                any(segment(theme, Some("plus"), "", false)
+                    .id("explorer-new-connection")
+                    .cursor_pointer()
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ExplorerEvent::NewConnection)))),
                 any(segment(theme, Some("refresh"), "", false)
                     .id("explorer-refresh")
                     .cursor_pointer()

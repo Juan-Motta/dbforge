@@ -13,17 +13,26 @@ path = "src/main.rs"
 anyhow = "1"
 dbforge-core = { path = "../core" }
 gpui = "=0.2.2"
+# Percent-encoding for connection URLs, as the web UI's encodeURIComponent did.
+percent-encoding = "2"
+# The connection URL pattern the dialog splits pasted URLs with.
+regex = "1"
+# The core's settings structs that only serialize (where passwords are stored).
+serde_json = "1"
 # The OS's preferred languages, for the first language DBForge speaks.
 sys-locale = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 # Grapheme boundaries, so the caret steps over a whole "é" or emoji.
 unicode-segmentation = "1"
+# Account URIs (Cosmos DB) and URL query strings.
+url = "2"
 
 # Compiles GPUI's Metal shaders at start instead of with Xcode's Metal toolchain at build time.
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
 
 [dev-dependencies]
-serde_json = "1"
+# Windows drawn headless in tests.
+gpui = { version = "=0.2.2", features = ["test-support"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "time"] }

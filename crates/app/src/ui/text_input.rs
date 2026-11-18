@@ -2,7 +2,9 @@
 //! methods work: dead keys and accents, ñ, emoji and CJK composition. It
 //! draws only the text, the caret and the selection, at a fixed height; the
 //! caller frames it (a capsule, a form field) and listens to its
-//! [`TextInputEvent`]s.
+//! [`TextInputEvent`]s. A masked field (a password) draws a bullet for each
+//! character and never puts its text on the clipboard; a disabled one takes
+//! neither the keyboard nor the mouse.
 
 use std::ops::Range;
 
@@ -11,7 +13,7 @@ use gpui::{
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, InteractiveElement, IntoElement,
     KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels,
     Point, Render, ShapedLine, SharedString, Style, Styled, TextRun, UTF16Selection, UnderlineStyle, Window, actions,
-    div, fill, point, px, relative, size,
+    div, fill, point, prelude::FluentBuilder, px, relative, size,
 };
 
 use super::editing::{EditState, utf8_offset};
@@ -93,7 +95,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
 }
 
 /// What a text field tells its owner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextInputEvent {
     /// The user changed the text (typing, deleting, pasting, composing).
     Changed,
@@ -101,7 +103,14 @@ pub enum TextInputEvent {
     Submitted,
     /// Escape.
     Cancelled,
+    /// Pasting, on a field that hands pastes to its owner
+    /// ([`TextInput::intercept_paste`]): nothing was inserted; the owner
+    /// inserts the text ([`TextInput::insert`]) or uses it otherwise.
+    Pasted(String),
 }
+
+/// What a masked field draws for each character.
+const BULLET: char = '•';
 
 pub struct TextInput {
     state: EditState,
@@ -113,6 +122,9 @@ pub struct TextInput {
     /// How far the text is scrolled left so the caret stays in view.
     scroll: Pixels,
     selecting: bool,
+    masked: bool,
+    disabled: bool,
+    intercept_paste: bool,
 }
 
 impl EventEmitter<TextInputEvent> for TextInput {}
@@ -128,12 +140,50 @@ impl TextInput {
         Self {
             state: EditState::default(),
             placeholder: placeholder.into(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             layout: None,
             bounds: None,
             scroll: px(0.),
             selecting: false,
+            masked: false,
+            disabled: false,
+            intercept_paste: false,
         }
+    }
+
+    /// Draws a bullet for each character, and never copies the text: a password.
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
+    }
+
+    /// Hands each paste to the owner as [`TextInputEvent::Pasted`] instead of inserting it.
+    pub fn intercept_paste(mut self) -> Self {
+        self.intercept_paste = true;
+        self
+    }
+
+    /// A disabled field shows its text dimmed and takes neither the keyboard
+    /// (it leaves the tab order) nor the mouse.
+    pub fn set_disabled(&mut self, disabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled == disabled {
+            return;
+        }
+        self.disabled = disabled;
+        self.focus = self.focus.clone().tab_stop(!disabled);
+        if disabled && self.focus.is_focused(window) {
+            window.blur();
+        }
+        cx.notify();
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
+    /// Inserts `text` where the caret is, replacing the selection, as typing it would.
+    pub fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.edit(cx, |state| state.replace(None, text));
     }
 
     pub fn text(&self) -> &str {
@@ -141,8 +191,11 @@ impl TextInput {
     }
 
     /// Replaces the text, caret at its end, without a [`TextInputEvent::Changed`]:
-    /// the owner set it.
+    /// the owner set it. The same text leaves the caret where it is.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.state.text() == text {
+            return;
+        }
         self.state = EditState::new(text);
         cx.notify();
     }
@@ -163,6 +216,9 @@ impl TextInput {
 
     /// Runs `edit` and tells the owner when the text changed.
     fn edit(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut EditState) -> bool) {
+        if self.disabled {
+            return;
+        }
         let changed = edit(&mut self.state);
         if changed {
             cx.emit(TextInputEvent::Changed);
@@ -177,20 +233,26 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.state.selection().is_empty() {
+        if !self.masked && !self.state.selection().is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(self.state.selected_text().to_owned()));
         }
     }
 
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.state.selection().is_empty() {
+        if !self.masked && !self.state.selection().is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(self.state.selected_text().to_owned()));
             self.edit(cx, |state| state.replace(None, ""));
         }
     }
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else { return };
+        if self.disabled {
+            return;
+        }
+        if self.intercept_paste {
+            cx.emit(TextInputEvent::Pasted(text));
+        } else {
             self.edit(cx, |state| state.replace(None, &text));
         }
     }
@@ -202,10 +264,32 @@ impl TextInput {
         if self.state.text().is_empty() {
             return 0;
         }
-        line.closest_index_for_x(position.x - bounds.left() + self.scroll)
+        self.text_offset(line.closest_index_for_x(position.x - bounds.left() + self.scroll))
+    }
+
+    /// The text as drawn: the text, or a bullet for each of its characters.
+    fn shown_text(&self) -> String {
+        if self.masked {
+            BULLET.to_string().repeat(self.state.text().chars().count())
+        } else {
+            self.state.text().into()
+        }
+    }
+
+    /// Where `offset` in the text is in the text as drawn.
+    fn shown_offset(&self, offset: usize) -> usize {
+        if self.masked { masked_offset(self.state.text(), offset) } else { offset }
+    }
+
+    /// Where `offset` in the text as drawn is in the text.
+    fn text_offset(&self, offset: usize) -> usize {
+        if self.masked { unmasked_offset(self.state.text(), offset) } else { offset }
     }
 
     fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         self.focus(window);
         let index = self.index_for_position(event.position);
         if event.click_count >= 2 {
@@ -242,7 +326,10 @@ impl EntityInputHandler for TextInput {
     ) -> Option<String> {
         let range = self.state.range_from_utf16(&range_utf16);
         actual_range.replace(self.state.range_to_utf16(&range));
-        Some(self.state.text()[range].to_owned())
+        let text = &self.state.text()[range];
+        // A masked field never hands its text to the OS (input methods,
+        // accessibility): one bullet per UTF-16 unit keeps the ranges valid.
+        Some(if self.masked { "•".repeat(text.encode_utf16().count()) } else { text.to_owned() })
     }
 
     fn selected_text_range(
@@ -307,8 +394,8 @@ impl EntityInputHandler for TextInput {
         let range = self.state.range_from_utf16(&range_utf16);
         let left = bounds.left() - self.scroll;
         Some(Bounds::from_corners(
-            point(left + line.x_for_index(range.start), bounds.top()),
-            point(left + line.x_for_index(range.end), bounds.bottom()),
+            point(left + line.x_for_index(self.shown_offset(range.start)), bounds.top()),
+            point(left + line.x_for_index(self.shown_offset(range.end)), bounds.bottom()),
         ))
     }
 
@@ -320,7 +407,7 @@ impl EntityInputHandler for TextInput {
     ) -> Option<usize> {
         let local = self.bounds?.localize(&point)?;
         let line = self.layout.as_ref()?;
-        let index = line.index_for_x(local.x + self.scroll)?;
+        let index = self.text_offset(line.index_for_x(local.x + self.scroll)?);
         Some(self.state.to_utf16(index))
     }
 }
@@ -362,8 +449,19 @@ impl Render for TextInput {
             .h(px(HEIGHT))
             .line_height(px(HEIGHT))
             .overflow_hidden()
+            .when(self.disabled, |field| field.cursor_default().text_color(cx.theme().text3))
             .child(TextElement { input: cx.entity() })
     }
+}
+
+/// Where byte `offset` of `text` falls once each character is drawn as a bullet.
+fn masked_offset(text: &str, offset: usize) -> usize {
+    text[..offset].chars().count() * BULLET.len_utf8()
+}
+
+/// The byte of `text` at byte `offset` of its bullets.
+fn unmasked_offset(text: &str, offset: usize) -> usize {
+    text.char_indices().nth(offset / BULLET.len_utf8()).map_or(text.len(), |(index, _)| index)
 }
 
 /// Draws the input's line, selection and caret, and registers it with the
@@ -427,7 +525,7 @@ impl Element for TextElement {
         let (text, color) = if state.text().is_empty() {
             (input.placeholder.clone(), theme.text3)
         } else {
-            (SharedString::from(state.text().to_owned()), style.color)
+            (SharedString::from(input.shown_text()), style.color)
         };
         let run = TextRun {
             len: text.len(),
@@ -437,7 +535,8 @@ impl Element for TextElement {
             underline: None,
             strikethrough: None,
         };
-        let runs = match state.marked().filter(|_| !state.text().is_empty()) {
+        let marked = state.marked().map(|marked| input.shown_offset(marked.start)..input.shown_offset(marked.end));
+        let runs = match marked.filter(|_| !state.text().is_empty()) {
             Some(marked) => [
                 TextRun { len: marked.start, ..run.clone() },
                 TextRun {
@@ -456,7 +555,8 @@ impl Element for TextElement {
         let line = window.text_system().shape_line(text, font_size, &runs, None);
 
         // Scrolls just enough to keep the caret inside the field.
-        let caret_x = if state.text().is_empty() { px(0.) } else { line.x_for_index(state.cursor()) };
+        let caret_x =
+            if state.text().is_empty() { px(0.) } else { line.x_for_index(input.shown_offset(state.cursor())) };
         let width = bounds.size.width - px(2.);
         let mut scroll = input.scroll;
         if caret_x < scroll {
@@ -474,8 +574,8 @@ impl Element for TextElement {
             (None, Some(fill(caret, theme.accent)))
         } else {
             let corners = Bounds::from_corners(
-                point(left + line.x_for_index(selection.start), bounds.top()),
-                point(left + line.x_for_index(selection.end), bounds.bottom()),
+                point(left + line.x_for_index(input.shown_offset(selection.start)), bounds.top()),
+                point(left + line.x_for_index(input.shown_offset(selection.end)), bounds.bottom()),
             );
             (Some(fill(corners, theme.accent.opacity(0.3))), None)
         };
@@ -516,5 +616,24 @@ impl Element for TextElement {
             input.layout = Some(line);
             input.bounds = Some(bounds);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_masked_field_maps_each_character_to_one_bullet() {
+        let text = "pá🔑s";
+        // p, á (2 bytes), 🔑 (4 bytes), s: four characters, four bullets.
+        assert_eq!(masked_offset(text, 0), 0);
+        assert_eq!(masked_offset(text, 1), 3);
+        assert_eq!(masked_offset(text, 3), 6);
+        assert_eq!(masked_offset(text, text.len()), 12);
+        for (index, _) in text.char_indices() {
+            assert_eq!(unmasked_offset(text, masked_offset(text, index)), index);
+        }
+        assert_eq!(unmasked_offset(text, 12), text.len());
     }
 }

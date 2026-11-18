@@ -355,6 +355,11 @@ fn lister<'a>(nodes: &'a [TreeNode], id: &str, nearest: Option<&'a TreeNode>) ->
     None
 }
 
+/// The id of the connection node `id` is under (its own, for a connection).
+pub fn connection_of(id: &str) -> &str {
+    id.split(SEP).next().unwrap_or(id)
+}
+
 /// The index of the row holding node `id`.
 pub fn row_of(rows: &[TreeRow], id: &str) -> Option<usize> {
     rows.iter().position(|row| row.node().is_some_and(|node| node.id == id))
@@ -649,5 +654,12 @@ mod tests {
         let orders = row_of(&rows, &rows[5].node().unwrap().id).unwrap();
         assert_eq!(parent_row(&rows, orders), Some(3), "orders → Tables");
         assert_eq!(parent_row(&rows, 0), None);
+    }
+
+    #[test]
+    fn every_node_id_starts_with_its_connection_s() {
+        let id = format!("pg{SEP}shop{SEP}#Tables");
+        assert_eq!(connection_of(&id), "pg");
+        assert_eq!(connection_of("pg"), "pg");
     }
 }

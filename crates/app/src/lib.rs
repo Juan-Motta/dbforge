@@ -7,6 +7,7 @@
 pub mod app;
 pub mod assets;
 pub mod backend;
+pub mod connections;
 pub mod events;
 pub mod i18n;
 pub mod preferences;

@@ -2,11 +2,13 @@
 //! missing from one fails to compile rather than showing a key at runtime.
 //! The language is the user's choice, or the OS's when DBForge speaks it.
 
+mod connection;
 mod en;
 mod es;
 
 use gpui::{App, Global};
 
+pub use self::connection::ConnectionMessages;
 use crate::preferences::{Preferences, keys};
 
 /// The languages DBForge speaks.
@@ -76,6 +78,12 @@ pub struct Messages {
     pub views: &'static str,
     pub copy_name: &'static str,
     pub refresh_connection: &'static str,
+    pub copy_connection_url: &'static str,
+    pub duplicate_connection: &'static str,
+    pub edit_connection: &'static str,
+    pub delete_connection: &'static str,
+    /// The name a duplicated connection gets.
+    pub duplicate_name: fn(&str) -> String,
     pub resize_explorer: &'static str,
     // Toolbar
     pub no_connection: &'static str,
@@ -89,6 +97,8 @@ pub struct Messages {
     pub set_aside_title: &'static str,
     pub set_aside_note: &'static str,
     pub set_aside_ok: &'static str,
+    /// The connection dialog and deleting a connection.
+    pub connection: ConnectionMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

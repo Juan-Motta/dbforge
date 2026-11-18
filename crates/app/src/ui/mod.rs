@@ -1,9 +1,17 @@
 //! The glass building blocks views share: panels, cards, capsules and the
-//! segments inside them, pills and dots. Each takes the theme and returns an
-//! element to finish with its own content.
+//! segments inside them, pills and dots, buttons, and the form controls
+//! (text, password and file fields, dropdowns, checkboxes, section tabs).
+//! Each takes the theme and returns an element to finish with its own
+//! content, or is an entity its owner keeps.
 
+pub mod button;
+pub mod checkbox;
 pub mod editing;
+pub mod field;
+pub mod file_field;
 pub mod menu;
+pub mod select;
+pub mod tabs;
 pub mod text_input;
 
 use std::time::Duration;
@@ -15,7 +23,12 @@ use gpui::{
     Styled, Transformation, div, percentage, point, px, svg,
 };
 
-pub use menu::{MenuItem, PopoverMenu, popover};
+pub use button::{button, enabled, ghost_button};
+pub use checkbox::Checkbox;
+pub use file_field::FileField;
+pub use menu::{MenuItem, PopoverMenu, Swatch, popover};
+pub use select::{Select, SelectEvent, SelectOption};
+pub use tabs::{SectionTabs, Tab};
 pub use text_input::{TextInput, TextInputEvent};
 
 use crate::theme::{Theme, color};
