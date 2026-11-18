@@ -6,7 +6,6 @@
 pub mod explorer;
 pub mod set_aside;
 mod toolbar;
-mod workspace;
 
 use dbforge_core::connections::model::Connection;
 use gpui::{
@@ -14,10 +13,10 @@ use gpui::{
     Render, Styled, Subscription, Window, div, linear_color_stop, linear_gradient, px,
 };
 
+pub use crate::workspace::Workspace;
 pub use explorer::{Explorer, ExplorerEvent, OpenObject};
 pub use set_aside::SetAsideDialog;
 pub use toolbar::Toolbar;
-pub use workspace::Workspace;
 
 use crate::backend::Backend;
 use crate::connections::{ConnectionDialog, ConnectionDialogEvent, DeleteConnectionDialog, DeleteConnectionEvent};
@@ -66,11 +65,15 @@ impl Shell {
         let toolbar = cx.new(|_| Toolbar::default());
         let mut subscriptions = subscriptions;
         subscriptions.push(cx.subscribe_in(&explorer, window, Self::on_explorer));
+        let mut shell = Self {
+            explorer,
+            toolbar,
+            workspace: cx.new(|_| Workspace::default()),
+            dialog: None,
+            _subscriptions: subscriptions,
+        };
         // A selection made before this subscription (development builds open a tree at start).
-        let selected = explorer.read(cx).selected_connection();
-        toolbar.update(cx, |toolbar, cx| toolbar.show(selected, cx));
-        let mut shell =
-            Self { explorer, toolbar, workspace: cx.new(|_| Workspace), dialog: None, _subscriptions: subscriptions };
+        shell.show_selected_connection(cx);
         shell.tell_of_set_aside_files(window, cx);
         #[cfg(debug_assertions)]
         shell.open_for_development(window, cx);
@@ -86,11 +89,13 @@ impl Shell {
     ) {
         match event {
             // The toolbar shows the connection selected in the explorer.
-            ExplorerEvent::Selected { connection_id, .. } => {
+            ExplorerEvent::Selected { connection_id, path } => {
                 let connection = explorer
                     .read(cx)
                     .connection(connection_id)
                     .map(|(connection, tag)| (connection.clone(), tag.cloned()));
+                let target = connection.as_ref().map(|(connection, _)| (connection.clone(), path.clone()));
+                self.workspace.update(cx, |workspace, cx| workspace.set_target(target, cx));
                 self.toolbar.update(cx, |toolbar, cx| toolbar.show(connection, cx));
             }
             ExplorerEvent::ConnectionsChanged => self.show_selected_connection(cx),
@@ -99,12 +104,21 @@ impl Shell {
                 self.open_connection_dialog(Some(connection.clone()), window, cx)
             }
             ExplorerEvent::DeleteConnection(connection) => self.open_delete_dialog(connection.clone(), window, cx),
+            ExplorerEvent::NewQuery { connection_id, database, sql } => {
+                self.workspace.update(cx, |workspace, cx| {
+                    workspace.new_query(connection_id, database.clone(), sql.clone(), window, cx);
+                });
+            }
         }
     }
 
-    /// The toolbar follows the explorer's selection, which a save or delete may have changed.
+    /// The toolbar and "New query" follow the explorer's selection, which a
+    /// save or delete may have changed.
     fn show_selected_connection(&mut self, cx: &mut Context<Self>) {
-        let selected = self.explorer.read(cx).selected_connection();
+        let explorer = self.explorer.read(cx);
+        let selected = explorer.selected_connection();
+        let target = selected.as_ref().map(|(connection, _)| (connection.clone(), explorer.selected_path()));
+        self.workspace.update(cx, |workspace, cx| workspace.set_target(target, cx));
         self.toolbar.update(cx, |toolbar, cx| toolbar.show(selected, cx));
     }
 
@@ -133,8 +147,9 @@ impl Shell {
         let dialog = cx.new(|cx| DeleteConnectionDialog::new(connection, cx));
         dialog.read(cx).focus(window);
         let deleted =
-            cx.subscribe(&dialog, |this, _, DeleteConnectionEvent::Deleted(_): &DeleteConnectionEvent, cx| {
+            cx.subscribe(&dialog, |this, _, DeleteConnectionEvent::Deleted(id): &DeleteConnectionEvent, cx| {
                 this.explorer.update(cx, |explorer, cx| explorer.reload_connections(None, None, cx));
+                this.workspace.update(cx, |workspace, cx| workspace.close_connection(id, cx));
                 this.show_selected_connection(cx);
             });
         self.show_dialog(dialog, vec![deleted], window, cx);
@@ -161,12 +176,16 @@ impl Shell {
     /// screenshots without clicking: `new-connection`, `edit:<id>` or
     /// `delete:<id>`, and for the connection dialog `#ssl` or `#ssh` to show
     /// that section (`edit:<id>#ssh`), or `#engines` to open its engine list.
+    /// `query:<id>` (or `query:<id>/<database>`) opens a query console on
+    /// that connection, with `DBFORGE_SQL`'s script in it, run at once when
+    /// there is one; `#history` opens the console's history too.
     #[cfg(debug_assertions)]
     fn open_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::connections::form::Section;
         let Ok(wanted) = std::env::var("DBFORGE_OPEN") else { return };
         let (wanted, section) = wanted.split_once('#').unwrap_or((wanted.as_str(), ""));
         let wanted_menu = section == "engines";
+        let wanted_history = section == "history";
         let section = match section {
             "ssl" => Section::Ssl,
             "ssh" => Section::Ssh,
@@ -174,6 +193,9 @@ impl Shell {
         };
         let saved = |id: &str| cx.global::<Backend>().core().connections().list().into_iter().find(|c| c.id == id);
         match wanted.split_once(':') {
+            Some(("query", target)) => {
+                return self.open_query_for_development(target, wanted_history, window, cx);
+            }
             None if wanted == "new-connection" => self.open_connection_dialog(None, window, cx),
             Some(("edit", id)) => match saved(id) {
                 Some(connection) => self.open_connection_dialog(Some(connection), window, cx),
@@ -193,6 +215,30 @@ impl Shell {
                 dialog.update(cx, |dialog, cx| dialog.open_engines(window, cx));
             }
         }
+    }
+
+    /// `DBFORGE_OPEN=query:…`: a console, its script run, its history shown.
+    #[cfg(debug_assertions)]
+    fn open_query_for_development(&mut self, target: &str, history: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (connection_id, database) = match target.split_once('/') {
+            Some((id, database)) => (id, Some(database.to_owned())),
+            None => (target, None),
+        };
+        let sql = std::env::var("DBFORGE_SQL").ok().filter(|sql| !sql.trim().is_empty());
+        let console = self
+            .workspace
+            .update(cx, |workspace, cx| workspace.new_query(connection_id, database, sql.clone(), window, cx));
+        let Some(console) = console else {
+            return eprintln!("DBFORGE_OPEN: no SQL connection {connection_id}");
+        };
+        console.update(cx, |console, cx| {
+            if let Some(sql) = sql {
+                console.run(sql, cx);
+            }
+            if history {
+                console.toggle_history(window, cx);
+            }
+        });
     }
 
     /// Opens the notice of settings files that couldn't be read, once, when there are any.

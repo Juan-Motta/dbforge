@@ -1,7 +1,9 @@
-//! The editing rules of a single-line text field, apart from drawing it: the
-//! text, the selection, the text an input method is composing, and how keys
-//! move and change them. Offsets are UTF-8 byte offsets on grapheme
-//! boundaries; the OS's input methods speak UTF-16, converted here.
+//! The editing rules of a text field, apart from drawing it: the text, the
+//! selection, the text an input method is composing, and how keys move and
+//! change them. A single-line field turns line breaks into spaces; a
+//! multi-line one ([`EditState::multiline`], the code editor) keeps them as
+//! `\n`. Offsets are UTF-8 byte offsets on grapheme boundaries; the OS's
+//! input methods speak UTF-16, converted here.
 
 use std::ops::Range;
 
@@ -16,6 +18,8 @@ pub struct EditState {
     reversed: bool,
     /// The text an input method is composing (a dead key's accent, a CJK word).
     marked: Option<Range<usize>>,
+    /// Keeps line breaks (as `\n`) instead of turning them into spaces.
+    multiline: bool,
 }
 
 impl EditState {
@@ -23,7 +27,23 @@ impl EditState {
     pub fn new(text: &str) -> Self {
         let text = single_line(text);
         let end = text.len();
-        Self { text, selection: end..end, reversed: false, marked: None }
+        Self { text, selection: end..end, reversed: false, marked: None, multiline: false }
+    }
+
+    /// Multi-line `text` (line breaks kept as `\n`) with the caret at its start.
+    pub fn multiline(text: &str) -> Self {
+        Self { text: line_breaks(text), multiline: true, ..Self::default() }
+    }
+
+    pub fn is_multiline(&self) -> bool {
+        self.multiline
+    }
+
+    /// Selects `range` (clamped), the caret at its start when `reversed`.
+    pub fn set_selection(&mut self, range: Range<usize>, reversed: bool) {
+        let len = self.text.len();
+        self.selection = range.start.min(len)..range.end.min(len).max(range.start.min(len));
+        self.reversed = reversed && !self.selection.is_empty();
     }
 
     pub fn text(&self) -> &str {
@@ -165,7 +185,7 @@ impl EditState {
     /// with `new_text` and puts the caret after it; whether the text changed.
     pub fn replace(&mut self, range: Option<Range<usize>>, new_text: &str) -> bool {
         let range = self.target(range);
-        let new_text = single_line(new_text);
+        let new_text = self.normalized(new_text);
         let changed = self.text[range.clone()] != new_text;
         self.text.replace_range(range.clone(), &new_text);
         let caret = range.start + new_text.len();
@@ -179,7 +199,7 @@ impl EditState {
     /// composed, with `selected` (relative to it) selected inside.
     pub fn replace_and_mark(&mut self, range: Option<Range<usize>>, new_text: &str, selected: Option<Range<usize>>) {
         let range = self.target(range);
-        let new_text = single_line(new_text);
+        let new_text = self.normalized(new_text);
         self.text.replace_range(range.clone(), &new_text);
         self.marked = (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());
         let end = new_text.len();
@@ -195,6 +215,11 @@ impl EditState {
         self.marked = None;
     }
 
+    /// `text` as this field keeps it: on one line, or with `\n` line breaks.
+    fn normalized(&self, text: &str) -> String {
+        if self.multiline { line_breaks(text) } else { single_line(text) }
+    }
+
     /// The range an edit without one applies to.
     fn target(&self, range: Option<Range<usize>>) -> Range<usize> {
         let range = range.or_else(|| self.marked.clone()).unwrap_or_else(|| self.selection.clone());
@@ -202,11 +227,11 @@ impl EditState {
         range.start.min(len)..range.end.min(len)
     }
 
-    fn previous_boundary(&self, offset: usize) -> usize {
+    pub fn previous_boundary(&self, offset: usize) -> usize {
         self.text.grapheme_indices(true).rev().find_map(|(index, _)| (index < offset).then_some(index)).unwrap_or(0)
     }
 
-    fn next_boundary(&self, offset: usize) -> usize {
+    pub fn next_boundary(&self, offset: usize) -> usize {
         self.text
             .grapheme_indices(true)
             .find_map(|(index, _)| (index > offset).then_some(index))
@@ -214,7 +239,7 @@ impl EditState {
     }
 
     /// The start of the word before `offset`, past any spaces or punctuation.
-    fn previous_word(&self, offset: usize) -> usize {
+    pub fn previous_word(&self, offset: usize) -> usize {
         let mut chars = self.text[..offset].char_indices().rev().peekable();
         while chars.next_if(|(_, c)| !is_word(*c)).is_some() {}
         let mut start = chars.peek().map_or(0, |(index, _)| *index);
@@ -225,7 +250,7 @@ impl EditState {
     }
 
     /// The end of the word after `offset`, past any spaces or punctuation.
-    fn next_word(&self, offset: usize) -> usize {
+    pub fn next_word(&self, offset: usize) -> usize {
         let rest = &self.text[offset..];
         let mut chars = rest.char_indices().peekable();
         while chars.next_if(|(_, c)| !is_word(*c)).is_some() {}
@@ -271,6 +296,11 @@ fn is_word(c: char) -> bool {
 /// A line break pasted or typed into a one-line field becomes a space.
 fn single_line(text: &str) -> String {
     text.replace("\r\n", " ").replace(['\n', '\r'], " ")
+}
+
+/// Windows' and old Macs' line breaks become `\n`.
+fn line_breaks(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]
@@ -396,6 +426,17 @@ mod tests {
         let state = typed("a\nb\r\nc");
         assert_eq!(state.text(), "a b c");
         assert_eq!(EditState::new("x\ny").text(), "x y");
+    }
+
+    #[test]
+    fn a_multiline_field_keeps_line_breaks_as_newlines() {
+        let mut state = EditState::multiline("a\r\nb");
+        assert_eq!((state.text(), state.cursor()), ("a\nb", 0));
+        state.end();
+        state.replace(None, "\rc\n");
+        assert_eq!(state.text(), "a\nb\nc\n");
+        state.set_selection(2..3, true);
+        assert_eq!((state.selected_text(), state.cursor()), ("b", 2));
     }
 
     #[test]

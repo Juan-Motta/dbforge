@@ -1792,6 +1792,7 @@ name = "dbforge"
 version = "0.3.5"
 dependencies = [
  "anyhow",
+ "chrono",
  "dbforge-core",
  "gpui",
  "percent-encoding",

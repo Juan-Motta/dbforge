@@ -80,3 +80,29 @@ fn joined<T>(result: Result<T, tokio::task::JoinError>) -> T {
         Err(error) => panic!("a core call was cancelled: {error}"),
     }
 }
+
+/// A core over empty directories, for tests that draw views calling it.
+#[cfg(test)]
+pub fn test_backend(cx: &mut App) -> tempfile::TempDir {
+    use dbforge_core::Dirs;
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let config = dir.path().join("config");
+    std::fs::create_dir_all(&config).expect("a config directory");
+    // Secrets in the encrypted file, never the keychain.
+    std::fs::write(config.join("settings.json"), r#"{"credentialStorage":"file"}"#).expect("the settings");
+    let dirs = Dirs { config, data: dir.path().join("data") };
+    let core = {
+        let _runtime = runtime().enter();
+        Core::load(dirs, Arc::new(NoEvents)).expect("a core")
+    };
+    cx.set_global(Backend::new(core));
+    dir
+}
+
+#[cfg(test)]
+struct NoEvents;
+
+#[cfg(test)]
+impl dbforge_core::Events for NoEvents {
+    fn emit(&self, _event: dbforge_core::Event) {}
+}

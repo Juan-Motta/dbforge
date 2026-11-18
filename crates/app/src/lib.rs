@@ -9,10 +9,15 @@ pub mod assets;
 pub mod backend;
 pub mod connections;
 pub mod events;
+pub mod grid;
+pub mod history;
 pub mod i18n;
 pub mod preferences;
+pub mod query;
 pub mod shell;
+pub mod sql;
 pub mod theme;
 pub mod ui;
+pub mod workspace;
 
 pub use app::run;

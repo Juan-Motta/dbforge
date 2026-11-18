@@ -1,4 +1,4 @@
-use super::{ConnectionMessages, Messages};
+use super::{ConnectionMessages, HistoryMessages, Messages, QueryMessages, thousands};
 
 pub(super) const MESSAGES: Messages = Messages {
     connections: "Connections",
@@ -173,5 +173,55 @@ pub(super) const MESSAGES: Messages = Messages {
                       server changes.",
         deleting: "Deleting…",
         delete_connection: "Delete connection",
+    },
+    query: QueryMessages {
+        query_tab: |n| format!("Query {n}"),
+        close_tab: |title| format!("Close {title}"),
+        default_database: "default database",
+        database_to_query: "Database to query",
+        could_not_cancel: |error| format!("Could not cancel: {error}"),
+        history_title: |shortcut| format!("Query history {shortcut}"),
+        history: "History",
+        cancel: "Cancel",
+        cancelling: "Cancelling…",
+        run: "Run",
+        running: "Running…",
+        placeholder: |run| format!("Write a query and press {run} to run it. Select text to run only that part."),
+        rows_affected: |n| format!("{n} rows affected"),
+        rows: |n| format!("{} rows", thousands(n)),
+        rows_showing_first: |n, shown| format!("{} rows · showing first {shown}", thousands(n)),
+        no_statements: "The script had no statements.",
+        result: |n| format!("Result {n}"),
+        stopped_tab: "Error",
+        stopped_after: |n| {
+            if n == 1 {
+                "The script stopped after its first statement, which took effect:".into()
+            } else {
+                format!("The script stopped after {n} statements, which took effect:")
+            }
+        },
+        statement_executed: "Statement executed.",
+        history_panel: HistoryMessages {
+            title: "History",
+            close: "Close history",
+            search_placeholder: "Search SQL text…",
+            errors: "Errors",
+            this_connection: "This connection",
+            all: "All",
+            no_runs_match: "No runs match.",
+            empty_history: "Queries you run appear here.",
+            hint: |click| format!("Click to load into the editor · {click} opens a new tab"),
+            today: "Today",
+            yesterday: "Yesterday",
+            day: |weekday, month, day| {
+                const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                const MONTHS: [&str; 12] =
+                    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                format!("{}, {} {day}", DAYS[weekday as usize % 7], MONTHS[(month as usize + 11) % 12])
+            },
+            outcome_error: "error",
+            statements: |count| format!("{count} statements"),
+            rows: |count| if count == 1 { "1 row".into() } else { format!("{} rows", thousands(count)) },
+        },
     },
 };

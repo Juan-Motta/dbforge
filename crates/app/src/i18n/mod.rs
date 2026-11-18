@@ -5,10 +5,12 @@
 mod connection;
 mod en;
 mod es;
+mod query;
 
 use gpui::{App, Global};
 
 pub use self::connection::ConnectionMessages;
+pub use self::query::{HistoryMessages, QueryMessages, thousands};
 use crate::preferences::{Preferences, keys};
 
 /// The languages DBForge speaks.
@@ -99,6 +101,8 @@ pub struct Messages {
     pub set_aside_ok: &'static str,
     /// The connection dialog and deleting a connection.
     pub connection: ConnectionMessages,
+    /// The query console, its results and the history.
+    pub query: QueryMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

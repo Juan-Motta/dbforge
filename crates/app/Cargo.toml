@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+# Local dates and times for the query history, as the core reads them.
+chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
 dbforge-core = { path = "../core" }
 gpui = "=0.2.2"
 # Percent-encoding for connection URLs, as the web UI's encodeURIComponent did.

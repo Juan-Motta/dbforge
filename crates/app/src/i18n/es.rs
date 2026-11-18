@@ -1,4 +1,4 @@
-use super::{ConnectionMessages, Messages};
+use super::{ConnectionMessages, HistoryMessages, Messages, QueryMessages, thousands};
 
 pub(super) const MESSAGES: Messages = Messages {
     connections: "Conexiones",
@@ -178,5 +178,59 @@ pub(super) const MESSAGES: Messages = Messages {
                       el servidor.",
         deleting: "Eliminando…",
         delete_connection: "Eliminar conexión",
+    },
+    query: QueryMessages {
+        query_tab: |n| format!("Consulta {n}"),
+        close_tab: |title| format!("Cerrar {title}"),
+        default_database: "base de datos por defecto",
+        database_to_query: "Base de datos a consultar",
+        could_not_cancel: |error| format!("No se pudo cancelar: {error}"),
+        history_title: |shortcut| format!("Historial de consultas {shortcut}"),
+        history: "Historial",
+        cancel: "Cancelar",
+        cancelling: "Cancelando…",
+        run: "Ejecutar",
+        running: "Ejecutando…",
+        placeholder: |run| {
+            format!(
+                "Escribe una consulta y pulsa {run} para ejecutarla. Selecciona texto para ejecutar solo esa parte."
+            )
+        },
+        rows_affected: |n| if n == 1 { "1 fila afectada".into() } else { format!("{n} filas afectadas") },
+        rows: |n| if n == 1 { "1 fila".into() } else { format!("{} filas", thousands(n)) },
+        rows_showing_first: |n, shown| format!("{} filas · se muestran las primeras {shown}", thousands(n)),
+        no_statements: "El script no tenía sentencias.",
+        result: |n| format!("Resultado {n}"),
+        stopped_tab: "Error",
+        stopped_after: |n| {
+            if n == 1 {
+                "El script se detuvo después de su primera sentencia, que se aplicó:".into()
+            } else {
+                format!("El script se detuvo después de {n} sentencias, que se aplicaron:")
+            }
+        },
+        statement_executed: "Sentencia ejecutada.",
+        history_panel: HistoryMessages {
+            title: "Historial",
+            close: "Cerrar historial",
+            search_placeholder: "Buscar en el texto SQL…",
+            errors: "Errores",
+            this_connection: "Esta conexión",
+            all: "Todas",
+            no_runs_match: "Ninguna ejecución coincide.",
+            empty_history: "Las consultas que ejecutes aparecen aquí.",
+            hint: |click| format!("Haz clic para cargarla en el editor · {click} la abre en una pestaña nueva"),
+            today: "Hoy",
+            yesterday: "Ayer",
+            day: |weekday, month, day| {
+                const DAYS: [&str; 7] = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+                const MONTHS: [&str; 12] =
+                    ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"];
+                format!("{}, {day} {}", DAYS[weekday as usize % 7], MONTHS[(month as usize + 11) % 12])
+            },
+            outcome_error: "error",
+            statements: |count| format!("{count} sentencias"),
+            rows: |count| if count == 1 { "1 fila".into() } else { format!("{} filas", thousands(count)) },
+        },
     },
 };

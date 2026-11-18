@@ -50,6 +50,8 @@ pub enum ExplorerEvent {
     EditConnection(Connection),
     /// Ask before deleting this connection.
     DeleteConnection(Connection),
+    /// Open a query console on this connection and database, starting with `sql`.
+    NewQuery { connection_id: String, database: Option<String>, sql: Option<String> },
 }
 
 const CONTEXT: &str = "Explorer";
@@ -167,6 +169,33 @@ impl Explorer {
         let id = self.selected.as_deref()?;
         let connection_id = tree::row_of(&self.rows, id).and_then(|row| self.node_at(row))?.connection_id;
         self.connection(&connection_id).map(|(connection, tag)| (connection.clone(), tag.cloned()))
+    }
+
+    /// Where in its connection the selected node is.
+    pub fn selected_path(&self) -> Vec<String> {
+        self.selected
+            .as_deref()
+            .and_then(|id| tree::row_of(&self.rows, id))
+            .and_then(|row| self.node_at(row))
+            .map(|node| node.path)
+            .unwrap_or_default()
+    }
+
+    /// What a "New query" on `node` opens: its database, and for a table its first rows.
+    fn new_query(&self, node: &Node) -> Option<ExplorerEvent> {
+        let (connection, _) = self.connection(&node.connection_id)?;
+        let dialect = crate::sql::Dialect::of(connection.engine)?;
+        let (database, sql) = match node.kind {
+            NodeKind::Connection if connection.engine == Engine::Sqlite => (Some("main".to_owned()), None),
+            NodeKind::Connection => (Some(connection.database.clone()).filter(|database| !database.is_empty()), None),
+            NodeKind::Table | NodeKind::View => {
+                let table = crate::sql::snippets::table_ref(&node.path)?;
+                let sql = crate::sql::snippets::preview_query(dialect, &table);
+                (Some(table.database), Some(sql))
+            }
+            _ => (node.path.first().cloned(), None),
+        };
+        Some(ExplorerEvent::NewQuery { connection_id: node.connection_id.clone(), database, sql })
     }
 
     fn query(&self, cx: &App) -> String {
@@ -446,6 +475,13 @@ impl Explorer {
             .map(|command| {
                 let (this, node) = (this.clone(), node.clone());
                 MenuItem::new(command.label(m), move |_, cx| match command {
+                    NodeCommand::NewQuery => {
+                        let _ = this.update(cx, |this, cx| {
+                            if let Some(event) = this.new_query(&node) {
+                                cx.emit(event);
+                            }
+                        });
+                    }
                     NodeCommand::Refresh => {
                         let _ = this.update(cx, |this, cx| this.refresh(Some(&node.id), cx));
                     }
