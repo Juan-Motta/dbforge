@@ -105,9 +105,9 @@ impl Shell {
                 self.open_connection_dialog(Some(connection.clone()), window, cx)
             }
             ExplorerEvent::DeleteConnection(connection) => self.open_delete_dialog(connection.clone(), window, cx),
-            ExplorerEvent::NewQuery { connection_id, database, sql } => {
+            ExplorerEvent::NewQuery { connection_id, scope, sql } => {
                 self.workspace.update(cx, |workspace, cx| {
-                    workspace.new_query(connection_id, database.clone(), sql.clone(), window, cx);
+                    workspace.new_query(connection_id, scope.clone(), sql.clone(), window, cx);
                 });
             }
             ExplorerEvent::OpenDiagram { connection_id, database, schema } => {
@@ -182,8 +182,8 @@ impl Shell {
     /// screenshots without clicking: `new-connection`, `edit:<id>` or
     /// `delete:<id>`, and for the connection dialog `#ssl` or `#ssh` to show
     /// that section (`edit:<id>#ssh`), or `#engines` to open its engine list.
-    /// `query:<id>` (or `query:<id>/<database>`) opens a query console on
-    /// that connection, with `DBFORGE_SQL`'s script in it, run at once when
+    /// `query:<id>` (or `query:<id>/<database>`, and for Cosmos DB
+    /// `query:<id>/<database>/<container>`) opens a query console on that connection, with `DBFORGE_SQL`'s script in it, run at once when
     /// there is one; `#history` opens the console's history too.
     /// `table:<id>/<path>` opens a table's rows, its path as the explorer
     /// names it (`table:<id>/orders` for SQLite, `<database>/<schema>/<table>`
@@ -193,6 +193,9 @@ impl Shell {
     /// `#menu` a cell's menu, `#edit`/`#date` a cell's editor (text, date);
     /// `#columns`, `#indexes`, `#foreign-keys`, `#triggers`, `#ddl` or
     /// `#diagram` open the table's tab on that view instead of its rows.
+    /// On MongoDB and Cosmos DB, `#documents` shows the rows as documents,
+    /// `#document-edits` with pending edits, `#document-edit` with one open
+    /// in its editor, and `#document-menu` with a document's menu.
     /// `diagram:<id>/<database>/<schema>` opens a schema's ER diagram.
     /// `query:<id>#explain` explains `DBFORGE_SQL`'s statement instead of
     /// running it, and `#analyze` explains it with Analyze on.
@@ -267,16 +270,19 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (connection_id, database) = match target.split_once('/') {
-            Some((id, database)) => (id, Some(database.to_owned())),
-            None => (target, None),
+        // `query:<id>[/<database>[/<container>]]`
+        let mut parts = target.split('/');
+        let connection_id = parts.next().unwrap_or_default();
+        let scope = dbforge_core::query::QueryScope {
+            database: parts.next().map(str::to_owned),
+            container: parts.next().map(str::to_owned),
         };
         let sql = std::env::var("DBFORGE_SQL").ok().filter(|sql| !sql.trim().is_empty());
         let console = self
             .workspace
-            .update(cx, |workspace, cx| workspace.new_query(connection_id, database, sql.clone(), window, cx));
+            .update(cx, |workspace, cx| workspace.new_query(connection_id, scope, sql.clone(), window, cx));
         let Some(console) = console else {
-            return eprintln!("DBFORGE_OPEN: no SQL connection {connection_id}");
+            return eprintln!("DBFORGE_OPEN: no connection with a console {connection_id}");
         };
         console.update(cx, |console, cx| {
             match (sql, explain) {

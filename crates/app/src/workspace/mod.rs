@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use dbforge_core::connections::model::{Connection, Engine};
 use dbforge_core::drivers::{RowFilter, TableRef};
+use dbforge_core::query::QueryScope;
 use gpui::{
     AnyView, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, Styled,
     Subscription, Window, div, px,
@@ -32,10 +33,22 @@ use crate::ui::card;
 /// Space between the strip and the tab's content.
 const GAP: f32 = 10.;
 
-/// Whether `engine` has a SQL console. MongoDB's and Cosmos DB's consoles
-/// and Redis's key browser come with their own features.
-pub fn has_sql_console(engine: Engine) -> bool {
-    matches!(engine, Engine::Postgres | Engine::Mysql | Engine::Mariadb | Engine::Sqlite | Engine::Sqlserver)
+/// Whether `engine` has a query console: SQL, mongosh for MongoDB, SQL
+/// over a container for Cosmos DB. Redis's key browser holds its CLI and
+/// comes with its own feature.
+pub fn has_query_console(engine: Engine) -> bool {
+    engine != Engine::Redis
+}
+
+/// Where "New query" on a connection selected at `path` queries: the
+/// database selected (else the connection's own) and, for Cosmos DB, the
+/// container selected, if any.
+pub fn target_scope(connection: &Connection, path: &[String]) -> QueryScope {
+    let own = Some(connection.database.clone()).filter(|database| !database.is_empty());
+    match connection.engine {
+        Engine::Cosmosdb => QueryScope { database: path.first().cloned().or(own), container: path.get(1).cloned() },
+        _ => QueryScope { database: path.first().cloned(), container: None },
+    }
 }
 
 /// An open console and what the workspace hears from it.
@@ -85,41 +98,42 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Whether "New query" can open now: a SQL connection is selected.
+    /// Whether "New query" can open now: a connection with a console is selected.
     pub fn can_query(&self) -> bool {
-        self.target.as_ref().is_some_and(|(connection, _)| has_sql_console(connection.engine))
+        self.target.as_ref().is_some_and(|(connection, _)| has_query_console(connection.engine))
     }
 
     /// "New query" from the strip's +: a console on the selected connection
-    /// and database.
+    /// and database (and Cosmos DB container).
     pub fn new_query_on_target(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((connection, path)) = self.target.clone() else { return };
-        self.new_query(&connection.id, path.first().cloned(), None, window, cx);
+        self.new_query(&connection.id, target_scope(&connection, &path), None, window, cx);
     }
 
-    /// Opens a console on `connection_id` and `database`, its editor
-    /// starting with `sql`, and gives it the keyboard. Nothing for an engine
-    /// without a SQL console, or a connection that is gone.
+    /// Opens a console on `connection_id` and `scope`, its editor starting
+    /// with `sql`, and gives it the keyboard. Nothing for an engine without
+    /// a console, or a connection that is gone.
     pub fn new_query(
         &mut self,
         connection_id: &str,
-        database: Option<String>,
+        scope: QueryScope,
         sql: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<QueryConsole>> {
         let connection = Backend::global(cx).core().connections().list().into_iter().find(|c| c.id == connection_id)?;
-        if !has_sql_console(connection.engine) {
+        if !has_query_console(connection.engine) {
             return None;
         }
-        let tab = self.tabs.new_query(cx.messages().query.query_tab, connection_id, database, sql).clone();
-        let TabKind::Query { database, initial_sql } = tab.kind else { return None };
+        let tab = self.tabs.new_query(cx.messages().query.query_tab, connection_id, scope, sql).clone();
+        let TabKind::Query { scope, initial_sql } = tab.kind else { return None };
         let console = cx.new(|cx| {
-            QueryConsole::new(tab.id.clone(), tab.connection_id.clone(), connection.engine, database, initial_sql, cx)
+            QueryConsole::new(tab.id.clone(), tab.connection_id.clone(), connection.engine, scope, initial_sql, cx)
         });
         let events = cx.subscribe_in(&console, window, |this, _, event: &ConsoleEvent, window, cx| match event {
             ConsoleEvent::OpenQuery(entry) => {
-                this.new_query(&entry.connection_id, entry.database.clone(), Some(entry.sql.clone()), window, cx);
+                let scope = QueryScope { database: entry.database.clone(), container: entry.container.clone() };
+                this.new_query(&entry.connection_id, scope, Some(entry.sql.clone()), window, cx);
             }
         });
         self.consoles.insert(tab.id, OpenConsole { console: console.clone(), _events: events });
@@ -290,5 +304,40 @@ impl Render for Workspace {
             _ => self.empty(cx).into_any_element(),
         };
         div().flex_1().min_h_0().flex().flex_col().gap(px(GAP)).child(self.strip(cx)).child(content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn connection(engine: Engine, database: &str) -> Connection {
+        serde_json::from_value(serde_json::json!({
+            "id": "c", "name": "c", "engine": engine, "environment": null, "host": "h", "port": 1, "database": database, "username": "u",
+        }))
+        .expect("a connection")
+    }
+
+    fn path(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn opens_every_console_but_redis_s() {
+        assert!([Engine::Postgres, Engine::Mongodb, Engine::Cosmosdb].into_iter().all(has_query_console));
+        assert!(!has_query_console(Engine::Redis));
+    }
+
+    #[test]
+    fn queries_the_selected_database_and_a_cosmos_db_container() {
+        let cosmos = connection(Engine::Cosmosdb, "shop");
+        assert_eq!(
+            target_scope(&cosmos, &path(&["sales", "orders"])),
+            QueryScope { database: Some("sales".into()), container: Some("orders".into()) }
+        );
+        assert_eq!(target_scope(&cosmos, &[]), QueryScope { database: Some("shop".into()), container: None });
+        let mongo = connection(Engine::Mongodb, "shop");
+        assert_eq!(target_scope(&mongo, &path(&["catalog", "items"])).container, None);
+        assert_eq!(target_scope(&mongo, &[]).database, None, "the connection's own database, as before");
     }
 }

@@ -25,7 +25,8 @@ use gpui::{
 
 use self::document::{Document, EditKind};
 use self::element::EditorElement;
-use crate::sql::Dialect;
+pub use self::element::PADDING_TOP;
+use crate::sql::Syntax;
 use crate::sql::completion::{self, Completion, CompletionNames};
 use crate::sql::highlight::{self, LineState};
 use crate::theme::MONO;
@@ -176,7 +177,7 @@ struct Layout {
 
 pub struct CodeEditor {
     document: Document,
-    dialect: Option<Dialect>,
+    syntax: Syntax,
     /// The state each line starts in, for highlighting; kept with the text.
     line_states: Vec<LineState>,
     names: Option<Rc<CompletionNames>>,
@@ -201,11 +202,11 @@ impl Focusable for CodeEditor {
 }
 
 impl CodeEditor {
-    /// An editor holding `text`, highlighted and completed in `dialect` when it has one.
-    pub fn new(text: &str, dialect: Option<Dialect>, cx: &mut Context<Self>) -> Self {
+    /// An editor holding `text`, highlighted (and completed, when it is SQL) as `syntax`.
+    pub fn new(text: &str, syntax: impl Into<Syntax>, cx: &mut Context<Self>) -> Self {
         let mut editor = Self {
             document: Document::new(text),
-            dialect,
+            syntax: syntax.into(),
             line_states: Vec::new(),
             names: None,
             completion: None,
@@ -236,8 +237,19 @@ impl CodeEditor {
         self.document.state().cursor()
     }
 
-    pub fn dialect(&self) -> Option<Dialect> {
-        self.dialect
+    pub fn syntax(&self) -> Syntax {
+        self.syntax
+    }
+
+    /// Puts the caret at byte `offset` (clamped to the text), nothing selected.
+    pub fn place_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
+        let mut offset = offset.min(self.text().len());
+        while !self.text().is_char_boundary(offset) {
+            offset -= 1;
+        }
+        self.document.place(offset, false);
+        self.autoscroll = true;
+        cx.notify();
     }
 
     /// Replaces the whole text (undoably), the caret at its end.
@@ -287,7 +299,7 @@ impl CodeEditor {
     }
 
     fn restyle(&mut self) {
-        self.line_states = match self.dialect {
+        self.line_states = match self.syntax.dialect() {
             Some(dialect) => highlight::line_states(self.text(), dialect),
             None => Vec::new(),
         };
@@ -317,7 +329,7 @@ impl CodeEditor {
 
     /// Shows the suggestions at the caret, or closes them when there are none.
     fn complete(&mut self, explicit: bool, cx: &mut Context<Self>) {
-        let Some(dialect) = self.dialect else { return };
+        let Some(dialect) = self.syntax.dialect() else { return };
         let found = completion::complete(self.text(), self.caret(), dialect, self.names.as_deref(), explicit);
         self.completion = found.map(|completion| OpenCompletion { completion, selected: 0 });
         cx.notify();
@@ -716,12 +728,13 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+    use crate::sql::Dialect;
     use crate::theme::{Appearance, Theme};
 
     #[gpui::test]
     fn types_through_the_input_handler_completes_and_draws(cx: &mut TestAppContext) {
         cx.update(|cx| cx.set_global(Theme::new(Appearance::Dark)));
-        let (editor, cx) = cx.add_window_view(|_, cx| CodeEditor::new("", Some(Dialect::Postgres), cx));
+        let (editor, cx) = cx.add_window_view(|_, cx| CodeEditor::new("", Dialect::Postgres, cx));
         editor.update_in(cx, |editor, window, cx| {
             let schema = CompletionSchema {
                 database: "shop".into(),

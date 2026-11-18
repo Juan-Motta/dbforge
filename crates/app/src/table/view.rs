@@ -3,7 +3,9 @@
 //! with their pending changes (new rows on top, deleted rows struck out,
 //! edited cells marked); the footer counts them, pages through them and,
 //! while changes are pending, offers Preview SQL, Discard and Apply. A new
-//! page keeps the rows shown until it arrives, so nothing flickers.
+//! page keeps the rows shown until it arrives, so nothing flickers. A
+//! document database's rows also show as whole documents (see
+//! [`super::documents`]), switched from the bar while nothing is pending.
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
@@ -14,12 +16,13 @@ use dbforge_core::edit::{apply_changes, preview_changes};
 use dbforge_core::explorer::fetch_rows;
 use gpui::{
     AnyElement, AnyView, AppContext, ClipboardItem, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::cell_actions::is_relational;
 use super::dialogs::{ConfirmDialog, ConfirmEvent, PreviewDialog};
+use super::documents::Documents;
 use super::editors::OpenEditor;
 use super::edits::{Edits, RowRef, key_of, row_keys};
 use super::filter::{Direction, is_filtered, sort_by, sort_of};
@@ -32,7 +35,7 @@ use crate::grid::marks::{CellMark, ColumnMark, GridMarks, RowState, SortMark};
 use crate::grid::selection::Cell;
 use crate::grid::{DataGrid, GridEvent};
 use crate::i18n::Translate;
-use crate::sql::Dialect;
+use crate::sql::Syntax;
 use crate::structure::StructureSource;
 use crate::structure::format::summary;
 use crate::tags::confirming_tag;
@@ -65,6 +68,8 @@ pub(super) struct Page {
     pub has_more: bool,
     /// Each row's key among the edits.
     pub keys: Vec<String>,
+    /// Document databases: each row's whole document, in the engine's own syntax.
+    pub documents: Option<Rc<Vec<SharedString>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,7 +86,7 @@ pub struct TableView {
     pub(super) table: TableRef,
     pub(super) filter: RowFilter,
     page_size: u32,
-    offset: u64,
+    pub(super) offset: u64,
     pub(super) page: Option<Page>,
     error: Option<String>,
     loading: bool,
@@ -95,9 +100,11 @@ pub struct TableView {
     page_sizes: Entity<Select<u32>>,
     inspector: Option<Entity<CellInspector>>,
     pub(super) editor: Option<OpenEditor>,
+    /// The rows as documents, when the engine has them.
+    pub(super) documents: Documents,
     pub(super) menu: Option<(Entity<PopoverMenu>, Point<Pixels>, Subscription)>,
     dialog: Vec<Subscription>,
-    focus: FocusHandle,
+    pub(super) focus: FocusHandle,
     /// Development only: what to show once the first page arrives.
     #[cfg(debug_assertions)]
     pub(super) seed: Option<String>,
@@ -164,6 +171,7 @@ impl TableView {
             page_sizes,
             inspector: None,
             editor: None,
+            documents: Documents::default(),
             menu: None,
             dialog: Vec::new(),
             focus: cx.focus_handle(),
@@ -188,9 +196,13 @@ impl TableView {
         self.loading
     }
 
-    /// The grid takes the keyboard.
+    /// The grid takes the keyboard; the view itself while documents show.
     pub fn focus(&self, window: &mut Window, cx: &gpui::App) {
-        self.grid.read(cx).focus(window);
+        if self.showing_documents() {
+            window.focus(&self.focus);
+        } else {
+            self.grid.read(cx).focus(window);
+        }
     }
 
     /// Rows can be told apart to change them: the table has a primary key.
@@ -240,6 +252,9 @@ impl TableView {
                             rows: Rc::new(page.rows),
                             has_more: page.has_more,
                             keys,
+                            documents: page
+                                .documents
+                                .map(|documents| Rc::new(documents.into_iter().map(SharedString::from).collect())),
                         });
                         this.show_page(same_columns, reload, cx);
                     }
@@ -264,10 +279,12 @@ impl TableView {
         }
     }
 
-    /// A page arrived: the grid shows it, nothing picked, the editor closed.
+    /// A page arrived: the grid (or the documents) shows it, nothing picked,
+    /// the editors closed.
     fn show_page(&mut self, same_columns: bool, reload: bool, cx: &mut Context<Self>) {
         self.editor = None;
         self.menu = None;
+        self.reset_documents(reload);
         let columns = self.columns().to_vec();
         self.grid.update(cx, |grid, cx| {
             if !same_columns {
@@ -489,12 +506,22 @@ impl TableView {
         self.changed(Some(before), cx);
     }
 
-    /// The edits changed: the grid shows them and an old outcome goes.
+    /// The edits changed: the grid and the documents show them and an old outcome goes.
     pub(super) fn changed(&mut self, before: Option<Vec<RowRef>>, cx: &mut Context<Self>) {
         if self.status != Status::Idle && self.status != Status::Applying {
             self.status = Status::Idle;
         }
+        self.remeasure_documents();
         self.refresh_grid(before, cx);
+    }
+
+    /// The bar's +: a new document while documents show, else a new row.
+    fn add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.showing_documents() {
+            self.new_document(window, cx);
+        } else {
+            self.add_row(cx);
+        }
     }
 
     pub(super) fn add_row(&mut self, cx: &mut Context<Self>) {
@@ -532,10 +559,14 @@ impl TableView {
         self.changed(None, cx);
     }
 
-    /// Marks the selected rows for deletion (or unmarks them); new rows are simply removed.
+    /// Marks the selected rows (or documents) for deletion, or unmarks
+    /// them; new ones are simply removed.
     pub(super) fn delete_selected(&mut self, cx: &mut Context<Self>) {
         if !self.editable() || self.applying() {
             return;
+        }
+        if self.showing_documents() {
+            return self.delete_selected_documents(cx);
         }
         let rows: Vec<RowRef> =
             self.grid.read(cx).selection().rows().into_iter().filter_map(|row| self.row_ref(row)).collect();
@@ -667,8 +698,9 @@ impl TableView {
 
     fn show_preview(&mut self, statements: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         let note = preview_note(self.engine, cx);
-        let dialect = Dialect::of(self.engine);
-        let dialog = cx.new(|cx| PreviewDialog::new(&statements, dialect, note, cx));
+        // The changes as the engine's console writes them: mongosh for MongoDB.
+        let syntax = Syntax::console(self.engine);
+        let dialog = cx.new(|cx| PreviewDialog::new(&statements, syntax, note, cx));
         dialog.read(cx).focus(window);
         let dismiss = cx.subscribe_in(&dialog, window, |this, _, _: &DismissEvent, window, cx| {
             this.close_dialog(window, cx);
@@ -681,6 +713,9 @@ impl TableView {
         let before = self.row_refs();
         self.edits = Edits::default();
         self.editor = None;
+        self.documents.editor = None;
+        self.documents.selected.clear();
+        self.remeasure_documents();
         self.status = Status::Idle;
         self.grid.update(cx, |grid, cx| grid.selection_mut(cx).clear());
         self.refresh_grid(Some(before), cx);
@@ -786,18 +821,36 @@ impl TableView {
 
     // Drawing
 
-    /// The row actions, for the page's top bar: add, delete, reload, inspect.
+    /// The row actions, for the page's top bar: the documents' switch (on
+    /// a document database), add, delete, reload, inspect.
     pub fn actions(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = *cx.theme();
         let m = &cx.messages().table;
         let editable = self.editable();
         let pending = self.edits.has_edits();
-        let has_selection = !self.grid.read(cx).selection().is_empty();
+        let documents = self.showing_documents();
+        let has_selection =
+            if documents { !self.documents.selected.is_empty() } else { !self.grid.read(cx).selection().is_empty() };
         let action = |id: &'static str, name: &'static str, label: &'static str, on: bool, active: bool| {
             icon_button(&theme, id, name, on, active).tooltip(Tooltip::text(label))
         };
         let label = |text: &'static str| if editable { text } else { m.no_key };
-        let add = action("add-row", "plus", label(m.add_row), editable && !self.applying(), false);
+        let switch = self.has_documents().then(|| {
+            let label = if pending {
+                m.switch_views_locked
+            } else if documents {
+                m.show_as_table
+            } else {
+                m.show_as_documents
+            };
+            action("toggle-documents", "code", label, !pending, documents)
+                .when(!pending, |switch| {
+                    switch.on_click(cx.listener(|this, _, window, cx| this.toggle_documents(window, cx)))
+                })
+                .into_any_element()
+        });
+        let add_label = label(if documents { m.add_document } else { m.add_row });
+        let add = action("add-row", "plus", add_label, editable && !self.applying(), false);
         let delete = action(
             "delete-rows",
             "trash",
@@ -806,22 +859,32 @@ impl TableView {
             false,
         );
         let reload = action("reload-rows", "refresh", m.reload_rows, !self.loading && !pending, false);
-        let inspect = action("inspect-cell", "view", m.inspect_cell, true, self.inspector.is_some());
-        vec![
-            add.when(editable && !self.applying(), |add| add.on_click(cx.listener(|this, _, _, cx| this.add_row(cx))))
-                .into_any_element(),
-            delete
-                .when(editable && has_selection && !self.applying(), |delete| {
-                    delete.on_click(cx.listener(|this, _, _, cx| this.delete_selected(cx)))
+        let inspect_label = if documents { m.inspect_in_table } else { m.inspect_cell };
+        let inspect = action("inspect-cell", "view", inspect_label, !documents, self.inspector.is_some() && !documents);
+        switch
+            .into_iter()
+            .chain([
+                add.when(editable && !self.applying(), |add| {
+                    add.on_click(cx.listener(|this, _, window, cx| this.add(window, cx)))
                 })
                 .into_any_element(),
-            reload
-                .when(!self.loading && !pending, |reload| {
-                    reload.on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
-                })
-                .into_any_element(),
-            inspect.on_click(cx.listener(|this, _, window, cx| this.toggle_inspector(window, cx))).into_any_element(),
-        ]
+                delete
+                    .when(editable && has_selection && !self.applying(), |delete| {
+                        delete.on_click(cx.listener(|this, _, _, cx| this.delete_selected(cx)))
+                    })
+                    .into_any_element(),
+                reload
+                    .when(!self.loading && !pending, |reload| {
+                        reload.on_click(cx.listener(|this, _, _, cx| this.reload(cx)))
+                    })
+                    .into_any_element(),
+                inspect
+                    .when(!documents, |inspect| {
+                        inspect.on_click(cx.listener(|this, _, window, cx| this.toggle_inspector(window, cx)))
+                    })
+                    .into_any_element(),
+            ])
+            .collect()
     }
 
     fn footer(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -884,9 +947,16 @@ impl TableView {
             }
             _ => {}
         }
-        let selected = self.grid.read(cx).selection().cells().len();
-        if selected > 1 {
-            footer = footer.child(pill(&(m.selection_hint)(selected), theme.accent).flex_none());
+        if self.showing_documents() {
+            let selected = self.documents.selected.len();
+            if selected > 1 {
+                footer = footer.child(pill(&(m.documents_selected)(selected), theme.accent).flex_none());
+            }
+        } else {
+            let selected = self.grid.read(cx).selection().cells().len();
+            if selected > 1 {
+                footer = footer.child(pill(&(m.selection_hint)(selected), theme.accent).flex_none());
+            }
         }
         let rows = self.rows().len() as u64;
         let range = if self.loading {
@@ -945,7 +1015,7 @@ impl TableView {
         footer.into_any_element()
     }
 
-    fn content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         if let Some(error) = &self.error {
             return div()
@@ -958,6 +1028,9 @@ impl TableView {
                 .text_color(theme.err)
                 .child(error.clone())
                 .into_any_element();
+        }
+        if self.showing_documents() {
+            return self.render_documents(cx);
         }
         div()
             .flex_1()
@@ -977,7 +1050,24 @@ impl TableView {
         self.loading = false;
         self.error = None;
         let keys = row_keys(&rows, &columns);
-        self.page = Some(Page { columns, rows: Rc::new(rows), has_more: true, keys });
+        self.page = Some(Page { columns, rows: Rc::new(rows), has_more: true, keys, documents: None });
+        self.show_page(false, false, cx);
+    }
+
+    /// Shows `rows` with their `documents` as if they had been read.
+    pub(super) fn show_documents_page(
+        &mut self,
+        columns: Vec<Column>,
+        rows: Vec<Vec<Option<String>>>,
+        documents: Vec<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.request += 1;
+        self.loading = false;
+        self.error = None;
+        let keys = row_keys(&rows, &columns);
+        let documents = Some(Rc::new(documents.into_iter().map(SharedString::from).collect()));
+        self.page = Some(Page { columns, rows: Rc::new(rows), has_more: false, keys, documents });
         self.show_page(false, false, cx);
     }
 
@@ -1027,6 +1117,9 @@ impl Render for TableView {
                 if this.editor.is_some() {
                     // Saves the cell first; a second ⌘S applies everything.
                     this.finish_editor(window, cx);
+                } else if this.documents.editor.is_some() {
+                    // Keeps the document first, once the database can read it.
+                    this.keep_document(window, cx);
                 } else {
                     this.request_apply(window, cx);
                 }
@@ -1052,7 +1145,7 @@ impl Render for TableView {
                             .when(self.loading && self.page.is_some(), |content| content.opacity(0.75))
                             .child(self.content(cx)),
                     )
-                    .children(self.inspector.clone()),
+                    .children(self.inspector.clone().filter(|_| !self.showing_documents())),
             )
             .child(self.footer(cx))
             .children(editor)

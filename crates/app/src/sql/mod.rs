@@ -1,8 +1,10 @@
 //! SQL as the console reads it, apart from drawing it: each engine's dialect,
 //! highlighting, where statements start and end, completion and the snippets
-//! the explorer writes. Pure functions, so they are tested without a window.
+//! the explorer writes; and the documents of MongoDB and Cosmos DB, which are
+//! highlighted but not SQL. Pure functions, so they are tested without a window.
 
 pub mod completion;
+pub mod document;
 pub mod highlight;
 pub mod snippets;
 pub mod statements;
@@ -64,5 +66,69 @@ impl Dialect {
     /// `$$ … $$` and `$tag$ … $tag$` strings, as in function bodies.
     fn dollar_strings(self) -> bool {
         self == Self::Postgres
+    }
+}
+
+/// What an editor's text is, for highlighting and completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Syntax {
+    /// Text, neither highlighted nor completed.
+    #[default]
+    Plain,
+    /// SQL in a dialect: highlighted and completed.
+    Sql(Dialect),
+    /// JSON: Cosmos DB's documents.
+    Json,
+    /// mongosh's JavaScript: MongoDB's documents and console.
+    Mongosh,
+}
+
+impl Syntax {
+    /// What `engine`'s console is written in: mongosh for MongoDB, else its SQL.
+    pub fn console(engine: Engine) -> Self {
+        match engine {
+            Engine::Mongodb => Self::Mongosh,
+            engine => Dialect::of(engine).map_or(Self::Plain, Self::Sql),
+        }
+    }
+
+    /// What `engine`'s documents are written in: mongosh's literals, or JSON.
+    pub fn documents(engine: Engine) -> Self {
+        if engine == Engine::Mongodb { Self::Mongosh } else { Self::Json }
+    }
+
+    /// The SQL dialect, when it is SQL.
+    pub fn dialect(self) -> Option<Dialect> {
+        match self {
+            Self::Sql(dialect) => Some(dialect),
+            _ => None,
+        }
+    }
+}
+
+impl From<Dialect> for Syntax {
+    fn from(dialect: Dialect) -> Self {
+        Self::Sql(dialect)
+    }
+}
+
+impl From<Option<Dialect>> for Syntax {
+    fn from(dialect: Option<Dialect>) -> Self {
+        dialect.map_or(Self::Plain, Self::Sql)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_each_engine_s_console_and_documents_in_its_own_syntax() {
+        assert_eq!(Syntax::console(Engine::Mongodb), Syntax::Mongosh);
+        assert_eq!(Syntax::console(Engine::Cosmosdb), Syntax::Sql(Dialect::Cosmos));
+        assert_eq!(Syntax::console(Engine::Mariadb), Syntax::Sql(Dialect::Mysql));
+        assert_eq!(Syntax::console(Engine::Redis), Syntax::Plain);
+        assert_eq!(Syntax::documents(Engine::Mongodb), Syntax::Mongosh);
+        assert_eq!(Syntax::documents(Engine::Cosmosdb), Syntax::Json);
     }
 }

@@ -9,7 +9,8 @@ use crate::grid::selection::Cell;
 
 impl TableView {
     /// What to show once the rows arrive: `edits`, `review`, `prod`,
-    /// `inspect`, `menu`, `edit` or `date`.
+    /// `inspect`, `menu`, `edit` or `date`; on a document database,
+    /// `documents`, `document-edits`, `document-edit` or `document-menu`.
     pub fn seed_for_development(&mut self, seed: String) {
         self.seed = Some(seed);
     }
@@ -18,6 +19,10 @@ impl TableView {
     pub(super) fn run_seed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.page.is_none() || self.is_loading() || self.seed.is_none() {
             return;
+        }
+        if self.seed.as_deref().is_some_and(|seed| seed.starts_with("document")) {
+            let Some(seed) = self.seed.take() else { return };
+            return self.seed_documents(&seed, window, cx);
         }
         if self.grid.read(cx).cell_bounds(Cell::new(0, 0)).is_none() {
             cx.notify();

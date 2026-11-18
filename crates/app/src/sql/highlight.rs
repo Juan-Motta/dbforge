@@ -11,6 +11,8 @@ use super::Dialect;
 pub enum Kind {
     Plain,
     Keyword,
+    /// A document's key: coloured as a keyword, not bold.
+    Key,
     /// A type name: `integer`, `varchar`.
     Type,
     String,

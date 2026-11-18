@@ -85,6 +85,10 @@ pub struct Messages {
     pub tables: &'static str,
     pub views: &'static str,
     pub copy_name: &'static str,
+    /// A MongoDB collection's menu: copy the mongosh that reads its first documents.
+    pub copy_find: &'static str,
+    /// A MongoDB collection's menu: copy the mongosh that counts its documents.
+    pub copy_count: &'static str,
     /// A table's or view's menu: open its rows.
     pub open_data: &'static str,
     /// A table's or view's menu: open its structure.

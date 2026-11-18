@@ -1,6 +1,6 @@
-//! The SQL console: an editor, the results of its runs or the plan of an
+//! The query console (SQL, mongosh for MongoDB, SQL over a container for
+//! Cosmos DB): an editor, the results of its runs or the plan of an
 //! explained statement, and the history.
-//! MongoDB's and Cosmos DB's consoles come with their own features.
 
 mod console;
 pub mod plan;

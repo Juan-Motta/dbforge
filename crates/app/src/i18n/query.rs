@@ -7,6 +7,9 @@ pub struct QueryMessages {
     pub close_tab: fn(&str) -> String,
     pub default_database: &'static str,
     pub database_to_query: &'static str,
+    /// Cosmos DB: the container picker's tooltip, and what it says when the database has none.
+    pub container_to_query: &'static str,
+    pub no_containers: &'static str,
     pub could_not_cancel: fn(&str) -> String,
     /// The History button's tooltip, with its shortcut.
     pub history_title: fn(&str) -> String,

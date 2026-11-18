@@ -4,12 +4,15 @@
 //! then copy its URL, duplicate, edit, delete. A table's or view's start
 //! with opening its rows, its structure, then a new query, as the web UI's
 //! do; a schema's (or a database that is its own schema) offer its ER
-//! diagram after the new query.
+//! diagram after the new query. A MongoDB collection's copies also offer its
+//! mongosh `find()` and `countDocuments()`.
+
+use dbforge_core::connections::model::Engine;
 
 use super::tree::{Node, NodeKind};
 use crate::connections::engine::is_relational;
 use crate::i18n::Messages;
-use crate::workspace::has_sql_console;
+use crate::workspace::has_query_console;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeCommand {
@@ -27,6 +30,10 @@ pub enum NodeCommand {
     RefreshConnection,
     /// Puts the node's name on the clipboard.
     CopyName,
+    /// Puts the mongosh that reads a collection's first documents on the clipboard.
+    CopyFind,
+    /// Puts the mongosh that counts a collection's documents on the clipboard.
+    CopyCount,
     /// Puts the connection's URL, without its password, on the clipboard.
     CopyConnectionUrl,
     /// Saves a copy of the connection, its secrets included.
@@ -47,6 +54,8 @@ impl NodeCommand {
             Self::Refresh => m.refresh,
             Self::RefreshConnection => m.refresh_connection,
             Self::CopyName => m.copy_name,
+            Self::CopyFind => m.copy_find,
+            Self::CopyCount => m.copy_count,
             Self::CopyConnectionUrl => m.copy_connection_url,
             Self::DuplicateConnection => m.duplicate_connection,
             Self::EditConnection => m.edit_connection,
@@ -61,7 +70,7 @@ impl NodeCommand {
             Self::ShowDiagram => "diagram",
             Self::NewQuery => "code",
             Self::Refresh | Self::RefreshConnection => "refresh",
-            Self::CopyName => "copy",
+            Self::CopyName | Self::CopyFind | Self::CopyCount => "copy",
             Self::CopyConnectionUrl => "external",
             Self::DuplicateConnection => "duplicate",
             Self::EditConnection => "edit",
@@ -71,10 +80,10 @@ impl NodeCommand {
 }
 
 /// The commands `node`'s menu offers, in order. A new query comes first
-/// wherever the engine has a SQL console.
+/// wherever the engine has a console.
 pub fn commands(node: &Node) -> Vec<NodeCommand> {
     use NodeCommand::*;
-    let query = has_sql_console(node.engine) && node.kind != NodeKind::Folder;
+    let query = has_query_console(node.engine) && node.kind != NodeKind::Folder;
     let mut commands =
         if matches!(node.kind, NodeKind::Table | NodeKind::View) { vec![OpenData, ViewStructure] } else { Vec::new() };
     if query {
@@ -89,9 +98,11 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
             vec![Refresh, CopyName, CopyConnectionUrl, DuplicateConnection, EditConnection, DeleteConnection]
         }
         NodeKind::Folder => vec![Refresh, RefreshConnection],
-        NodeKind::Database | NodeKind::Schema | NodeKind::Table | NodeKind::View => {
-            vec![Refresh, RefreshConnection, CopyName]
+        NodeKind::Database | NodeKind::Schema => vec![Refresh, RefreshConnection, CopyName],
+        NodeKind::Table | NodeKind::View if node.engine == Engine::Mongodb => {
+            vec![Refresh, RefreshConnection, CopyName, CopyFind, CopyCount]
         }
+        NodeKind::Table | NodeKind::View => vec![Refresh, RefreshConnection, CopyName],
     });
     commands
 }
@@ -115,8 +126,6 @@ pub fn diagram_target(node: &Node) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use dbforge_core::connections::model::Engine;
-
     use super::*;
     use crate::i18n::Language;
 
@@ -160,8 +169,11 @@ mod tests {
             assert_eq!(commands(&sql_node(kind)), [NewQuery, Refresh, RefreshConnection, CopyName], "{kind:?}");
         }
         assert_eq!(commands(&sql_node(NodeKind::Folder)), [Refresh, RefreshConnection]);
-        let mongo = Node { engine: Engine::Mongodb, ..sql_node(NodeKind::Database) };
-        assert!(!commands(&mongo).contains(&NewQuery), "MongoDB's console comes later");
+        for engine in [Engine::Mongodb, Engine::Cosmosdb] {
+            let database = Node { engine, ..sql_node(NodeKind::Database) };
+            assert_eq!(commands(&database)[0], NewQuery, "{engine:?}");
+        }
+        assert!(!commands(&node(NodeKind::Database)).contains(&NewQuery), "Redis has no console");
         assert_eq!(NodeCommand::NewQuery.label(Language::Es.messages()), "Nueva consulta");
     }
 
@@ -174,8 +186,12 @@ mod tests {
                 [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName],
                 "{kind:?}"
             );
-            let mongo = Node { engine: Engine::Mongodb, ..sql_node(kind) };
-            assert_eq!(commands(&mongo), [OpenData, ViewStructure, Refresh, RefreshConnection, CopyName], "{kind:?}");
+            let cosmos = Node { engine: Engine::Cosmosdb, ..sql_node(kind) };
+            assert_eq!(
+                commands(&cosmos),
+                [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName],
+                "{kind:?}"
+            );
         }
         assert_eq!(OpenData.label(Language::En.messages()), "Open data");
         assert_eq!(OpenData.label(Language::Es.messages()), "Abrir datos");
@@ -215,5 +231,17 @@ mod tests {
         assert_eq!(NodeCommand::RefreshConnection.label(Language::Es.messages()), "Actualizar conexión");
         assert_eq!(NodeCommand::DuplicateConnection.label(Language::En.messages()), "Duplicate connection");
         assert_eq!(NodeCommand::DeleteConnection.label(Language::Es.messages()), "Eliminar conexión");
+    }
+
+    #[test]
+    fn copies_a_collection_s_find_and_count_in_mongosh() {
+        use NodeCommand::*;
+        let collection = at(NodeKind::Table, Engine::Mongodb, &["shop", "orders"]);
+        assert_eq!(
+            commands(&collection),
+            [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName, CopyFind, CopyCount]
+        );
+        assert_eq!(CopyFind.label(Language::En.messages()), "Copy find() query");
+        assert_eq!(CopyCount.label(Language::Es.messages()), "Copiar consulta countDocuments()");
     }
 }

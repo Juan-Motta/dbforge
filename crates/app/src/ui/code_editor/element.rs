@@ -148,7 +148,7 @@ impl Element for EditorElement {
             let runs = runs(
                 &text,
                 editor.line_states.get(row),
-                editor.dialect,
+                editor.syntax,
                 &theme,
                 marked.as_ref().map(|marked| {
                     marked.start.saturating_sub(range.start).min(text.len())
@@ -245,13 +245,14 @@ impl Element for EditorElement {
 fn runs(
     text: &str,
     state: Option<&LineState>,
-    dialect: Option<crate::sql::Dialect>,
+    syntax: crate::sql::Syntax,
     theme: &Theme,
     marked: Option<std::ops::Range<usize>>,
 ) -> Vec<TextRun> {
     let run = |len: usize, kind: Kind| {
         let (color, weight, style) = match kind {
             Kind::Keyword => (theme.kw, FontWeight::SEMIBOLD, FontStyle::Normal),
+            Kind::Key => (theme.kw, FontWeight::NORMAL, FontStyle::Normal),
             Kind::Type | Kind::Function => (theme.func, FontWeight::NORMAL, FontStyle::Normal),
             Kind::String => (theme.str, FontWeight::NORMAL, FontStyle::Normal),
             Kind::Number => (theme.num, FontWeight::NORMAL, FontStyle::Normal),
@@ -267,10 +268,15 @@ fn runs(
             strikethrough: None,
         }
     };
-    let mut runs: Vec<TextRun> = match (dialect, state) {
-        (Some(dialect), Some(state)) => {
+    use crate::sql::{Syntax, document};
+    let mut runs: Vec<TextRun> = match (syntax, state) {
+        (Syntax::Sql(dialect), Some(state)) => {
             tokenize(text, state.clone(), dialect).0.into_iter().map(|span| run(span.range.len(), span.kind)).collect()
         }
+        (Syntax::Json | Syntax::Mongosh, _) => document::spans(text, syntax == Syntax::Mongosh)
+            .into_iter()
+            .map(|span| run(span.range.len(), span.kind))
+            .collect(),
         _ => vec![run(text.len(), Kind::Plain)],
     };
     if text.is_empty() {

@@ -1,6 +1,8 @@
 //! SQL the explorer writes for a table: its name as a console on its
-//! database names it, and the query a "New query" on it starts with.
+//! database names it, and the query a "New query" on it starts with
+//! (mongosh's for a MongoDB collection).
 
+use dbforge_core::connections::model::Engine;
 use dbforge_core::drivers::TableRef;
 
 use super::Dialect;
@@ -45,8 +47,26 @@ pub fn qualified_name(dialect: Dialect, table: &TableRef) -> String {
     format!("{}.{}", quote(dialect, &table.schema), quote(dialect, &table.name))
 }
 
-/// The first rows of a table, as the engine's console writes it.
-pub fn preview_query(dialect: Dialect, table: &TableRef) -> String {
+/// The first rows of a table, as `engine`'s console writes it; `None` for
+/// an engine without a console (Redis).
+pub fn preview_query(engine: Engine, table: &TableRef) -> Option<String> {
+    if engine == Engine::Mongodb {
+        return Some(format!("db.getCollection({}).find({{}}).limit({PREVIEW_ROWS})", collection(table)));
+    }
+    Some(sql_preview(Dialect::of(engine)?, table))
+}
+
+/// A collection's count in mongosh.
+pub fn count_query(table: &TableRef) -> String {
+    format!("db.getCollection({}).countDocuments({{}})", collection(table))
+}
+
+/// A collection's name as mongosh writes it: a JSON string.
+fn collection(table: &TableRef) -> String {
+    serde_json::Value::from(table.name.as_str()).to_string()
+}
+
+fn sql_preview(dialect: Dialect, table: &TableRef) -> String {
     match dialect {
         // The console runs on the container it was opened with.
         Dialect::Cosmos => format!("SELECT TOP {PREVIEW_ROWS} * FROM c"),
@@ -88,12 +108,20 @@ mod tests {
     #[test]
     fn asks_each_engine_for_its_first_hundred_rows() {
         let users = table("shop", "public", "users");
-        assert_eq!(preview_query(Dialect::Postgres, &users), "SELECT * FROM \"public\".\"users\" LIMIT 100;");
+        let preview = |engine, table: &TableRef| preview_query(engine, table).unwrap();
+        assert_eq!(preview(Engine::Postgres, &users), "SELECT * FROM \"public\".\"users\" LIMIT 100;");
+        assert_eq!(preview(Engine::Sqlserver, &table("shop", "dbo", "users")), "SELECT TOP 100 * FROM [dbo].[users];");
         assert_eq!(
-            preview_query(Dialect::Sqlserver, &table("shop", "dbo", "users")),
-            "SELECT TOP 100 * FROM [dbo].[users];"
+            preview(Engine::Mongodb, &table("shop", "shop", "my-orders")),
+            "db.getCollection(\"my-orders\").find({}).limit(100)"
         );
-        assert_eq!(preview_query(Dialect::Cosmos, &users), "SELECT TOP 100 * FROM c");
+        assert_eq!(preview(Engine::Cosmosdb, &users), "SELECT TOP 100 * FROM c");
+        assert_eq!(preview_query(Engine::Redis, &users), None);
+    }
+
+    #[test]
+    fn counts_a_collection_in_mongosh() {
+        assert_eq!(count_query(&table("shop", "shop", "a\"b")), "db.getCollection(\"a\\\"b\").countDocuments({})");
     }
 
     #[test]

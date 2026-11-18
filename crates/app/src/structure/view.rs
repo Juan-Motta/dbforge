@@ -16,7 +16,7 @@ use super::format::{KeyKind, column_keys};
 use super::sections::Section;
 use super::source::StructureSource;
 use crate::i18n::{StructureMessages, Translate};
-use crate::sql::Dialect;
+use crate::sql::{Dialect, Syntax};
 use crate::theme::{ActiveTheme, MONO, Theme};
 use crate::ui::sheet::{one_line, sheet, text_width};
 use crate::ui::{CodeEditor, icon, pill};
@@ -97,7 +97,7 @@ impl StructureView {
     /// The sections of `source`'s structure, on an `engine` connection.
     pub fn new(source: Entity<StructureSource>, engine: Engine, section: Section, cx: &mut Context<Self>) -> Self {
         let ddl = cx.new(|cx| {
-            let mut editor = CodeEditor::new("", definition_dialect(engine), cx);
+            let mut editor = CodeEditor::new("", definition_syntax(engine), cx);
             editor.set_read_only(true, cx);
             editor
         });
@@ -323,12 +323,12 @@ impl StructureView {
     }
 }
 
-/// The dialect a definition is highlighted in: SQL, except Cosmos DB's,
-/// which is JSON, and MongoDB's, which has none.
-fn definition_dialect(engine: Engine) -> Option<Dialect> {
+/// What a definition is highlighted as: SQL, except Cosmos DB's, which is
+/// JSON, and MongoDB's, which is mongosh.
+fn definition_syntax(engine: Engine) -> Syntax {
     match engine {
-        Engine::Cosmosdb => None,
-        engine => Dialect::of(engine),
+        Engine::Cosmosdb | Engine::Mongodb => Syntax::documents(engine),
+        engine => Dialect::of(engine).into(),
     }
 }
 

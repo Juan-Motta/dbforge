@@ -1,7 +1,10 @@
-//! A SQL console: the database it queries, the editor, the results of its
-//! last run below it and, on ⌘Y, the history beside them. Each console has
-//! its own core session (a connection kept open between runs, so a
-//! transaction or a `SET` carries over); closing its tab closes it.
+//! A query console: the database it queries (and for Cosmos DB the
+//! container), the editor, the results of its last run below it and, on
+//! ⌘Y, the history beside them. Each console has its own core session (a
+//! connection kept open between runs, so a transaction or a `SET` carries
+//! over); closing its tab closes it. SQL engines' consoles complete the
+//! database's names; MongoDB's takes mongosh, Cosmos DB's SQL over one
+//! container, picked beside the database.
 //!
 //! ⌘↵ (Ctrl+Enter) and the Run button run the selection, or the whole
 //! script, as the web console did. Explain shows the plan of the same text
@@ -26,9 +29,10 @@ use super::plan::parse_plan;
 use super::results::{LastRun, ResultsPanel};
 use super::shortcuts;
 use crate::backend::Backend;
+use crate::connections::engine::is_relational;
 use crate::history::{HistoryEvent, HistoryPanel};
 use crate::i18n::Translate;
-use crate::sql::Dialect;
+use crate::sql::Syntax;
 use crate::sql::completion::CompletionNames;
 use crate::sql::statements::changes_structure;
 use crate::theme::{ActiveTheme, color};
@@ -70,11 +74,18 @@ pub struct QueryConsole {
     session_id: String,
     connection_id: String,
     engine: Engine,
-    dialect: Dialect,
+    syntax: Syntax,
     /// The database queried; the connection's own when `None`.
     database: Option<String>,
     /// The databases the picker offers; `None` while they load.
     databases: Option<Vec<String>>,
+    /// Cosmos DB: the database's containers; `None` while they load, empty
+    /// without a database.
+    containers: Option<Vec<String>>,
+    /// Cosmos DB: the container picked; until one is, the database's first.
+    picked_container: Option<String>,
+    /// Counts container listings, so a stale one is dropped.
+    containers_generation: u64,
     editor: Entity<CodeEditor>,
     results: Entity<ResultsPanel>,
     history: Option<Entity<HistoryPanel>>,
@@ -84,7 +95,8 @@ pub struct QueryConsole {
     /// Explain runs the statement to measure it (in a transaction rolled back).
     analyze: bool,
     cancel_error: Option<String>,
-    database_menu: Option<(Entity<PopoverMenu>, Point<Pixels>, Subscription)>,
+    /// The database's or the container's picker, open.
+    picker_menu: Option<(Entity<PopoverMenu>, Point<Pixels>, Subscription)>,
     /// Counts completion-name loads, so a stale one is dropped.
     names_generation: u64,
     focus: FocusHandle,
@@ -100,25 +112,28 @@ impl Focusable for QueryConsole {
 }
 
 impl QueryConsole {
-    /// A console `session_id` on `connection_id` (a SQL engine) and
-    /// `database`, its editor starting with `sql`.
+    /// A console `session_id` on `connection_id` (an `engine` connection)
+    /// and `scope`, its editor starting with `sql`.
     pub fn new(
         session_id: String,
         connection_id: String,
         engine: Engine,
-        database: Option<String>,
+        scope: QueryScope,
         sql: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let dialect = Dialect::of(engine).unwrap_or(Dialect::Postgres);
-        let editor = cx.new(|cx| CodeEditor::new(sql.as_deref().unwrap_or(""), Some(dialect), cx));
+        let syntax = Syntax::console(engine);
+        let editor = cx.new(|cx| CodeEditor::new(sql.as_deref().unwrap_or(""), syntax, cx));
         let mut console = Self {
             session_id,
             connection_id,
             engine,
-            dialect,
-            database,
+            syntax,
+            database: scope.database,
             databases: None,
+            containers: None,
+            picked_container: scope.container,
+            containers_generation: 0,
             editor,
             results: cx.new(ResultsPanel::new),
             history: None,
@@ -126,12 +141,13 @@ impl QueryConsole {
             explaining: false,
             analyze: false,
             cancel_error: None,
-            database_menu: None,
+            picker_menu: None,
             names_generation: 0,
             focus: cx.focus_handle(),
             _subscriptions: Vec::new(),
         };
         console.load_databases(cx);
+        console.load_containers(cx);
         console.load_names(cx);
         console
     }
@@ -175,8 +191,22 @@ impl QueryConsole {
         self.editor.read(cx).focus(window);
     }
 
-    fn scope(&self) -> QueryScope {
-        QueryScope { database: self.database.clone(), container: None }
+    /// Where the next run goes: the database and, for Cosmos DB, the container.
+    pub fn scope(&self) -> QueryScope {
+        QueryScope { database: self.database.clone(), container: self.container() }
+    }
+
+    /// Cosmos DB: the container queried, the picked one or else the database's first.
+    pub fn container(&self) -> Option<String> {
+        if self.engine != Engine::Cosmosdb {
+            return None;
+        }
+        self.picked_container.clone().or_else(|| self.containers.as_ref()?.first().cloned())
+    }
+
+    /// Cosmos DB: the containers the picker offers; `None` while they load.
+    pub fn containers(&self) -> Option<&[String]> {
+        self.containers.as_deref()
     }
 
     /// The databases the picker offers. A SQLite file is its one database.
@@ -203,11 +233,42 @@ impl QueryConsole {
         .detach();
     }
 
-    /// Reads the names the editor completes; a failure leaves keywords alone.
+    /// Cosmos DB: the containers of the database queried, for the picker.
+    /// Without a database there is nothing to list; a failed listing offers none.
+    fn load_containers(&mut self, cx: &mut Context<Self>) {
+        if self.engine != Engine::Cosmosdb {
+            return;
+        }
+        self.containers_generation += 1;
+        let generation = self.containers_generation;
+        let Some(database) = self.database.clone().filter(|database| !database.is_empty()) else {
+            self.containers = Some(Vec::new());
+            return;
+        };
+        self.containers = None;
+        let connection = self.connection_id.clone();
+        let listing = Backend::global(cx).spawn(cx, move |core| async move {
+            list_objects(core.connections(), core.statement_log(), connection, vec![database]).await
+        });
+        cx.spawn(async move |this, cx| {
+            let containers = listing.await.map(|objects| objects.into_iter().map(|o| o.name).collect());
+            let _ = this.update(cx, |this, cx| {
+                if this.containers_generation == generation {
+                    this.containers = Some(containers.unwrap_or_default());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Reads the names the editor completes; a failure leaves keywords
+    /// alone. Only SQL engines' tables have names to complete.
     fn load_names(&mut self, cx: &mut Context<Self>) {
         self.names_generation += 1;
+        let Some(dialect) = self.syntax.dialect().filter(|_| is_relational(self.engine)) else { return };
         let generation = self.names_generation;
-        let (connection, database, dialect) = (self.connection_id.clone(), self.database.clone(), self.dialect);
+        let (connection, database) = (self.connection_id.clone(), self.database.clone());
         let reading = Backend::global(cx).spawn(cx, move |core| async move {
             completion_schema(core.connections(), core.statement_log(), connection, database).await
         });
@@ -223,13 +284,22 @@ impl QueryConsole {
         .detach();
     }
 
-    /// Queries `database` from the next run on.
-    fn pick_database(&mut self, database: Option<String>, cx: &mut Context<Self>) {
+    /// Queries `database` from the next run on; a container picked in the
+    /// previous one is not in it.
+    pub fn pick_database(&mut self, database: Option<String>, cx: &mut Context<Self>) {
         if self.database != database {
             self.database = database;
+            self.picked_container = None;
+            self.load_containers(cx);
             self.load_names(cx);
             cx.notify();
         }
+    }
+
+    /// Cosmos DB: queries `container` from the next run on.
+    pub fn pick_container(&mut self, container: String, cx: &mut Context<Self>) {
+        self.picked_container = Some(container);
+        cx.notify();
     }
 
     /// What ⌘↵ and Run run: the selection, or the whole script.
@@ -432,13 +502,43 @@ impl QueryConsole {
                 .checked(checked)
             })
             .collect();
+        self.open_picker(items, position, window, cx);
+    }
+
+    fn open_container_menu(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(containers) = self.containers.clone() else { return };
+        let this = cx.entity().downgrade();
+        let current = self.container();
+        let items = containers
+            .into_iter()
+            .map(|name| {
+                let this = this.clone();
+                let checked = current.as_ref() == Some(&name);
+                MenuItem::new(name.clone(), move |_, cx| {
+                    let name = name.clone();
+                    let _ = this.update(cx, |this, cx| this.pick_container(name, cx));
+                })
+                .checked(checked)
+            })
+            .collect();
+        self.open_picker(items, position, window, cx);
+    }
+
+    /// Shows a picker's choices under it; closing it gives the editor the keyboard back.
+    fn open_picker(
+        &mut self,
+        items: Vec<MenuItem>,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let menu = cx.new(|cx| PopoverMenu::new(items, window, cx));
         let closing = cx.subscribe_in(&menu, window, |this, _, _: &gpui::DismissEvent, window, cx| {
-            this.database_menu = None;
+            this.picker_menu = None;
             this.focus(window, cx);
             cx.notify();
         });
-        self.database_menu = Some((menu, position, closing));
+        self.picker_menu = Some((menu, position, closing));
         cx.notify();
     }
 
@@ -465,12 +565,49 @@ impl QueryConsole {
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                    if this.database_menu.is_none() {
+                    if this.picker_menu.is_none() {
                         this.open_database_menu(event.position + point(px(0.), px(12.)), window, cx);
                     }
                 }),
             )
             .into_any_element()
+    }
+
+    /// Cosmos DB: the container queried, picked from the database's.
+    fn container_picker(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.engine != Engine::Cosmosdb {
+            return None;
+        }
+        let theme = *cx.theme();
+        let m = &cx.messages().query;
+        let containers = self.containers.as_deref();
+        let none = containers.is_some_and(<[String]>::is_empty);
+        let name = if none { m.no_containers.to_owned() } else { self.container().unwrap_or_default() };
+        let pickable = !self.busy() && containers.is_some_and(|containers| !containers.is_empty());
+        let picker = capsule(&theme)
+            .id("container-picker")
+            .max_w(px(240.))
+            .text_color(if none { theme.text2 } else { theme.text })
+            .tooltip(Tooltip::text(m.container_to_query))
+            .child(icon("table", theme.text3, 14.))
+            .child(div().min_w_0().truncate().child(name))
+            .child(icon("down", theme.text3, 12.));
+        if !pickable {
+            return Some(picker.into_any_element());
+        }
+        Some(
+            picker
+                .cursor_pointer()
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                        if this.picker_menu.is_none() {
+                            this.open_container_menu(event.position + point(px(0.), px(12.)), window, cx);
+                        }
+                    }),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Run, or Cancel while a run goes; both in one slot, so nothing moves.
@@ -557,6 +694,7 @@ impl QueryConsole {
             .items_center()
             .gap(px(8.))
             .child(self.database_picker(cx))
+            .children(self.container_picker(cx))
             .child(div().flex_1())
             // The cancel error keeps to one line, cut short, so nothing moves.
             .children(self.cancel_error.as_ref().map(|error| {
@@ -630,7 +768,7 @@ impl Render for QueryConsole {
                         }),
                     ),
             )
-            .children(self.database_menu.as_ref().map(|(menu, position, _)| popover(menu.clone(), *position)))
+            .children(self.picker_menu.as_ref().map(|(menu, position, _)| popover(menu.clone(), *position)))
     }
 }
 
@@ -657,7 +795,14 @@ mod tests {
         });
         let sql = "SELECT 1;\nSELECT id, name FROM users;\nSELECT nope";
         let (console, cx) = cx.add_window_view(|_, cx| {
-            QueryConsole::new("query:1".into(), "gone".into(), Engine::Sqlite, None, Some(sql.into()), cx)
+            QueryConsole::new(
+                "query:1".into(),
+                "gone".into(),
+                Engine::Sqlite,
+                QueryScope::default(),
+                Some(sql.into()),
+                cx,
+            )
         });
         console.update_in(cx, |console, window, cx| {
             // Nothing selected: ⌘↵ and Run run the whole script.
@@ -700,7 +845,14 @@ mod tests {
             test_backend(cx)
         });
         let (console, cx) = cx.add_window_view(|_, cx| {
-            QueryConsole::new("query:1".into(), "gone".into(), Engine::Sqlite, None, Some("SELECT 1".into()), cx)
+            QueryConsole::new(
+                "query:1".into(),
+                "gone".into(),
+                Engine::Sqlite,
+                QueryScope::default(),
+                Some("SELECT 1".into()),
+                cx,
+            )
         });
         let plan = serde_json::json!([{
             "Plan": {
@@ -732,6 +884,65 @@ mod tests {
             let sql = console.text_to_run(cx);
             console.explain(sql, cx);
             assert!(!console.is_explaining());
+        });
+    }
+
+    #[gpui::test]
+    fn queries_a_cosmos_db_container_picked_beside_the_database(cx: &mut TestAppContext) {
+        let _dir = cx.update(|cx| {
+            cx.set_global(Theme::new(Appearance::Dark));
+            cx.set_global(Locale(Language::Es));
+            test_backend(cx)
+        });
+        let scope = QueryScope { database: Some("shop".into()), container: Some("orders".into()) };
+        let (console, cx) = cx.add_window_view(|_, cx| {
+            QueryConsole::new("query:1".into(), "gone".into(), Engine::Cosmosdb, scope.clone(), None, cx)
+        });
+        console.read_with(cx, |console, cx| {
+            assert_eq!(console.scope(), scope, "the container it was opened on");
+            assert_eq!(console.editor().read(cx).syntax(), Syntax::Sql(crate::sql::Dialect::Cosmos));
+        });
+        cx.update(|window, cx| window.draw(cx).clear());
+        // Another database: the container picked in the previous one is not in it.
+        console.update(cx, |console, cx| console.pick_database(Some("sales".into()), cx));
+        console.read_with(cx, |console, _| assert_eq!(console.scope().container, None));
+        // Its listing fails (the connection is gone): no containers to pick.
+        for _ in 0..400 {
+            cx.run_until_parked();
+            if console.read_with(cx, |console, _| console.containers().is_some()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        console.read_with(cx, |console, _| assert_eq!(console.containers(), Some(&[][..])));
+        cx.update(|window, cx| window.draw(cx).clear());
+        console.update(cx, |console, cx| console.pick_container("orders".into(), cx));
+        console.read_with(cx, |console, _| assert_eq!(console.scope().container.as_deref(), Some("orders")));
+    }
+
+    #[gpui::test]
+    fn writes_mongodb_s_console_in_mongosh(cx: &mut TestAppContext) {
+        let _dir = cx.update(|cx| {
+            cx.set_global(Theme::new(Appearance::Light));
+            cx.set_global(Locale(Language::En));
+            test_backend(cx)
+        });
+        let find = "db.getCollection(\"orders\").find({}).limit(100) // the first ones";
+        let (console, cx) = cx.add_window_view(|_, cx| {
+            QueryConsole::new(
+                "query:1".into(),
+                "gone".into(),
+                Engine::Mongodb,
+                QueryScope::default(),
+                Some(find.into()),
+                cx,
+            )
+        });
+        cx.update(|window, cx| window.draw(cx).clear());
+        console.read_with(cx, |console, cx| {
+            assert_eq!(console.editor().read(cx).syntax(), Syntax::Mongosh);
+            assert_eq!(console.scope(), QueryScope::default(), "no container outside Cosmos DB");
+            assert_eq!(console.text_to_run(cx), find);
         });
     }
 }

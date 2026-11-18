@@ -9,7 +9,7 @@ use gpui::{
 };
 
 use crate::i18n::Translate;
-use crate::sql::Dialect;
+use crate::sql::Syntax;
 use crate::table::edits::Counts;
 use crate::theme::{ActiveTheme, MONO};
 use crate::ui::{CodeEditor, button, glass, icon, primary_button};
@@ -39,12 +39,12 @@ impl Focusable for PreviewDialog {
 }
 
 impl PreviewDialog {
-    /// `statements` as the core wrote them, each ended with `;`.
-    pub fn new(statements: &[String], dialect: Option<Dialect>, note: &'static str, cx: &mut Context<Self>) -> Self {
+    /// `statements` as the core wrote them, each ended with `;`, highlighted as `syntax`.
+    pub fn new(statements: &[String], syntax: Syntax, note: &'static str, cx: &mut Context<Self>) -> Self {
         let text: Vec<String> =
             statements.iter().map(|line| if line.ends_with(';') { line.clone() } else { format!("{line};") }).collect();
         let code = cx.new(|cx| {
-            let mut editor = CodeEditor::new(&text.join("\n"), dialect, cx);
+            let mut editor = CodeEditor::new(&text.join("\n"), syntax, cx);
             editor.set_read_only(true, cx);
             editor
         });

@@ -1,6 +1,7 @@
 //! Pending edits to a table, kept until the user applies or discards them.
 //! Loaded rows are identified by their primary key, so edits survive a
-//! reload of the page; new rows by a number of their own.
+//! reload of the page; new rows by a number of their own. Document
+//! databases also rewrite a row's whole document, or add new ones.
 
 use std::collections::BTreeMap;
 
@@ -30,6 +31,20 @@ pub struct NewRow {
     pub values: BTreeMap<String, Option<String>>,
 }
 
+/// A loaded row's whole document, rewritten.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Replacement {
+    pub key: Key,
+    pub document: String,
+}
+
+/// A new document, in the engine's own syntax.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewDocument {
+    pub id: u64,
+    pub document: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Edits {
     /// Changed cells of loaded rows, by row key.
@@ -38,6 +53,10 @@ pub struct Edits {
     pub deletes: BTreeMap<String, Key>,
     /// New rows, newest first.
     pub inserts: Vec<NewRow>,
+    /// Document databases: loaded rows whose whole document was rewritten, by row key.
+    pub replacements: BTreeMap<String, Replacement>,
+    /// Document databases: new documents, newest first.
+    pub new_documents: Vec<NewDocument>,
 }
 
 /// How many rows the edits change, by kind.
@@ -99,13 +118,47 @@ impl Edits {
         }
     }
 
-    /// Marks a loaded row for deletion, or unmarks it. Its cell edits are dropped either way.
+    /// Marks a loaded row for deletion, or unmarks it. Its cell edits and
+    /// rewritten document are dropped either way.
     pub fn toggle_delete(&mut self, key: &Key) {
         let id = row_key(key);
         if self.deletes.remove(&id).is_none() {
             self.deletes.insert(id.clone(), key.clone());
         }
         self.updates.remove(&id);
+        self.replacements.remove(&id);
+    }
+
+    /// Rewrites a loaded row's whole document; writing back what was loaded drops the change.
+    pub fn replace_document(&mut self, key: &Key, document: &str, original: &str) {
+        let id = row_key(key);
+        if document == original {
+            self.replacements.remove(&id);
+        } else {
+            self.replacements.insert(id, Replacement { key: key.clone(), document: document.to_owned() });
+        }
+    }
+
+    /// Starts a new document with `document` as its text. Its id.
+    pub fn add_document(&mut self, document: &str) -> u64 {
+        let id = self.new_documents.iter().map(|new| new.id).max().unwrap_or(0) + 1;
+        self.new_documents.insert(0, NewDocument { id, document: document.to_owned() });
+        id
+    }
+
+    pub fn edit_new_document(&mut self, id: u64, document: &str) {
+        if let Some(new) = self.new_documents.iter_mut().find(|new| new.id == id) {
+            new.document = document.to_owned();
+        }
+    }
+
+    pub fn remove_new_document(&mut self, id: u64) {
+        self.new_documents.retain(|new| new.id != id);
+    }
+
+    /// The new document `id`'s text, if it is still there.
+    pub fn new_document(&self, id: u64) -> Option<&str> {
+        self.new_documents.iter().find(|new| new.id == id).map(|new| new.document.as_str())
     }
 
     pub fn is_deleted(&self, id: &str) -> bool {
@@ -142,7 +195,11 @@ impl Edits {
     }
 
     pub fn counts(&self) -> Counts {
-        Counts { updated: self.updates.len(), inserted: self.inserts.len(), deleted: self.deletes.len() }
+        Counts {
+            updated: self.updates.len() + self.replacements.len(),
+            inserted: self.inserts.len() + self.new_documents.len(),
+            deleted: self.deletes.len(),
+        }
     }
 
     pub fn has_edits(&self) -> bool {
@@ -150,17 +207,24 @@ impl Edits {
     }
 
     /// The changes in the order they run: deletes first so a new row can
-    /// reuse a deleted row's unique value, then updates, then inserts oldest first.
+    /// reuse a deleted row's unique value, then updates and rewritten
+    /// documents, then new rows and new documents, oldest first.
     pub fn to_changes(&self) -> Vec<RowChange> {
         let deletes = self.deletes.values().map(|key| RowChange::Delete { key: key.clone() });
         let updates = self
             .updates
             .values()
             .map(|update| RowChange::Update { key: update.key.clone(), values: update.values.clone() });
+        let replacements = self.replacements.values().map(|replacement| RowChange::Replace {
+            key: replacement.key.clone(),
+            document: replacement.document.clone(),
+        });
         let inserts = self.inserts.iter().rev().map(|row| RowChange::Insert {
             values: row.values.iter().map(|(column, value)| (column.clone(), value.clone().into())).collect(),
         });
-        deletes.chain(updates).chain(inserts).collect()
+        let new_documents =
+            self.new_documents.iter().rev().map(|new| RowChange::InsertDocument { document: new.document.clone() });
+        deletes.chain(updates).chain(replacements).chain(inserts).chain(new_documents).collect()
     }
 
     /// The cell at `row` and `column` as the grid shows it; `None` when it is no longer there.
@@ -359,5 +423,44 @@ mod tests {
             values: BTreeMap::from([("name".to_owned(), text("Ann")), ("email".to_owned(), CellValue::Null)])
         }));
         assert_eq!(id, 2);
+    }
+
+    #[test]
+    fn replaces_a_document_until_it_is_written_back_as_loaded() {
+        let mut edits = Edits::default();
+        edits.replace_document(&key("1"), r#"{"id": "1", "n": 2}"#, r#"{"id": "1", "n": 1}"#);
+        assert_eq!(edits.counts(), Counts { updated: 1, inserted: 0, deleted: 0 });
+        assert_eq!(
+            edits.to_changes(),
+            [RowChange::Replace { key: key("1"), document: r#"{"id": "1", "n": 2}"#.into() }]
+        );
+        edits.replace_document(&key("1"), r#"{"id": "1", "n": 1}"#, r#"{"id": "1", "n": 1}"#);
+        assert!(!edits.has_edits());
+    }
+
+    #[test]
+    fn drops_a_replacement_when_the_row_is_marked_for_deletion() {
+        let mut edits = Edits::default();
+        edits.replace_document(&key("1"), "{}", r#"{"id": "1"}"#);
+        edits.toggle_delete(&key("1"));
+        assert_eq!(edits.counts(), Counts { updated: 0, inserted: 0, deleted: 1 });
+    }
+
+    #[test]
+    fn adds_new_documents_sent_oldest_first_after_everything_else() {
+        let mut edits = Edits::default();
+        edits.add_document("{}");
+        edits.add_document("{}");
+        edits.edit_new_document(1, r#"{"first": true}"#);
+        edits.replace_document(&key("1"), r#"{"id": "1"}"#, r#"{"id": "1", "old": true}"#);
+        let changes = edits.to_changes();
+        assert!(matches!(
+            changes[..],
+            [RowChange::Replace { .. }, RowChange::InsertDocument { .. }, RowChange::InsertDocument { .. }]
+        ));
+        assert_eq!(changes[1], RowChange::InsertDocument { document: r#"{"first": true}"#.into() });
+        edits.remove_new_document(2);
+        assert_eq!(edits.counts(), Counts { updated: 1, inserted: 1, deleted: 0 });
+        assert_eq!(edits.new_document(1), Some(r#"{"first": true}"#));
     }
 }

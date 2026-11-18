@@ -20,7 +20,7 @@ use crate::i18n::Translate;
 use crate::ui::{MenuItem, PopoverMenu};
 
 /// What a menu item does to the table's rows.
-type Action = Box<dyn Fn(&mut TableView, &mut Window, &mut Context<TableView>)>;
+pub(super) type Action = Box<dyn Fn(&mut TableView, &mut Window, &mut Context<TableView>)>;
 
 impl TableView {
     /// The row as it stands, edits included; DEFAULT reads as NULL.

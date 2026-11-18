@@ -12,6 +12,7 @@ use std::rc::Rc;
 use dbforge_core::connections::model::{Connection, Engine};
 use dbforge_core::connections::tags::Tag;
 use dbforge_core::explorer;
+use dbforge_core::query::QueryScope;
 use gpui::{
     App, AppContext, BorrowAppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     KeyBinding, Pixels, Point, ScrollStrategy, Subscription, UniformListScrollHandle, Window, actions,
@@ -54,8 +55,9 @@ pub enum ExplorerEvent {
     EditConnection(Connection),
     /// Ask before deleting this connection.
     DeleteConnection(Connection),
-    /// Open a query console on this connection and database, starting with `sql`.
-    NewQuery { connection_id: String, database: Option<String>, sql: Option<String> },
+    /// Open a query console on this connection and scope (a database, a
+    /// Cosmos DB container), starting with `sql`.
+    NewQuery { connection_id: String, scope: QueryScope, sql: Option<String> },
     /// Open the ER diagram of this schema.
     OpenDiagram { connection_id: String, database: String, schema: String },
 }
@@ -187,21 +189,29 @@ impl Explorer {
             .unwrap_or_default()
     }
 
-    /// What a "New query" on `node` opens: its database, and for a table its first rows.
+    /// What a "New query" on `node` opens: its database, and for a table
+    /// its first rows (a Cosmos DB console runs on the container itself).
     fn new_query(&self, node: &Node) -> Option<ExplorerEvent> {
         let (connection, _) = self.connection(&node.connection_id)?;
-        let dialect = crate::sql::Dialect::of(connection.engine)?;
-        let (database, sql) = match node.kind {
-            NodeKind::Connection if connection.engine == Engine::Sqlite => (Some("main".to_owned()), None),
-            NodeKind::Connection => (Some(connection.database.clone()).filter(|database| !database.is_empty()), None),
+        let engine = connection.engine;
+        if !crate::workspace::has_query_console(engine) {
+            return None;
+        }
+        let on = |database: Option<String>| QueryScope { database, container: None };
+        let (scope, sql) = match node.kind {
+            NodeKind::Connection if engine == Engine::Sqlite => (on(Some("main".to_owned())), None),
+            NodeKind::Connection => {
+                (on(Some(connection.database.clone()).filter(|database| !database.is_empty())), None)
+            }
             NodeKind::Table | NodeKind::View => {
                 let table = crate::sql::snippets::table_ref(&node.path)?;
-                let sql = crate::sql::snippets::preview_query(dialect, &table);
-                (Some(table.database), Some(sql))
+                let sql = crate::sql::snippets::preview_query(engine, &table);
+                let container = (engine == Engine::Cosmosdb).then(|| table.name.clone());
+                (QueryScope { database: Some(table.database), container }, sql)
             }
-            _ => (node.path.first().cloned(), None),
+            _ => (on(node.path.first().cloned()), None),
         };
-        Some(ExplorerEvent::NewQuery { connection_id: node.connection_id.clone(), database, sql })
+        Some(ExplorerEvent::NewQuery { connection_id: node.connection_id.clone(), scope, sql })
     }
 
     fn query(&self, cx: &App) -> String {
@@ -515,6 +525,17 @@ impl Explorer {
                         let _ = this.update(cx, |this, cx| this.refresh(Some(&node.connection_id), cx));
                     }
                     NodeCommand::CopyName => cx.write_to_clipboard(ClipboardItem::new_string(node.name.clone())),
+                    NodeCommand::CopyFind | NodeCommand::CopyCount => {
+                        let Some(table) = crate::sql::snippets::table_ref(&node.path) else { return };
+                        let text = if command == NodeCommand::CopyFind {
+                            crate::sql::snippets::preview_query(node.engine, &table)
+                        } else {
+                            Some(crate::sql::snippets::count_query(&table))
+                        };
+                        if let Some(text) = text {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        }
+                    }
                     NodeCommand::CopyConnectionUrl => {
                         let _ = this.update(cx, |this, cx| {
                             if let Some((connection, _)) = this.connection(&node.connection_id) {

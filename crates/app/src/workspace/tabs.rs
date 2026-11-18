@@ -5,12 +5,15 @@
 //! foreign key followed); a schema's diagram opens once too. Key browsers
 //! join with their feature.
 
+use dbforge_core::query::QueryScope;
+
 /// What a tab shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TabKind {
-    /// A query console on `database` (the connection's own when `None`),
-    /// starting with `initial_sql` (a query reopened from the history).
-    Query { database: Option<String>, initial_sql: Option<String> },
+    /// A query console on `scope` (its database, the connection's own when
+    /// it has none, and a Cosmos DB container), starting with `initial_sql`
+    /// (a query reopened from the history).
+    Query { scope: QueryScope, initial_sql: Option<String> },
     /// A table's or view's rows, opened with `filter` (a `WHERE` condition) when it has one.
     Table { table: TableName, filter: Option<String> },
     /// A schema's ER diagram.
@@ -25,7 +28,7 @@ pub struct TableName {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Tab {
     /// Unique among the tabs; a console's id is also its core session's.
     pub id: String,
@@ -34,7 +37,7 @@ pub struct Tab {
     pub kind: TabKind,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Tabs {
     tabs: Vec<Tab>,
     active: Option<String>,
@@ -61,7 +64,7 @@ impl Tabs {
         &mut self,
         title: fn(usize) -> String,
         connection_id: &str,
-        database: Option<String>,
+        scope: QueryScope,
         initial_sql: Option<String>,
     ) -> &Tab {
         self.queries_created += 1;
@@ -70,7 +73,7 @@ impl Tabs {
             id: format!("query:{n}"),
             title: title(n),
             connection_id: connection_id.to_owned(),
-            kind: TabKind::Query { database, initial_sql },
+            kind: TabKind::Query { scope, initial_sql },
         };
         self.open(tab)
     }
@@ -148,6 +151,10 @@ mod tests {
     use super::*;
     use crate::i18n::Language;
 
+    fn on(database: &str) -> QueryScope {
+        QueryScope { database: Some(database.into()), container: None }
+    }
+
     fn titles(tabs: &Tabs) -> Vec<&str> {
         tabs.tabs().iter().map(|tab| tab.title.as_str()).collect()
     }
@@ -159,8 +166,8 @@ mod tests {
     #[test]
     fn numbers_query_tabs_and_shows_the_new_one() {
         let mut tabs = Tabs::default();
-        tabs.new_query(en, "pg", Some("shop".into()), None);
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", on("shop"), None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         assert_eq!(titles(&tabs), ["Query 1", "Query 2"]);
         assert_eq!(tabs.active_id(), Some("query:2"));
     }
@@ -168,23 +175,26 @@ mod tests {
     #[test]
     fn titles_query_tabs_in_the_interface_language() {
         let mut tabs = Tabs::default();
-        tabs.new_query(Language::Es.messages().query.query_tab, "pg", None, None);
+        tabs.new_query(Language::Es.messages().query.query_tab, "pg", QueryScope::default(), None);
         assert_eq!(titles(&tabs), ["Consulta 1"]);
     }
 
     #[test]
     fn can_prefill_a_query_tab_from_the_history() {
         let mut tabs = Tabs::default();
-        let tab = tabs.new_query(en, "pg", Some("shop".into()), Some("SELECT 1".into()));
-        assert_eq!(tab.kind, TabKind::Query { database: Some("shop".into()), initial_sql: Some("SELECT 1".into()) });
+        let tab = tabs.new_query(en, "pg", on("shop"), Some("SELECT 1".into()));
+        assert_eq!(tab.kind, TabKind::Query { scope: on("shop"), initial_sql: Some("SELECT 1".into()) });
+        let scope = QueryScope { database: Some("shop".into()), container: Some("orders".into()) };
+        let tab = tabs.new_query(en, "cosmos", scope.clone(), None);
+        assert_eq!(tab.kind, TabKind::Query { scope, initial_sql: None }, "a Cosmos DB console keeps its container");
     }
 
     #[test]
     fn keeps_numbering_after_a_query_tab_closes() {
         let mut tabs = Tabs::default();
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         tabs.close("query:1");
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         assert_eq!(titles(&tabs), ["Query 2"]);
     }
 
@@ -192,7 +202,7 @@ mod tests {
     fn shows_the_right_neighbour_then_the_left_when_the_shown_tab_closes() {
         let mut tabs = Tabs::default();
         for _ in 0..3 {
-            tabs.new_query(en, "pg", None, None);
+            tabs.new_query(en, "pg", QueryScope::default(), None);
         }
         tabs.activate("query:2");
         assert_eq!(tabs.close("query:2").map(|tab| tab.id), Some("query:2".into()));
@@ -207,8 +217,8 @@ mod tests {
     #[test]
     fn keeps_the_shown_tab_when_another_one_closes() {
         let mut tabs = Tabs::default();
-        tabs.new_query(en, "pg", None, None);
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         tabs.close("query:1");
         assert_eq!(tabs.active_id(), Some("query:2"));
         tabs.activate("nope");
@@ -223,7 +233,7 @@ mod tests {
     fn opens_a_table_once_and_shows_its_tab_again() {
         let mut tabs = Tabs::default();
         tabs.open_table("pg", orders(), None);
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         let tab = tabs.open_table("pg", orders(), None).clone();
         assert_eq!((tab.id.as_str(), tab.title.as_str()), ("table:pg:shop.public.orders", "orders"));
         assert_eq!(titles(&tabs), ["orders", "Query 1"]);
@@ -249,7 +259,7 @@ mod tests {
         let tab = tabs.open_diagram(Language::En.messages().diagram.tab, "pg", "shop", "public").clone();
         assert_eq!((tab.id.as_str(), tab.title.as_str()), ("diagram:pg:shop.public", "public diagram"));
         assert_eq!(tab.kind, TabKind::Diagram { database: "shop".into(), schema: "public".into() });
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         tabs.open_diagram(es, "pg", "shop", "public");
         assert_eq!(titles(&tabs), ["public diagram", "Query 1"], "opening it again shows its tab");
         assert_eq!(tabs.active_id(), Some("diagram:pg:shop.public"));
@@ -259,9 +269,9 @@ mod tests {
     #[test]
     fn closes_all_tabs_of_a_connection() {
         let mut tabs = Tabs::default();
-        tabs.new_query(en, "pg", None, None);
-        tabs.new_query(en, "other", None, None);
-        tabs.new_query(en, "pg", None, None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
+        tabs.new_query(en, "other", QueryScope::default(), None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
         let closed = tabs.close_connection("pg");
         assert_eq!(closed.len(), 2);
         assert_eq!(titles(&tabs), ["Query 2"]);

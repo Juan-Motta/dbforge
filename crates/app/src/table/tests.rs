@@ -5,6 +5,7 @@ use dbforge_core::connections::model::{ConnectionInput, Engine};
 use dbforge_core::drivers::{CellValue, Column, RowFilter, TableRef};
 use gpui::{AnyView, AppContext, Entity, TestAppContext, VisualTestContext, point, px};
 
+use super::documents::{DocumentId, DocumentState};
 use super::edits::Counts;
 use super::page::{TablePage, TablePageEvent};
 use super::view::TableView;
@@ -270,4 +271,130 @@ impl gpui::Render for Host {
         use gpui::{ParentElement, Styled};
         gpui::div().size_full().flex().flex_col().child(self.0.clone())
     }
+}
+
+/// A window with a MongoDB collection open as documents: three loaded, keyed by `_id`.
+fn open_documents(cx: &mut TestAppContext) -> (Entity<TableView>, &mut VisualTestContext) {
+    let (host, cx) = cx.add_window_view(|window, cx| {
+        let orders = TableRef { database: "shop".into(), schema: "shop".into(), name: "orders".into() };
+        let page =
+            cx.new(|cx| TablePage::new("gone".into(), Engine::Mongodb, orders, RowFilter::default(), window, cx));
+        Host(page.into())
+    });
+    cx.run_until_parked();
+    let page = host.read_with(cx, |host, _| host.0.clone().downcast::<TablePage>().expect("a table page"));
+    let data = page.read_with(cx, |page, _| page.data().clone());
+    data.update(cx, |data, cx| {
+        let columns = vec![column("_id", "objectId", true), column("total", "int", false)];
+        let ids = ["65a0", "65a1", "65a2"];
+        let rows = ids.iter().enumerate().map(|(n, id)| vec![Some(id.to_string()), Some(n.to_string())]).collect();
+        let documents = ids
+            .iter()
+            .enumerate()
+            .map(|(n, id)| format!("{{\n  \"_id\": ObjectId(\"{id}\"),\n  \"total\": {n}\n}}"))
+            .collect();
+        data.show_documents_page(columns, rows, documents, cx);
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
+    (data, cx)
+}
+
+fn loaded(data: &TableView, index: usize) -> DocumentId {
+    data.document_cards().iter().filter(|card| matches!(card.id, DocumentId::Loaded(_))).nth(index).unwrap().id.clone()
+}
+
+#[gpui::test]
+fn shows_a_collection_as_documents_and_edits_them_one_at_a_time(cx: &mut TestAppContext) {
+    let _dir = setup(cx);
+    let (data, cx) = open_documents(cx);
+    data.update_in(cx, |data, window, cx| {
+        assert!(data.has_documents() && !data.showing_documents(), "the table shows first");
+        data.toggle_documents(window, cx);
+        assert!(data.showing_documents());
+        let labels: Vec<String> = data.document_cards().into_iter().map(|card| card.label).collect();
+        assert_eq!(labels, ["#1", "#2", "#3"]);
+        // Written back as it was, a document is no change.
+        let first = loaded(data, 0);
+        data.open_document(first, window, cx);
+        assert!(data.document_editor().is_some());
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
+    // ⌘↵ in the editor keeps it.
+    cx.dispatch_action(super::documents::KeepDocument);
+    data.update_in(cx, |data, window, cx| {
+        assert!(data.document_editor().is_none() && !data.edits().has_edits());
+        // Picked together, deleted together; the views stay as they are while it is pending.
+        let (second, third) = (loaded(data, 1), loaded(data, 2));
+        data.select_document(second, false, cx);
+        data.select_document(third, true, cx);
+        assert_eq!(data.selected_documents().len(), 2);
+        data.delete_selected(cx);
+        assert_eq!(data.edits().counts(), Counts { updated: 0, inserted: 0, deleted: 2 });
+        let states: Vec<_> = data.document_cards().into_iter().map(|card| card.state).collect();
+        assert_eq!(states, [None, Some(DocumentState::Deleted), Some(DocumentState::Deleted)]);
+        data.toggle_documents(window, cx);
+        assert!(data.showing_documents(), "apply or discard first");
+        // A deleted document doesn't open.
+        let second = loaded(data, 1);
+        data.open_document(second, window, cx);
+        assert!(data.document_editor().is_none());
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
+    data.update_in(cx, |data, window, cx| {
+        data.discard(cx);
+        // A new document opens on its empty line; cancelled before it was kept, it is gone.
+        data.new_document(window, cx);
+        let editor = data.document_editor().expect("open").editor.clone();
+        assert_eq!(editor.read(cx).caret(), 4);
+        assert_eq!(data.document_cards()[0].state, Some(DocumentState::New));
+        assert_eq!(data.edits().counts().inserted, 1);
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
+    // Escape, which the editor passes on, drops it.
+    cx.dispatch_action(crate::ui::code_editor::Escape);
+    data.update_in(cx, |data, _, _| {
+        assert!(data.document_editor().is_none());
+        assert!(!data.edits().has_edits());
+        assert_eq!(data.document_cards().len(), 3);
+    });
+}
+
+#[gpui::test]
+fn keeps_a_document_open_with_what_the_database_said_of_it(cx: &mut TestAppContext) {
+    let _dir = setup(cx);
+    let (data, cx) = open_documents(cx);
+    data.update_in(cx, |data, window, cx| {
+        data.toggle_documents(window, cx);
+        let first = loaded(data, 0);
+        data.open_document(first, window, cx);
+        let editor = data.document_editor().expect("open").editor.clone();
+        editor.update(cx, |editor, cx| editor.set_text("{\"_id\": ObjectId(\"65a0\"), \"total\": 9}", cx));
+        data.keep_document(window, cx);
+        assert!(data.document_editor().is_some_and(|open| open.is_saving()));
+    });
+    // The check runs on the core's runtime; the connection is gone, so it fails.
+    let mut problem = None;
+    for _ in 0..400 {
+        cx.run_until_parked();
+        problem =
+            data.read_with(cx, |data, _| data.document_editor().and_then(|open| open.problem()).map(str::to_owned));
+        if problem.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(problem.is_some(), "the editor says why");
+    cx.update(|window, cx| window.draw(cx).clear());
+    data.read_with(cx, |data, _| {
+        let open = data.document_editor().expect("still open, the draft kept");
+        assert!(!open.is_saving());
+        assert!(!data.edits().has_edits(), "nothing pending until the database can read it");
+    });
+    // A menu on a card that isn't picked picks it.
+    data.update_in(cx, |data, window, cx| {
+        let second = loaded(data, 1);
+        data.open_document_menu(second.clone(), point(px(40.), px(80.)), window, cx);
+        assert!(data.selected_documents().contains(&second));
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
 }
