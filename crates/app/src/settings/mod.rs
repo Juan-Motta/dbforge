@@ -3,7 +3,7 @@
 //! something is picked. Appearance (the theme), Language, Tags, Passwords
 //! (where credentials are kept), Export and import (the export folder and
 //! PostgreSQL's tools, from `dump`), Backup (from `backup`) and About live
-//! here; Agents (MCP) joins with its feature ([`Section::available`]).
+//! here, and Agents (MCP) from `mcp`.
 
 mod dialog;
 mod passwords;
@@ -40,10 +40,9 @@ impl Section {
         Section::About,
     ];
 
-    /// The sections this app draws, in order. Agents comes with the MCP
-    /// settings (T11): it joins the list once its body exists.
+    /// The sections this app draws, in order: all of them.
     pub fn available() -> impl Iterator<Item = Section> {
-        Self::ALL.into_iter().filter(|section| *section != Section::Agents)
+        Self::ALL.into_iter()
     }
 
     /// `DBFORGE_OPEN=settings#<name>`: the section named so.
@@ -118,18 +117,7 @@ mod tests {
         }
         assert_eq!(Section::parse("nope"), None);
         let shown: Vec<Section> = Section::available().collect();
-        assert_eq!(
-            shown,
-            [
-                Section::Appearance,
-                Section::Language,
-                Section::Tags,
-                Section::Exports,
-                Section::Passwords,
-                Section::Backup,
-                Section::About
-            ]
-        );
+        assert_eq!(shown, Section::ALL, "Agents (MCP) included");
     }
 
     #[test]

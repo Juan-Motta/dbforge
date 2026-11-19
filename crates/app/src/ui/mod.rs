@@ -7,6 +7,7 @@
 pub mod button;
 pub mod callout;
 pub mod checkbox;
+pub mod choices;
 pub mod code_editor;
 pub mod editing;
 pub mod field;
@@ -31,6 +32,7 @@ use gpui::{
 
 pub use button::{button, enabled, ghost_button, icon_button};
 pub use checkbox::Checkbox;
+pub use choices::{choice, choice_group};
 pub use code_editor::{CodeEditor, CodeEditorEvent};
 pub use file_field::FileField;
 pub use menu::{MenuItem, PopoverMenu, Swatch, popover};

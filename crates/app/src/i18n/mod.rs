@@ -8,6 +8,7 @@ mod diagram;
 mod en;
 mod es;
 mod keyspace;
+mod mcp;
 mod palette;
 mod query;
 mod settings;
@@ -22,6 +23,7 @@ pub use self::admin::AdminMessages;
 pub use self::connection::ConnectionMessages;
 pub use self::diagram::DiagramMessages;
 pub use self::keyspace::KeyspaceMessages;
+pub use self::mcp::McpMessages;
 pub use self::palette::PaletteMessages;
 pub use self::query::{HistoryMessages, PlanMessages, QueryMessages, thousands};
 pub use self::settings::{SettingsMessages, TagsMessages};
@@ -177,6 +179,8 @@ pub struct Messages {
     pub dump: DumpMessages,
     /// The settings' backup of DBForge's configuration.
     pub backup: BackupMessages,
+    /// Settings › Agents (MCP) and the dialog approving an agent's change.
+    pub mcp: McpMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

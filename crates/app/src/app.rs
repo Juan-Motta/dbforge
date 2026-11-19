@@ -13,6 +13,7 @@ use crate::assets::Assets;
 use crate::backend::{Backend, runtime};
 use crate::events::{self, EventHub};
 use crate::i18n::Locale;
+use crate::mcp::Approvals;
 use crate::preferences::{PreferenceFile, Preferences};
 use crate::shell::{self, Shell};
 use crate::theme::Theme;
@@ -57,6 +58,8 @@ pub fn run() -> i32 {
         cx.set_global(Backend::new(core));
         cx.set_global(preferences);
         EventHub::start(received, cx);
+        // Before the hub forwards anything, so an agent's request sent while the window opens waits for it.
+        Approvals::start(cx);
         // Theme and language before the first frame, so it never flickers.
         Theme::sync(cx.window_appearance().into(), cx);
         Locale::sync(cx);
@@ -98,6 +101,7 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::export::key_bindings());
     cx.bind_keys(crate::import::key_bindings());
     cx.bind_keys(crate::dump::key_bindings());
+    cx.bind_keys(crate::mcp::key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
     // The app menu: on macOS the menu bar's DBForge menu, with Quit.
     cx.set_menus(vec![Menu { name: "DBForge".into(), items: vec![MenuItem::action("Quit DBForge", Quit)] }]);

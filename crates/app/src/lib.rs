@@ -19,6 +19,7 @@ pub mod history;
 pub mod i18n;
 pub mod import;
 pub mod keyspace;
+pub mod mcp;
 pub mod palette;
 pub mod preferences;
 pub mod query;

@@ -2,8 +2,8 @@ use dbforge_core::connections::tags::TagColor;
 
 use super::{
     AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, ExportMessages, HistoryMessages,
-    ImportMessages, KeyspaceMessages, Messages, PaletteMessages, PlanMessages, QueryMessages, SettingsMessages,
-    StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
+    ImportMessages, KeyspaceMessages, McpMessages, Messages, PaletteMessages, PlanMessages, QueryMessages,
+    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
 };
 
 pub(super) const MESSAGES: Messages = Messages {
@@ -985,6 +985,59 @@ pub(super) const MESSAGES: Messages = Messages {
         need_password: |names| format!("Sin contraseña, escríbela en su configuración: {names}."),
         missing_tools: |names| format!("No se encontraron en este equipo y quedaron como estaban: {names}."),
         failed: "No se pudo completar",
+    },
+    mcp: McpMessages {
+        approval_title: "¿Aprobar el cambio de un agente?",
+        an_agent: "Un agente",
+        approval_who: |agent, connection| format!("{agent} quiere cambiar datos en {connection}:"),
+        in_database: |database| format!("En {database}"),
+        approval_note: "No se ejecuta nada hasta que lo apruebes. Si lo rechazas, el agente sabrá que no se \
+                        ejecutó.",
+        approve: "Aprobar y ejecutar",
+        decline: "Rechazar",
+        close: "Cerrar",
+        enable: "Permitir que agentes de IA usen DBForge",
+        enable_description: "Ejecuta un servidor MCP en este equipo mientras DBForge está abierto. Los agentes \
+                             consultan tus conexiones sin ver sus contraseñas.",
+        listening: "Los agentes pueden conectarse",
+        failed: "El servidor no está en marcha",
+        port: "Puerto",
+        port_help: "Solo este equipo puede alcanzarlo (127.0.0.1). Pulsa Enter para aplicar.",
+        port_invalid: "Un número de 1024 a 65535.",
+        token: "Token",
+        show: "Mostrar token",
+        hide: "Ocultar token",
+        copy: "Copiar",
+        regenerate: "Regenerar",
+        regenerate_confirm: "Los agentes que usan el token actual dejarán de conectarse.",
+        cancel: "Cancelar",
+        add_to_agents: "Añadir DBForge a un agente",
+        claude_code: "Claude Code",
+        codex: "Codex",
+        opencode: "OpenCode",
+        pi: "Pi",
+        other_agent: "Otro agente",
+        step_terminal: "Ejecuta en una terminal",
+        step_profile: "Pon el token en tu perfil de la shell (por ejemplo, ~/.zshrc); el agente lo lee de ahí",
+        step_config: |file| format!("Añade a {file}"),
+        step_connect: "Su dirección y cabecera, para cualquier agente que acepte servidores MCP por HTTP",
+        step_launch: "Su comando, para cualquier agente que inicie servidores MCP por stdio",
+        transport: "Cómo llega el agente a DBForge",
+        transport_stdio: "Inicia DBForge él mismo",
+        transport_http: "Por HTTP",
+        transport_stdio_note: "Recomendado. El agente inicia el ejecutable de DBForge y lo mantiene toda su \
+                               sesión, así que se reconecta solo cuando DBForge se abre o se reinicia. Su \
+                               configuración no lleva token.",
+        transport_http_note: "El agente se conecta a DBForge mientras está abierto, con el token. Si DBForge \
+                              estaba cerrado cuando el agente arrancó, reinicia el agente.",
+        prompt_title: "O deja que el agente lo configure: pega este prompt en él",
+        prompt_help: "El prompt lleva el token; añade DBForge para todos los proyectos y lo anota en el actual.",
+        prompt_help_stdio: "El prompt añade DBForge para todos los proyectos y lo anota en el actual.",
+        note_title: |file| format!("Para que use DBForge en un proyecto: añade a su {file}"),
+        access_note: "Los agentes solo ven las conexiones a las que les des acceso: abre la configuración de una \
+                      conexión y elige Acceso de agentes. Solo lectura bloquea las escrituras, no todo lo que \
+                      puede hacer una cuenta de administrador (cerrar sesiones, ajustes del servidor); para \
+                      agentes, lo más seguro es un usuario con solo los permisos que necesitan.",
     },
 };
 

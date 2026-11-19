@@ -12,12 +12,13 @@ use super::{PasswordsSection, Section};
 use crate::backup::{BackupEvent, BackupSection};
 use crate::dump::ExportSettings;
 use crate::i18n::{Language, Locale, Translate};
+use crate::mcp::McpSection;
 use crate::preferences::Preferences;
 use crate::tags::TagsSection;
 use crate::tags::section::TagsEvent;
 use crate::theme::{ActiveTheme, Appearance, Theme, ThemePreference};
 use crate::ui::field::Tooltip;
-use crate::ui::{glass, icon, icon_button};
+use crate::ui::{choice, choice_group, glass, icon, icon_button};
 
 actions!(settings_dialog, [Dismiss]);
 
@@ -46,6 +47,8 @@ pub struct SettingsDialog {
     passwords: Entity<PasswordsSection>,
     exports: Entity<ExportSettings>,
     backup: Entity<BackupSection>,
+    /// Agents (MCP) while it is shown: the token is read only when the user goes there.
+    agents: Option<Entity<McpSection>>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -77,7 +80,18 @@ impl SettingsDialog {
         ];
         let section =
             if Section::available().any(|available| available == section) { section } else { Section::Appearance };
-        Self { section, tags, passwords, exports, backup, focus: cx.focus_handle(), _subscriptions: subscriptions }
+        let mut dialog = Self {
+            section: Section::Appearance,
+            tags,
+            passwords,
+            exports,
+            backup,
+            agents: None,
+            focus: cx.focus_handle(),
+            _subscriptions: subscriptions,
+        };
+        dialog.show_section_in(section, window, cx);
+        dialog
     }
 
     /// Takes the keyboard, so Escape reaches it.
@@ -85,11 +99,22 @@ impl SettingsDialog {
         window.focus(&self.focus);
     }
 
-    pub fn show_section(&mut self, section: Section, cx: &mut Context<Self>) {
-        if Section::available().any(|available| available == section) {
-            self.section = section;
-            cx.notify();
+    pub fn show_section(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_section_in(section, window, cx);
+    }
+
+    fn show_section_in(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
+        if !Section::available().any(|available| available == section) {
+            return;
         }
+        // As the web UI mounts it: read again each time it is shown, the token hidden.
+        if section != Section::Agents {
+            self.agents = None;
+        } else if self.agents.is_none() {
+            self.agents = Some(cx.new(|cx| McpSection::new(window, cx)));
+        }
+        self.section = section;
+        cx.notify();
     }
 
     fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -120,7 +145,7 @@ impl SettingsDialog {
                     .cursor_pointer()
                     .when(current, |item| item.bg(theme.accent.opacity(0.2)))
                     .when(!current, |item| item.hover(|item| item.bg(theme.sel)))
-                    .on_click(cx.listener(move |this, _, _, cx| this.show_section(section, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.show_section(section, window, cx)))
                     .child(section.label(m))
             }))
     }
@@ -141,8 +166,11 @@ impl SettingsDialog {
             Section::Exports => (m.exports, Some(m.exports_intro), self.exports.clone().into_any_element()),
             Section::Backup => (m.backup, Some(m.backup_intro), self.backup.clone().into_any_element()),
             Section::About => (m.about, None, self.render_about(cx).into_any_element()),
-            // Not drawn until its feature joins (`Section::available`).
-            Section::Agents => (self.section.label(m), None, div().into_any_element()),
+            Section::Agents => (
+                m.agents,
+                Some(m.agents_intro),
+                self.agents.clone().map_or_else(|| div().into_any_element(), |agents| agents.into_any_element()),
+            ),
         };
         div()
             .id("settings-content")
@@ -207,33 +235,10 @@ impl SettingsDialog {
                     .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(m.interface_language))
                     .child(div().text_size(px(12.5)).text_color(theme.text3).child(m.interface_language_help)),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .p(px(2.))
-                    .rounded(px(9.))
-                    .border_1()
-                    .border_color(theme.line)
-                    .bg(theme.sel)
-                    .children(Language::ALL.map(|(language, name)| {
-                        let checked = language == current;
-                        div()
-                            .id(language.as_str())
-                            .h(px(26.))
-                            .px(px(12.))
-                            .flex()
-                            .items_center()
-                            .rounded(px(7.))
-                            .text_size(px(12.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(if checked { theme.text } else { theme.text2 })
-                            .when(checked, |button| button.bg(theme.accent.opacity(0.2)))
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |_, _, _, cx| language.save(cx)))
-                            .child(name)
-                    })),
-            )
+            .child(choice_group(&theme).children(Language::ALL.map(|(language, name)| {
+                choice(&theme, language.as_str(), name, language == current)
+                    .on_click(cx.listener(move |_, _, _, cx| language.save(cx)))
+            })))
     }
 
     fn render_about(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -365,10 +370,9 @@ mod tests {
     fn draws_every_section_it_offers_and_applies_a_theme_and_a_language_at_once(cx: &mut TestAppContext) {
         let _dir = setup(cx);
         let (dialog, cx) = cx.add_window_view(|window, cx| SettingsDialog::new(Section::Agents, window, cx));
-        // A section that isn't drawn yet opens on Appearance.
-        dialog.read_with(cx, |dialog, _| assert_eq!(dialog.section, Section::Appearance));
+        dialog.read_with(cx, |dialog, _| assert_eq!(dialog.section, Section::Agents));
         for section in Section::available() {
-            dialog.update(cx, |dialog, cx| dialog.show_section(section, cx));
+            dialog.update_in(cx, |dialog, window, cx| dialog.show_section(section, window, cx));
             cx.run_until_parked();
             draw(cx);
         }

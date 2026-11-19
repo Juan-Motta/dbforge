@@ -2,8 +2,8 @@ use dbforge_core::connections::tags::TagColor;
 
 use super::{
     AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, ExportMessages, HistoryMessages,
-    ImportMessages, KeyspaceMessages, Messages, PaletteMessages, PlanMessages, QueryMessages, SettingsMessages,
-    StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
+    ImportMessages, KeyspaceMessages, McpMessages, Messages, PaletteMessages, PlanMessages, QueryMessages,
+    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
 };
 
 pub(super) const MESSAGES: Messages = Messages {
@@ -950,5 +950,58 @@ pub(super) const MESSAGES: Messages = Messages {
         need_password: |names| format!("Without a password, type it in their settings: {names}."),
         missing_tools: |names| format!("Not found on this computer, left as they were: {names}."),
         failed: "That didn’t work",
+    },
+    mcp: McpMessages {
+        approval_title: "Approve an agent’s change?",
+        an_agent: "An agent",
+        approval_who: |agent, connection| format!("{agent} wants to change data on {connection}:"),
+        in_database: |database| format!("In {database}"),
+        approval_note: "Nothing runs until you approve. Declining tells the agent it was not run.",
+        approve: "Approve and run",
+        decline: "Decline",
+        close: "Close",
+        enable: "Let AI agents use DBForge",
+        enable_description: "Runs an MCP server on this computer while DBForge is open. Agents query your \
+                             connections without seeing their passwords.",
+        listening: "Agents can connect",
+        failed: "The server isn’t running",
+        port: "Port",
+        port_help: "Only this computer can reach it (127.0.0.1). Press Enter to apply.",
+        port_invalid: "A number from 1024 to 65535.",
+        token: "Token",
+        show: "Show token",
+        hide: "Hide token",
+        copy: "Copy",
+        regenerate: "Regenerate",
+        regenerate_confirm: "Agents using the current token will stop connecting.",
+        cancel: "Cancel",
+        add_to_agents: "Add DBForge to an agent",
+        claude_code: "Claude Code",
+        codex: "Codex",
+        opencode: "OpenCode",
+        pi: "Pi",
+        other_agent: "Other agent",
+        step_terminal: "Run in a terminal",
+        step_profile: "Put the token in your shell profile (e.g. ~/.zshrc); the agent reads it from there",
+        step_config: |file| format!("Add to {file}"),
+        step_connect: "Its address and header, for any agent that takes MCP servers over HTTP",
+        step_launch: "Its command, for any agent that starts MCP servers over stdio",
+        transport: "How the agent reaches DBForge",
+        transport_stdio: "Starts DBForge itself",
+        transport_http: "Over HTTP",
+        transport_stdio_note: "Recommended. The agent starts DBForge’s executable and keeps it for its whole \
+                               session, so it reconnects by itself when DBForge opens or restarts. Its settings \
+                               hold no token.",
+        transport_http_note: "The agent connects to DBForge while it is open, with the token. If DBForge was \
+                              closed when the agent started, restart the agent.",
+        prompt_title: "Or let the agent set it up: paste this prompt into it",
+        prompt_help: "The prompt carries the token; it adds DBForge for every project and notes it in the current \
+                      one.",
+        prompt_help_stdio: "The prompt adds DBForge for every project and notes it in the current one.",
+        note_title: |file| format!("So it uses DBForge in a project: add to its {file}"),
+        access_note: "Agents only see connections you give them access to: open a connection’s settings and \
+                      choose Agent access. Read only blocks writes, not everything an administrator account can \
+                      do (ending sessions, server settings); for agents, a database user with only the rights \
+                      they need is safest.",
     },
 };

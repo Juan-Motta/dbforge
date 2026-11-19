@@ -3,7 +3,9 @@
 //! while it is open; and a dialog over them when one is open (the command
 //! palette, the settings, the connection and admin dialogs, exporting and
 //! importing rows, a database's dump and restore, the notice of unreadable
-//! settings). Each part is its own view, which its feature grows.
+//! settings); and over everything, while an agent waits for the user, the
+//! dialog approving its change. Each part is its own view, which its
+//! feature grows.
 //! ⌘K / Ctrl+K toggles the palette, ⌘B / Ctrl+B the explorer and ⌘J /
 //! Ctrl+J the statement console, from anywhere in the window.
 
@@ -30,6 +32,7 @@ use crate::dump::{DumpEvent, DumpMode, ExportDatabaseDialog, ImportDatabaseDialo
 use crate::export::{ExportDialog, ExportSource};
 use crate::i18n::{Locale, Translate};
 use crate::import::{ImportDialog, ImportEvent, ImportTarget};
+use crate::mcp::{ApprovalDialog, Approvals};
 use crate::palette::{CommandAction, CommandPalette, PaletteEvent, PaletteSource};
 use crate::preferences::{Preferences, keys};
 use crate::settings::{Section, SettingsDialog, SettingsEvent};
@@ -66,6 +69,13 @@ struct OpenDialog {
     _subscriptions: Vec<Subscription>,
 }
 
+/// The request an agent waits on, over everything else, and where the
+/// keyboard was before it took it.
+struct OpenApproval {
+    dialog: Entity<ApprovalDialog>,
+    restore: Option<gpui::FocusHandle>,
+}
+
 /// The statement console while it is open, and what the window hears from it.
 struct OpenStatements {
     console: Entity<StatementConsole>,
@@ -81,6 +91,7 @@ pub struct Shell {
     workspace: Entity<Workspace>,
     statements: Option<OpenStatements>,
     dialog: Option<OpenDialog>,
+    approval: Option<OpenApproval>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -127,6 +138,10 @@ impl Shell {
                 WorkspaceEvent::Import(target) => this.open_import_dialog((**target).clone(), window, cx),
             },
         ));
+        // An agent asked, or stopped waiting: its dialog shows, or the next one, or none.
+        subscriptions.push(cx.observe_in(&Approvals::global(cx), window, |this, _, window, cx| {
+            this.sync_approval(window, cx);
+        }));
         let mut shell = Self {
             explorer,
             explorer_open: true,
@@ -134,8 +149,11 @@ impl Shell {
             workspace,
             statements: None,
             dialog: None,
+            approval: None,
             _subscriptions: subscriptions,
         };
+        // Requests that came while the window opened.
+        shell.sync_approval(window, cx);
         if statements_open {
             shell.set_statements(true, cx);
         }
@@ -311,7 +329,7 @@ impl Shell {
 
     /// Opens the command palette on the selected connection's tables, with the commands that apply now.
     pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() {
+        if self.dialog.is_some() || self.approval.is_some() {
             return;
         }
         let explorer = self.explorer.read(cx);
@@ -495,10 +513,52 @@ impl Shell {
     /// Closes the dialog shown; the explorer (or, hidden, the window) takes the keyboard back.
     fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog = None;
+        if self.approval.is_none() {
+            self.focus_explorer(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn focus_explorer(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.explorer_open {
             window.focus(&self.explorer.focus_handle(cx));
         } else {
             window.blur();
+        }
+    }
+
+    /// Shows the request agents have waited on longest, each in a dialog of
+    /// its own with Decline focused; once none waits, the keyboard goes back
+    /// where it was. The window is not brought forward: a key meant for the
+    /// agent's terminal must not answer.
+    fn sync_approval(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = Approvals::global(cx).read(cx).current().cloned();
+        let shown = self.approval.as_ref().map(|open| open.dialog.read(cx).id().to_owned());
+        if current.as_ref().map(|request| request.id.as_str()) == shown.as_deref() {
+            return;
+        }
+        let restore = match self.approval.take() {
+            Some(open) => open.restore,
+            None => window.focused(cx),
+        };
+        match current {
+            Some(request) => {
+                let engine = Backend::global(cx)
+                    .core()
+                    .connections()
+                    .list()
+                    .into_iter()
+                    .find(|connection| connection.id == request.connection_id)
+                    .map(|connection| connection.engine);
+                let dialog = cx.new(|cx| ApprovalDialog::new(request, engine, cx));
+                dialog.read(cx).focus(window);
+                self.approval = Some(OpenApproval { dialog, restore });
+            }
+            None => match restore {
+                Some(handle) => window.focus(&handle),
+                None if self.dialog.is_none() => self.focus_explorer(window, cx),
+                None => window.blur(),
+            },
         }
         cx.notify();
     }
@@ -534,6 +594,10 @@ impl Shell {
     /// `statement-log` the statement console, `new-object:<id>` the New
     /// database dialog (`#role`, `#user` for the others) and
     /// `drop-database:<id>/<database>` the Drop database dialog.
+    /// `approval` shows a sample of an agent's request to approve, on the
+    /// first saved connection (`#plain`: no agent name, tag or database;
+    /// `#many`: two waiting); answering it reaches the core, which has
+    /// nothing waiting under its id, so nothing runs.
     #[cfg(debug_assertions)]
     fn open_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::connections::form::Section;
@@ -568,6 +632,7 @@ impl Shell {
                 let section = section.unwrap_or(crate::settings::Section::Appearance);
                 return self.open_settings(section, window, cx);
             }
+            ("approval", _) => return self.show_approval_for_development(seed.as_deref(), cx),
             ("statement-log", _) => {
                 if self.statements.is_none() {
                     self.set_statements(true, cx);
@@ -647,6 +712,35 @@ impl Shell {
                 dialog.update(cx, |dialog, cx| dialog.open_engines(window, cx));
             }
         }
+    }
+
+    /// `DBFORGE_OPEN=approval`: sample requests, as if agents had asked.
+    #[cfg(debug_assertions)]
+    fn show_approval_for_development(&mut self, seed: Option<&str>, cx: &mut Context<Self>) {
+        use dbforge_core::mcp::ApprovalRequest;
+        let connection = Backend::global(cx).core().connections().list().into_iter().next();
+        let (connection_id, connection_name) =
+            connection.map_or(("sample".to_owned(), "Shop".to_owned()), |connection| (connection.id, connection.name));
+        let plain = seed == Some("plain");
+        let sample = |id: &str, statement: &str| ApprovalRequest {
+            id: format!("development-{id}"),
+            agent: (!plain).then(|| "claude-code".to_owned()),
+            connection_id: connection_id.clone(),
+            connection_name: connection_name.clone(),
+            tag: (!plain).then(|| "PROD".to_owned()),
+            database: (!plain).then(|| "shop".to_owned()),
+            statement: statement.to_owned(),
+        };
+        let mut requests =
+            vec![sample("1", "UPDATE orders\nSET status = 'shipped', shipped_at = CURRENT_TIMESTAMP\nWHERE id = 42;")];
+        if seed == Some("many") {
+            requests.push(sample("2", "DELETE FROM carts WHERE updated_at < '2026-01-01';"));
+        }
+        Approvals::global(cx).update(cx, |approvals, cx| {
+            for request in requests {
+                approvals.show_for_development(request, cx);
+            }
+        });
     }
 
     /// `DBFORGE_OPEN=query:…`: a console, its script run, its history shown.
@@ -879,9 +973,9 @@ fn press_when_ready<V: 'static>(
 /// child, so it paints over the rest. It must not be deferred: a dialog's
 /// dropdowns are, and GPUI panics on a deferred draw inside another
 /// ("cannot call defer_draw during deferred drawing").
-fn dialog_layer(theme: &Theme, view: AnyView, placement: Placement) -> gpui::Stateful<gpui::Div> {
+fn dialog_layer(id: &'static str, theme: &Theme, view: AnyView, placement: Placement) -> gpui::Stateful<gpui::Div> {
     div()
-        .id("dialog-scrim")
+        .id(id)
         .absolute()
         .inset_0()
         .occlude()
@@ -925,7 +1019,17 @@ impl Render for Shell {
                     .child(self.workspace.clone())
                     .children(self.statements.as_ref().map(|open| open.console.clone())),
             )
-            .children(self.dialog.as_ref().map(|dialog| dialog_layer(theme, dialog.view.clone(), dialog.placement)))
+            .children(
+                self.dialog
+                    .as_ref()
+                    .map(|dialog| dialog_layer("dialog-scrim", theme, dialog.view.clone(), dialog.placement)),
+            )
+            // Last, so it covers any other dialog.
+            .children(
+                self.approval
+                    .as_ref()
+                    .map(|open| dialog_layer("approval-scrim", theme, open.dialog.clone().into(), Placement::Center)),
+            )
     }
 }
 
@@ -945,8 +1049,68 @@ mod tests {
     impl Render for DialogHost {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let theme = *cx.theme();
-            div().size_full().relative().child(dialog_layer(&theme, self.select.clone().into(), Placement::Center))
+            div().size_full().relative().child(dialog_layer(
+                "dialog-scrim",
+                &theme,
+                self.select.clone().into(),
+                Placement::Center,
+            ))
         }
+    }
+
+    fn approval(id: &str) -> dbforge_core::mcp::ApprovalRequest {
+        dbforge_core::mcp::ApprovalRequest {
+            id: id.into(),
+            agent: Some("codex".into()),
+            connection_id: "gone".into(),
+            connection_name: "Shop".into(),
+            tag: Some("PROD".into()),
+            database: None,
+            statement: "DELETE FROM orders".into(),
+        }
+    }
+
+    #[gpui::test]
+    fn shows_each_waiting_request_in_turn_over_any_dialog_then_gives_the_keyboard_back(cx: &mut TestAppContext) {
+        use dbforge_core::{Event, Events};
+        let _dir = crate::test_support::setup(cx);
+        let events = cx.update(|cx| {
+            let (events, received) = crate::events::channel();
+            crate::events::EventHub::start(received, cx);
+            Approvals::start(cx);
+            cx.bind_keys(crate::mcp::key_bindings());
+            cx.bind_keys(crate::settings::key_bindings());
+            events
+        });
+        let (shell, cx) = cx.add_window_view(Shell::new);
+        shell.update_in(cx, |shell, window, cx| shell.open_settings(Section::Tags, window, cx));
+        let before = cx.update(|window, cx| window.focused(cx));
+        let shown = |cx: &mut gpui::VisualTestContext| {
+            shell.read_with(cx, |shell, cx| shell.approval.as_ref().map(|open| open.dialog.read(cx).id().to_owned()))
+        };
+
+        events.emit(Event::McpApprovalAsked(approval("a")));
+        events.emit(Event::McpApprovalAsked(approval("b")));
+        cx.run_until_parked();
+        crate::test_support::draw(cx);
+        assert_eq!(shown(cx).as_deref(), Some("a"));
+        assert!(shell.read_with(cx, |shell, _| shell.dialog.is_some()), "the settings stay under it");
+        let decline = cx.update(|window, cx| {
+            shell.read(cx).approval.as_ref().map(|open| open.dialog.focus_handle(cx).is_focused(window))
+        });
+        assert_eq!(decline, Some(true), "Decline has the keyboard");
+
+        // The agent left: the next request shows.
+        events.emit(Event::McpApprovalWithdrawn { id: "a".into() });
+        cx.run_until_parked();
+        assert_eq!(shown(cx).as_deref(), Some("b"));
+        crate::test_support::draw(cx);
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert_eq!(shown(cx), None);
+        assert_eq!(cx.update(|window, cx| window.focused(cx)), before, "the keyboard goes back to the settings");
+        assert!(shell.read_with(cx, |shell, _| shell.dialog.is_some()), "Escape declined; it closed nothing else");
     }
 
     #[gpui::test]

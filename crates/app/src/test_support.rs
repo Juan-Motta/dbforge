@@ -21,6 +21,7 @@ pub fn setup(cx: &mut TestAppContext) -> tempfile::TempDir {
         // The core of the test backend sends no events; tests emit through the hub themselves.
         let (_core_side, received) = channel();
         EventHub::start(received, cx);
+        crate::mcp::Approvals::start(cx);
         dir
     })
 }
