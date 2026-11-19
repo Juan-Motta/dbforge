@@ -8,6 +8,7 @@ pub mod document;
 pub mod highlight;
 pub mod snippets;
 pub mod statements;
+pub mod structure;
 
 use dbforge_core::connections::model::Engine;
 
@@ -104,6 +105,26 @@ impl Syntax {
             _ => None,
         }
     }
+
+    /// What starts a line comment (⌘/ toggles it): `--` in SQL, `//` in
+    /// mongosh; JSON and plain text have none, as in CodeMirror's languages.
+    pub fn line_comment(self) -> Option<&'static str> {
+        match self {
+            Self::Sql(_) => Some("--"),
+            Self::Mongosh => Some("//"),
+            Self::Json | Self::Plain => None,
+        }
+    }
+
+    /// The brackets and quotes typing one of closes, as CodeMirror's
+    /// `closeBrackets` takes them from each language (its defaults for text).
+    pub fn closing_brackets(self) -> &'static [char] {
+        match self {
+            Self::Sql(_) | Self::Mongosh => &['(', '[', '{', '\'', '"', '`'],
+            Self::Json => &['[', '{', '"'],
+            Self::Plain => &['(', '[', '{', '\'', '"'],
+        }
+    }
 }
 
 impl From<Dialect> for Syntax {
@@ -130,5 +151,16 @@ mod tests {
         assert_eq!(Syntax::console(Engine::Redis), Syntax::Plain);
         assert_eq!(Syntax::documents(Engine::Mongodb), Syntax::Mongosh);
         assert_eq!(Syntax::documents(Engine::Cosmosdb), Syntax::Json);
+    }
+
+    #[test]
+    fn comments_and_closes_brackets_as_each_language_does() {
+        assert_eq!(Syntax::Sql(Dialect::Mysql).line_comment(), Some("--"));
+        assert_eq!(Syntax::Mongosh.line_comment(), Some("//"));
+        assert_eq!(Syntax::Json.line_comment(), None, "JSON has no comments");
+        assert_eq!(Syntax::Plain.line_comment(), None);
+        assert!(Syntax::Sql(Dialect::Postgres).closing_brackets().contains(&'`'));
+        assert!(!Syntax::Json.closing_brackets().contains(&'('), "JSON closes only [, {{ and \"");
+        assert!(!Syntax::Plain.closing_brackets().contains(&'`'));
     }
 }

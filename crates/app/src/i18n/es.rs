@@ -1,9 +1,10 @@
 use dbforge_core::connections::tags::TagColor;
 
 use super::{
-    AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, ExportMessages, HistoryMessages,
-    ImportMessages, KeyspaceMessages, McpMessages, Messages, PaletteMessages, PlanMessages, QueryMessages,
-    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, UpdateMessages, thousands,
+    AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, EditorMessages, ExportMessages,
+    HistoryMessages, ImportMessages, KeyspaceMessages, McpMessages, Messages, PaletteMessages, PlanMessages,
+    QueryMessages, SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, UpdateMessages,
+    thousands,
 };
 
 pub(super) const MESSAGES: Messages = Messages {
@@ -1105,6 +1106,20 @@ pub(super) const MESSAGES: Messages = Messages {
             minimize: "Minimizar",
             zoom: "Zoom",
         },
+    },
+    editor: EditorMessages {
+        find: "Buscar",
+        replace: "Reemplazar",
+        replace_all: "Reemplazar todo",
+        next: "Siguiente coincidencia",
+        previous: "Coincidencia anterior",
+        all: "Todas",
+        all_hint: "Seleccionar todas las coincidencias",
+        match_case: "Distinguir mayúsculas",
+        regex: "Expresión regular",
+        by_word: "Palabra completa",
+        close: "Cerrar",
+        wrap_lines: "Ajustar las líneas largas",
     },
 };
 

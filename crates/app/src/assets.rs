@@ -9,6 +9,7 @@ use gpui::{AssetSource, SharedString};
 const STROKED: &[(&str, &str)] = &[
     ("plus", "M8 3v10M3 8h10"),
     ("minus", "M3 8h10"),
+    ("wrap", "M2.5 4h11M2.5 8h9a2 2 0 0 1 0 4H8m1.5-1.5L8 12l1.5 1.5M2.5 12h3"),
     ("refresh", "M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"),
     ("search", "M11.2 7a4.2 4.2 0 1 1-8.4 0a4.2 4.2 0 1 1 8.4 0M10.5 10.5 14 14"),
     ("down", "M4 6l4 4 4-4"),

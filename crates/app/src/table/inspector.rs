@@ -1,8 +1,9 @@
 //! A side panel with the picked cell's whole value, in the editor its
 //! column's type calls for: a list of values (a boolean, an enum), date and
 //! time controls, or text, shown as text, as indented JSON or as rendered
-//! Markdown. Save puts the value in the cell as a pending edit; ⌘S (Ctrl+S)
-//! does too, and a second one applies every change. Its left edge resizes
+//! Markdown. Long lines wrap unless "Wrap long lines" is turned off, as in
+//! the former web UI. Save puts the value in the cell as a pending edit; ⌘S
+//! (Ctrl+S) does too, and a second one applies every change. Its left edge resizes
 //! it; the width is kept under `dbforge.inspectorWidth`, as the former web UI kept it.
 
 use dbforge_core::drivers::Column;
@@ -20,6 +21,7 @@ use super::markdown::{Block, blocks};
 use super::temporal::{TemporalKind, offset_space, temporal_kind_of};
 use crate::i18n::{TableMessages, Translate, thousands};
 use crate::preferences::{Preferences, keys};
+use crate::sql::Syntax;
 use crate::theme::{ActiveTheme, MONO};
 use crate::ui::field::Tooltip;
 use crate::ui::{
@@ -68,6 +70,13 @@ enum Mode {
     Markdown,
 }
 
+impl Mode {
+    /// What the editor reads the value as: JSON (brackets, folds) or plain text.
+    fn syntax(self) -> Syntax {
+        if self == Self::Json { Syntax::Json } else { Syntax::Plain }
+    }
+}
+
 /// The editor the column's type calls for.
 enum Body {
     Text { editor: Entity<CodeEditor>, mode: Mode, original: String, starts_as_json: bool },
@@ -89,6 +98,8 @@ impl Render for NoPreview {
 pub struct CellInspector {
     cell: Option<InspectedCell>,
     body: Option<Body>,
+    /// Long lines wrap in the editor; kept from cell to cell, as the former web UI kept it.
+    wrap: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -96,7 +107,7 @@ impl EventEmitter<InspectorEvent> for CellInspector {}
 
 impl CellInspector {
     pub fn new(cell: Option<InspectedCell>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut inspector = Self { cell: None, body: None, _subscriptions: Vec::new() };
+        let mut inspector = Self { cell: None, body: None, wrap: true, _subscriptions: Vec::new() };
         inspector.show(cell, window, cx);
         inspector
     }
@@ -143,13 +154,16 @@ impl CellInspector {
         let original = cell.value.clone().unwrap_or_default();
         let starts_as_json = is_json_document(&original);
         let text = if starts_as_json { pretty_json(&original) } else { original.clone() };
+        let mode = if starts_as_json { Mode::Json } else { Mode::Text };
+        let wrap = self.wrap;
         let editor = cx.new(|cx| {
-            let mut editor = CodeEditor::new(&text, None, cx);
+            let mut editor = CodeEditor::new(&text, mode.syntax(), cx);
             editor.set_read_only(cell.locked.is_some(), cx);
+            editor.set_soft_wrap(wrap, cx);
             editor
         });
         self._subscriptions.push(cx.subscribe(&editor, |_, _, _: &CodeEditorEvent, cx| cx.notify()));
-        Body::Text { editor, mode: if starts_as_json { Mode::Json } else { Mode::Text }, original, starts_as_json }
+        Body::Text { editor, mode, original, starts_as_json }
     }
 
     /// What Save would put in the cell; `None` when nothing (an unchanged
@@ -227,12 +241,29 @@ impl CellInspector {
     fn show_mode(&mut self, next: Mode, cx: &mut Context<Self>) {
         if let Some(Body::Text { editor, mode, .. }) = self.body.as_mut() {
             let draft = editor.read(cx).text().to_owned();
-            if next == Mode::Json && is_json_document(&draft) {
-                editor.update(cx, |editor, cx| editor.set_text(&pretty_json(&draft), cx));
-            }
+            editor.update(cx, |editor, cx| {
+                if next == Mode::Json && is_json_document(&draft) {
+                    editor.set_text(&pretty_json(&draft), cx);
+                }
+                editor.set_syntax(next.syntax(), cx);
+            });
             *mode = next;
         }
         cx.notify();
+    }
+
+    /// Turns wrapping long lines on or off ("Wrap long lines").
+    fn toggle_wrap(&mut self, cx: &mut Context<Self>) {
+        self.wrap = !self.wrap;
+        if let Some(Body::Text { editor, .. }) = &self.body {
+            let wrap = self.wrap;
+            editor.update(cx, |editor, cx| editor.set_soft_wrap(wrap, cx));
+        }
+        cx.notify();
+    }
+
+    pub fn wraps(&self) -> bool {
+        self.wrap
     }
 
     /// Keeps the width the user dragged the edge to.
@@ -268,6 +299,30 @@ impl CellInspector {
             .on_click(cx.listener(|_, _, _, cx| cx.emit(InspectorEvent::Close)))
             .child(icon("close", theme.text2, 13.))
             .into_any_element()
+    }
+
+    /// "Wrap long lines": raised while lines wrap; off in Markdown, which always wraps.
+    fn wrap_button(&self, allowed: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = *cx.theme();
+        let on = self.wrap && allowed;
+        enabled(
+            div()
+                .size(px(26.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(13.))
+                .when(on, |button| button.bg(theme.glass_hi).border_1().border_color(theme.rim))
+                .child(icon("wrap", if on { theme.text } else { theme.text2 }, 13.)),
+            allowed,
+        )
+        .id("inspector-wrap")
+        .tooltip(Tooltip::text(cx.messages().editor.wrap_lines))
+        .when(allowed, |button| {
+            button.hover(|button| button.bg(theme.sel)).on_click(cx.listener(|this, _, _, cx| this.toggle_wrap(cx)))
+        })
+        .into_any_element()
     }
 
     fn header(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -344,6 +399,7 @@ impl CellInspector {
                     )
                     .child(segment("mode-markdown", "Markdown", Mode::Markdown, true, cx)),
             );
+            bar = bar.child(self.wrap_button(*mode != Mode::Markdown, cx));
         }
         bar.child(self.close_button(cx)).into_any_element()
     }
@@ -593,5 +649,51 @@ mod tests {
         assert_eq!(width(Some("1200")), 900.);
         assert_eq!(width(Some("500")), 500.);
         assert_eq!(width(Some("x")), 380.);
+    }
+
+    fn text_cell(value: &str) -> InspectedCell {
+        InspectedCell {
+            column: Column {
+                name: "note".into(),
+                data_type: "text".into(),
+                primary_key: false,
+                generated: false,
+                default: None,
+            },
+            value: Some(value.into()),
+            unset: false,
+            locked: None,
+            nullable: true,
+            options: Vec::new(),
+        }
+    }
+
+    #[gpui::test]
+    fn wrap_long_lines_turns_the_editor_s_soft_wrap_on_and_off(cx: &mut gpui::TestAppContext) {
+        let _dir = crate::test_support::setup(cx);
+        let (inspector, cx) =
+            cx.add_window_view(|window, cx| CellInspector::new(Some(text_cell("{\"a\": 1}")), window, cx));
+        crate::test_support::draw(cx);
+        let editor = |inspector: &CellInspector| match &inspector.body {
+            Some(Body::Text { editor, .. }) => editor.clone(),
+            _ => panic!("a text cell shows an editor"),
+        };
+        inspector.update(cx, |inspector, cx| {
+            let code = editor(inspector);
+            assert!(
+                inspector.wraps() && code.read(cx).soft_wrap(),
+                "long lines wrap at first, as in the former web UI"
+            );
+            assert_eq!(code.read(cx).syntax(), Syntax::Json, "JSON mode reads the value as JSON");
+            inspector.toggle_wrap(cx);
+            assert!(!code.read(cx).soft_wrap(), "the toggle turns wrapping off");
+            inspector.show_mode(Mode::Text, cx);
+            assert_eq!(code.read(cx).syntax(), Syntax::Plain);
+        });
+        inspector.update_in(cx, |inspector, window, cx| {
+            inspector.show(Some(text_cell("plain")), window, cx);
+            assert!(!editor(inspector).read(cx).soft_wrap(), "the choice holds for the next cell");
+        });
+        crate::test_support::draw(cx);
     }
 }
