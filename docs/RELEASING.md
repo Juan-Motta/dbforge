@@ -95,7 +95,8 @@ reaches a signing step of its own, after the build, so build scripts and packagi
 
 ## Updates
 
-DBForge looks for a new version once a day (Settings › About can turn that off) and from DBForge › Check for
+DBForge looks for a new version shortly after launch and every hour while it runs, announces a version the
+first time it finds it and then reminds once a day (Settings › About can turn that off), and from DBForge › Check for
 Updates… or Settings › About › Check for Updates…, reading `latest.json` from the latest GitHub Release.
 Each release carries that manifest, `DBForge-<version>.app.tar.gz` (the notarized Mac app), the AppImage,
 the .deb and the Windows installer, each signed with the updater's own key (`scripts/sign-update.sh`);

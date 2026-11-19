@@ -23,8 +23,8 @@ pub mod keys {
     pub const EXPORT_FOLDER: &str = "dbforge.exportFolder";
     /// The last table export's format and options, as JSON.
     pub const EXPORT: &str = "dbforge.export";
-    /// When updates were last checked, in milliseconds since the epoch.
-    pub const UPDATES_LAST_CHECK: &str = "dbforge.updates.lastCheck";
+    /// The last update announced and when: `<version>@<milliseconds since the epoch>`.
+    pub const UPDATES_ANNOUNCED: &str = "dbforge.updates.announced";
     /// Whether updates are checked by themselves: `true` or `false`.
     pub const UPDATES_AUTOMATIC: &str = "dbforge.updates.automatic";
     /// Panel sizes in pixels, and whether the statement console is open.
@@ -165,15 +165,10 @@ mod tests {
     #[test]
     fn keeps_the_web_ui_s_keys() {
         assert_eq!(
-            [keys::THEME, keys::LANGUAGE, keys::EXPORT_FOLDER, keys::EXPORT, keys::UPDATES_LAST_CHECK],
-            [
-                "dbforge.theme",
-                "dbforge.language",
-                "dbforge.exportFolder",
-                "dbforge.export",
-                "dbforge.updates.lastCheck"
-            ]
+            [keys::THEME, keys::LANGUAGE, keys::EXPORT_FOLDER, keys::EXPORT],
+            ["dbforge.theme", "dbforge.language", "dbforge.exportFolder", "dbforge.export"]
         );
+        assert_eq!(keys::UPDATES_ANNOUNCED, "dbforge.updates.announced");
         assert_eq!(
             [keys::UPDATES_AUTOMATIC, keys::EXPLORER_WIDTH, keys::INSPECTOR_WIDTH],
             ["dbforge.updates.automatic", "dbforge.explorerWidth", "dbforge.inspectorWidth"]

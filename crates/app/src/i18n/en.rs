@@ -658,7 +658,7 @@ pub(super) const MESSAGES: Messages = Messages {
         tagline: "A fast desktop viewer and editor for your databases.",
         version: "Version",
         check_automatically: "Check for updates automatically",
-        check_automatically_description: "Once a day; DBForge asks before installing anything.",
+        check_automatically_description: "Tells you as soon as a version comes out, then once a day; DBForge asks before installing anything.",
         check_now: "Check for Updates…",
     },
     tags: TagsMessages {

@@ -690,7 +690,7 @@ pub(super) const MESSAGES: Messages = Messages {
         tagline: "Un visor y editor de escritorio rápido para tus bases de datos.",
         version: "Versión",
         check_automatically: "Buscar actualizaciones automáticamente",
-        check_automatically_description: "Una vez al día; DBForge pregunta antes de instalar nada.",
+        check_automatically_description: "Te avisa en cuanto sale una versión y luego una vez al día; DBForge pregunta antes de instalar nada.",
         check_now: "Buscar actualizaciones…",
     },
     tags: TagsMessages {

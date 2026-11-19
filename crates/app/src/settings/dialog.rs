@@ -291,7 +291,7 @@ impl SettingsDialog {
             .child(self.render_updates(cx))
     }
 
-    /// Below the version, as the former web UI: the daily check, then a check now.
+    /// Below the version, as the former web UI: the automatic check, then a check now.
     fn render_updates(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let m = &cx.messages().settings_dialog;

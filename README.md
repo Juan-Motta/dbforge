@@ -61,7 +61,7 @@ Reach servers through an **SSH tunnel** — with a password, a private key or yo
 
 ## Updates
 
-DBForge checks for a new version once a day and shows it with the release notes. **Install and Restart** downloads it, verifies its signature and relaunches. You can also check any time with **DBForge › Check for Updates…**, or turn the daily check off in **Settings › About**.
+DBForge tells you as soon as a new version is out (it looks every hour while open) and reminds you once a day after, with the release notes. **Install and Restart** downloads it, verifies its signature and relaunches. You can also check any time with **DBForge › Check for Updates…**, or turn the automatic check off in **Settings › About**.
 
 ## What you can do
 

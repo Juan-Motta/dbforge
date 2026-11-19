@@ -7,8 +7,8 @@
 //! Tauri did ([`install`]) and the new version started.
 //!
 //! [`Updates`] holds where that stands for the whole app ([`Phase`]): it
-//! checks once a day by itself while the user leaves that on
-//! ([`schedule`]), says something then only when there is an update, and
+//! looks by itself every hour while the user leaves that on, announces a
+//! version when it first finds it and then once a day ([`schedule`]), and
 //! answers every check the user asks for (the app menu, Settings › About).
 //! The window shows it in [`UpdateDialog`].
 
@@ -68,7 +68,7 @@ fn now_ms() -> i64 {
 }
 
 impl Updates {
-    /// Starts the updater for the app, with its daily check.
+    /// Starts the updater for the app, with its automatic check.
     pub fn start(cx: &mut App) {
         Self::start_with(Settings::current(), true, cx);
     }
@@ -106,7 +106,7 @@ impl Updates {
         &self.phase
     }
 
-    /// Whether the daily check is on (Settings › About).
+    /// Whether the automatic check is on (Settings › About).
     pub fn automatic(cx: &App) -> bool {
         schedule::automatic(Preferences::global(cx).get(keys::UPDATES_AUTOMATIC))
     }
@@ -117,11 +117,9 @@ impl Updates {
         });
     }
 
-    /// The hourly look: checks when the daily check is on and due.
+    /// The hourly look: checks quietly while the automatic check is on.
     fn look(&mut self, cx: &mut Context<Self>) {
-        let preferences = Preferences::global(cx);
-        let last = schedule::last_check(preferences.get(keys::UPDATES_LAST_CHECK));
-        if Self::automatic(cx) && schedule::check_due(last, now_ms()) {
+        if Self::automatic(cx) {
             self.check(false, cx);
         }
     }
@@ -141,22 +139,36 @@ impl Updates {
         self.work = Some(cx.spawn(async move |this, cx| {
             let result = checked.await;
             let _ = this.update(cx, |this, cx| {
-                if result.is_ok() {
-                    let at = Some(now_ms().to_string());
-                    cx.update_global::<Preferences, _>(|preferences, _| preferences.set(keys::UPDATES_LAST_CHECK, at));
-                }
-                let next = Phase::checked(manual, result);
-                // A quiet automatic check leaves an answer the user is reading.
-                if manual || next != Phase::Idle || !this.phase.shown() || this.phase == Phase::Checking {
-                    this.phase = next;
-                }
-                cx.notify();
+                this.receive(manual, result, now_ms(), cx);
                 #[cfg(debug_assertions)]
                 if std::mem::take(&mut this.install_when_found) && matches!(this.phase, Phase::Available(_)) {
                     this.install(cx);
                 }
             });
         }));
+    }
+
+    /// Takes a check's answer: what it found shows, except that an automatic
+    /// check announces a version only when it is new, or a day after it was
+    /// last announced (see [`schedule::announces`]).
+    fn receive(&mut self, manual: bool, result: Result<Option<Update>, String>, now: i64, cx: &mut Context<Self>) {
+        let mut next = Phase::checked(manual, result);
+        if let Phase::Available(update) = &next {
+            let last = schedule::Announced::parse(Preferences::global(cx).get(keys::UPDATES_ANNOUNCED));
+            if manual || schedule::announces(&update.version, last.as_ref(), now) {
+                let announced = schedule::Announced { version: update.version.clone(), at: now };
+                cx.update_global::<Preferences, _>(|preferences, _| {
+                    preferences.set(keys::UPDATES_ANNOUNCED, Some(announced.saved()))
+                });
+            } else {
+                next = Phase::Idle;
+            }
+        }
+        // A quiet automatic check leaves an answer the user is reading.
+        if manual || next != Phase::Idle || !self.phase.shown() || self.phase == Phase::Checking {
+            self.phase = next;
+        }
+        cx.notify();
     }
 
     /// Downloads, verifies and installs the update offered (or the one
@@ -413,6 +425,42 @@ mod tests {
             Updates::set_automatic(false, cx);
             assert!(!Updates::automatic(cx));
             assert_eq!(Preferences::global(cx).get(keys::UPDATES_AUTOMATIC), Some("false"));
+        });
+    }
+
+    #[gpui::test]
+    fn announces_a_new_version_at_once_then_once_a_day(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let updates = cx.update(|cx| {
+            Updates::start_with(Settings::current(), false, cx);
+            Updates::global(cx)
+        });
+        let found = |version: &str| Ok(Some(Update { version: version.into(), ..Arc::unwrap_or_clone(update()) }));
+        const NOW: i64 = 1_800_000_000_000;
+        const HOUR: i64 = 60 * 60 * 1000;
+        updates.update(cx, |updates, cx| {
+            updates.receive(false, found("9.0.0"), NOW, cx);
+            assert!(matches!(updates.phase, Phase::Available(_)), "a version found for the first time shows");
+            updates.dismiss(cx);
+
+            updates.receive(false, found("9.0.0"), NOW + HOUR, cx);
+            assert_eq!(updates.phase, Phase::Idle, "the hourly look keeps quiet about it");
+            updates.receive(false, found("9.0.0"), NOW + 23 * HOUR, cx);
+            assert_eq!(updates.phase, Phase::Idle);
+            updates.receive(false, found("9.0.0"), NOW + 24 * HOUR, cx);
+            assert!(matches!(updates.phase, Phase::Available(_)), "a day later it is told again");
+            updates.dismiss(cx);
+
+            updates.receive(false, found("9.0.1"), NOW + 25 * HOUR, cx);
+            assert!(matches!(updates.phase, Phase::Available(_)), "a newer release shows at once");
+            updates.dismiss(cx);
+
+            updates.receive(true, found("9.0.1"), NOW + 26 * HOUR, cx);
+            assert!(matches!(updates.phase, Phase::Available(_)), "a check the user asks for always answers");
+            assert_eq!(
+                Preferences::global(cx).get(keys::UPDATES_ANNOUNCED),
+                Some(format!("9.0.1@{}", NOW + 26 * HOUR).as_str())
+            );
         });
     }
 
