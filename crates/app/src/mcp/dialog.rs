@@ -1,5 +1,5 @@
 //! An agent wants to change data on a connection whose tag asks first, as
-//! the web UI's `ApprovalDialog.tsx`: what it will run, where, and who asks.
+//! the former web UI's `ApprovalDialog.tsx`: what it will run, where, and who asks.
 //! Decline has the focus, so Enter or Space pressed by mistake can't
 //! approve; Tab moves between the two buttons, and Enter or Space presses
 //! the one focused. Escape and the close button decline. Approve and run is

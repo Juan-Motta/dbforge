@@ -1,4 +1,4 @@
-//! Agents (MCP), as the web UI's `features/mcp`: Settings › Agents turns
+//! Agents (MCP), as the former web UI's `features/mcp`: Settings › Agents turns
 //! the core's MCP server on or off, sets its port, shows, copies and
 //! regenerates the token agents send, and writes the steps that add DBForge
 //! to an agent ([`McpSection`]); and the dialog asking the user to approve

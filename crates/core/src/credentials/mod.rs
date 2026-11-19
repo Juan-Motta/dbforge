@@ -30,8 +30,8 @@ pub enum Storage {
     File,
 }
 
-/// The settings DBForge keeps for itself (the interface's own preferences
-/// live in the web view).
+/// The settings DBForge keeps for itself (the window's own preferences
+/// live in `preferences.json`, which the app keeps).
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {

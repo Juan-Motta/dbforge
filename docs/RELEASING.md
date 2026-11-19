@@ -56,7 +56,7 @@ packages as the run's artifacts, and builds the DMG too only when asked.
 
 Made in CI (or on Windows, from Git Bash, with NSIS installed) with `scripts/make-windows.sh`. It writes
 `release/DBForge-<version>-x64-setup.exe`, built by `makensis` from `packaging/windows/installer.nsi`: it
-installs for the current user (no administrator needed) into `%LOCALAPPDATA%\DBForge`, where the Tauri app's
+installs for the current user (no administrator needed) into `%LOCALAPPDATA%\DBForge`, where the former Tauri app's
 installer did, with the same uninstall entry, so it upgrades an installed copy in place. It isn't
 code-signed: SmartScreen warns before the first run, until a code-signing certificate (or Azure Trusted
 Signing) is added to the build.
@@ -88,7 +88,7 @@ It needs these repository secrets:
 | `TAURI_SIGNING_PRIVATE_KEY` | The text of the updater's private key, `~/.tauri/dbforge.key` (every platform) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password, if it has one (it has none) |
 
-The updater key's secrets keep the names they had when Tauri signed the updates; the workflow hands them to
+The updater key's secrets keep the names they had when the former Tauri app's tooling signed the updates; the workflow hands them to
 the scripts as `UPDATER_PRIVATE_KEY` and `UPDATER_PRIVATE_KEY_PASSWORD`. On Linux and Windows the key only
 reaches a signing step of its own, after the build, so build scripts and packaging tools never see it; on macOS
 `scripts/make-dmg.sh` still builds and signs in one step, as before.
@@ -109,7 +109,7 @@ replaces its own file; a .deb runs `pkexec dpkg -i`, so Linux asks for an admini
 Windows the installer runs passive (`/P /UPDATE /R`) and starts the new version. The new version starts by
 itself.
 
-Copies installed by the Tauri app (0.3.x) update from the same manifest with Tauri's updater, which reads
+Copies installed by the former Tauri app (0.3.x) update from the same manifest with Tauri's updater, which reads
 the same names, formats and signatures, so they move to the GPUI app like any other update. Keep it so:
 `scripts/make-update-manifest.sh`'s shape, the artifact names, the bundle identifier `dev.dbforge.app`, the
 `DBForge` executable and the installers' locations must not change.
@@ -119,7 +119,8 @@ the format `tauri signer sign` wrote: the base64 of a minisign signature file wh
 the file and the version. `scripts/sign-update.sh` signs with it, then verifies the signature against
 `packaging/updater.pub`, so a release never carries an update installed copies would refuse.
 
-The private key was made with `tauri signer generate -w ~/.tauri/dbforge.key` and has no password. Keep a
+The private key was made, back when Tauri built DBForge, with `tauri signer generate -w ~/.tauri/dbforge.key`
+and has no password; `dbforge-release` reads that same key. Keep a
 copy somewhere safe: without it, no installed copy of DBForge can be updated again, and a new key means
 people reinstall by hand once. The packaging scripts sign the update when `UPDATER_PRIVATE_KEY` holds the
 key's text or path.

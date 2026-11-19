@@ -1,4 +1,4 @@
-//! What a check found, and the update's download and install, as the web
+//! What a check found, and the update's download and install, as the former web
 //! UI's `UpdateDialog.tsx`: DBForge's mark with the headline, the release
 //! notes, a box with the download's progress or what went wrong, and the
 //! buttons for the phase. Enter presses the main button (Install and
@@ -44,7 +44,7 @@ impl Focusable for UpdateDialog {
     }
 }
 
-/// Megabytes, with one decimal, as the web UI wrote them.
+/// Megabytes, with one decimal, as the former web UI wrote them.
 pub fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / (1024. * 1024.))
 }

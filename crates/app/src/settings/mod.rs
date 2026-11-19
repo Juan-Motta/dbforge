@@ -1,4 +1,4 @@
-//! The settings dialog, as the web UI's `SettingsDialog.tsx`: a list of
+//! The settings dialog, as the former web UI's `SettingsDialog.tsx`: a list of
 //! sections on the left and the chosen one on the right, applied as soon as
 //! something is picked. Appearance (the theme), Language, Tags, Passwords
 //! (where credentials are kept), Export and import (the export folder and
@@ -15,7 +15,7 @@ pub use passwords::PasswordsSection;
 
 use crate::i18n::SettingsMessages;
 
-/// A section of the dialog, in the order the web UI lists them.
+/// A section of the dialog, in the order the former web UI lists them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
     Appearance,

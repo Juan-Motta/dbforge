@@ -26,7 +26,7 @@ actions!(settings_dialog, [Dismiss]);
 
 const CONTEXT: &str = "SettingsDialog";
 
-/// The themes, in the order the web UI shows them.
+/// The themes, in the order the former web UI shows them.
 const THEMES: [ThemePreference; 3] = [ThemePreference::Dark, ThemePreference::Light, ThemePreference::System];
 
 pub fn key_bindings() -> Vec<KeyBinding> {
@@ -109,7 +109,7 @@ impl SettingsDialog {
         if !Section::available().any(|available| available == section) {
             return;
         }
-        // As the web UI mounts it: read again each time it is shown, the token hidden.
+        // As the former web UI mounts it: read again each time it is shown, the token hidden.
         if section != Section::Agents {
             self.agents = None;
         } else if self.agents.is_none() {
@@ -291,7 +291,7 @@ impl SettingsDialog {
             .child(self.render_updates(cx))
     }
 
-    /// Below the version, as the web UI: the daily check, then a check now.
+    /// Below the version, as the former web UI: the daily check, then a check now.
     fn render_updates(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let m = &cx.messages().settings_dialog;

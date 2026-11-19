@@ -1,5 +1,5 @@
 //! A whole PostgreSQL database to a .sql file with pg_dump and back with
-//! psql, as the web UI's `features/dump`: the two dialogs a database's menu
+//! psql, as the former web UI's `features/dump`: the two dialogs a database's menu
 //! opens, the folder exports go to and the client tools that run, both also
 //! in Settings › Export and import. Restoring into a connection whose tag
 //! asks first (PROD) warns on the first press and runs on the second.

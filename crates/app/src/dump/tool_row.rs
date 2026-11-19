@@ -1,4 +1,4 @@
-//! Which pg_dump or psql runs, as the web UI's `ToolRow.tsx`: its version
+//! Which pg_dump or psql runs, as the former web UI's `ToolRow.tsx`: its version
 //! and path, a way to choose another when the one found isn't right, and
 //! back to the one found. The core finds the tool and checks a chosen one
 //! before keeping it (`tools.json`).

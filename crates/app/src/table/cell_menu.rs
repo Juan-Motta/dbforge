@@ -1,7 +1,7 @@
 //! A cell's right-click menu: copying, filtering and sorting always; the
 //! changes its column and row allow on a table that can be edited. With
 //! several cells selected, this one among them, a change reaches them all.
-//! The web UI's submenus are groups here, in the same order: Edit, Copy,
+//! The former web UI's submenus are groups here, in the same order: Edit, Copy,
 //! Paste, Set, Filter, Row, Revert.
 
 use dbforge_core::drivers::CellValue;

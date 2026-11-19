@@ -1,4 +1,4 @@
-//! The changes agents are waiting to make, as the web UI's `useApprovals`:
+//! The changes agents are waiting to make, as the former web UI's `useApprovals`:
 //! oldest first, and the first is the one the dialog shows. Answering a
 //! request removes it, whatever the core says, since a request that already
 //! timed out has nothing left to wait for; a request nobody waits on any

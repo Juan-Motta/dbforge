@@ -1,5 +1,5 @@
 //! What the editor offers to complete at the caret: the dialect's keywords
-//! and the database's schemas, tables and columns, as the web UI's editor
+//! and the database's schemas, tables and columns, as the former web UI's editor
 //! did. After `schema.` come its tables; after `table.` (or an alias the
 //! statement gives it) its columns. Matches by prefix rank before a name
 //! whose later word (after `_`) matches.

@@ -1,4 +1,4 @@
-//! The update dialog's texts, as the web UI's `updates/messages.ts`.
+//! The update dialog's texts, as the former web UI's `updates/messages.ts`.
 
 /// The update dialog's texts in one language.
 pub struct UpdateMessages {

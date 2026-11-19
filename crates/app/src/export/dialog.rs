@@ -1,4 +1,4 @@
-//! The export dialog, as the web UI's `ExportDialog.tsx`: where the rows
+//! The export dialog, as the former web UI's `ExportDialog.tsx`: where the rows
 //! come from (and, for a filtered table, whether only the rows the filter
 //! keeps), the format, its options, the columns, then the export to a file
 //! the OS's save dialog names, or (for rows already shown) to the

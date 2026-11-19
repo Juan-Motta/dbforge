@@ -1,12 +1,12 @@
 //! The key list apart from drawing it: keys grouped into folders by their
 //! `:` prefixes, the rows those folders show, and how pages of a `SCAN`
-//! join. A port of the web UI's `keyspace.ts` (`keyTree`, `visibleKeyRows`).
+//! join. A port of the former web UI's `keyspace.ts` (`keyTree`, `visibleKeyRows`).
 
 use std::collections::{BTreeMap, HashSet};
 
 use dbforge_core::drivers::redis::KeyInfo;
 
-/// The types a key can be filtered by, in the web UI's order.
+/// The types a key can be filtered by, in the former web UI's order.
 pub const KINDS: [&str; 6] = ["string", "hash", "list", "set", "zset", "stream"];
 
 /// A folder of keys sharing a prefix, or one key.
@@ -33,7 +33,7 @@ impl KeyNode {
 
 /// Groups keys into folders by their `:`-separated prefixes, as most Redis
 /// apps name them (`session:7f3a:roles`). Folders come first; each counts
-/// the keys under it. Both are sorted by their bytes, as the web UI did.
+/// the keys under it. Both are sorted by their bytes, as the former web UI did.
 pub fn key_tree(keys: &[KeyInfo]) -> Vec<KeyNode> {
     tree_under(keys.iter().collect(), "")
 }

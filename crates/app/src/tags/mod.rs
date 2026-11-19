@@ -1,4 +1,4 @@
-//! Connection tags as the window reads them, as the web UI's `tags.ts`:
+//! Connection tags as the window reads them, as the former web UI's `tags.ts`:
 //! which one a connection carries, which one asks before data changes
 //! (changing data on a connection whose tag asks first, PROD, waits for the
 //! user to confirm), and what a new tag starts as. The settings' list of
@@ -66,7 +66,7 @@ pub fn new_tag_name(taken: &[String], name: fn(usize) -> String) -> String {
     (1..).map(name).find(|candidate| !taken.contains(&candidate.to_lowercase())).unwrap_or_default()
 }
 
-/// `name` cut to [`MAX_TAG_NAME`] characters, as the web UI's field kept it.
+/// `name` cut to [`MAX_TAG_NAME`] characters, as the former web UI's field kept it.
 pub fn clamp_tag_name(name: &str) -> &str {
     match name.char_indices().nth(MAX_TAG_NAME) {
         Some((end, _)) => &name[..end],

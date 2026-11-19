@@ -1,4 +1,4 @@
-//! The window's preferences: a string map under the same keys the web UI
+//! The window's preferences: a string map under the same keys the former web UI
 //! kept in `localStorage`, saved whole in `preferences.json` in the config
 //! directory. Memory changes at once; the file is written off the UI thread,
 //! in order, and once more as the app quits.
@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::backend::runtime;
 
-/// The keys, as the web UI named them, so a backup or a later version reads them alike.
+/// The keys, as the former web UI named them, so a backup or a later version reads them alike.
 pub mod keys {
     /// `system`, `light` or `dark`.
     pub const THEME: &str = "dbforge.theme";

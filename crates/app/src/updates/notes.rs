@@ -1,4 +1,4 @@
-//! The release notes as blocks to draw, as the web UI's `notes.ts`: the
+//! The release notes as blocks to draw, as the former web UI's `notes.ts`: the
 //! Markdown `scripts/release-notes.sh` writes, `## ` headings and `- `
 //! items with `**scope:**` in bold; any other line is a line of text.
 

@@ -1,5 +1,5 @@
 //! The CLI panel apart from drawing it: how a reply line is coloured and
-//! how ↑ and ↓ walk the commands run, as the web UI's `CliPanel.tsx` did.
+//! how ↑ and ↓ walk the commands run, as the former web UI's `CliPanel.tsx` did.
 
 /// What a reply line holds, which picks its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

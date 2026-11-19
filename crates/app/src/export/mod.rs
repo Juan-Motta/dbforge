@@ -1,4 +1,4 @@
-//! Exporting rows, as the web UI's `features/export`: a whole table streamed
+//! Exporting rows, as the former web UI's `features/export`: a whole table streamed
 //! from the server (only the rows its filter keeps, when it has one), or
 //! rows the window already holds (a query result), written as CSV, TSV,
 //! JSON, SQL INSERT statements or a Markdown table, to a file or the
@@ -153,7 +153,7 @@ pub fn read_choice(saved: Option<&str>) -> ExportChoice {
     }
 }
 
-/// The choice as it is kept, in the web UI's shape.
+/// The choice as it is kept, in the former web UI's shape.
 pub fn write_choice(choice: &ExportChoice) -> String {
     let options = &choice.options;
     json!({
@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(
             write_choice(&ExportChoice::default()),
             r#"{"format":"csv","options":{"header":true,"nullText":"","jsonStyle":"array","rowsPerInsert":1}}"#,
-            "the web UI's shape and key order"
+            "the former web UI's shape and key order"
         );
     }
 

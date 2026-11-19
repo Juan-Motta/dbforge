@@ -1,4 +1,4 @@
-//! How each agent is pointed at DBForge's MCP server, as the web UI's
+//! How each agent is pointed at DBForge's MCP server, as the former web UI's
 //! `setup.ts`: the steps to add it, a prompt that has the agent add it
 //! itself, and the note for a project's instructions file that has the
 //! agent use it. Every format here was checked against the agent's own
@@ -121,7 +121,7 @@ pub fn shell_argument(path: &str) -> String {
     format!("'{}'", path.replace('\'', "'\\''"))
 }
 
-/// JSON as the web UI wrote it (`JSON.stringify(value, null, 2)`): keys in
+/// JSON as the former web UI wrote it (`JSON.stringify(value, null, 2)`): keys in
 /// the order written, two spaces of indent.
 fn pretty(value: serde_json::Value) -> String {
     serde_json::to_string_pretty(&value).unwrap_or_default()

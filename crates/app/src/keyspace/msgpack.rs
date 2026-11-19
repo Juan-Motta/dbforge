@@ -1,5 +1,5 @@
 //! A binary value read as MessagePack, pretty-printed as JSON the way the
-//! web UI's `asMsgpack` (`@msgpack/msgpack` with 64-bit integers as
+//! former web UI's `asMsgpack` (`@msgpack/msgpack` with 64-bit integers as
 //! BigInt) did: bytes become `0x…` strings, 64-bit integers decimal
 //! strings, timestamps ISO dates, other extensions `{"type", "data"}`.
 
@@ -89,7 +89,7 @@ impl Reader<'_> {
             0xcc => Value::from(self.uint(1)?),
             0xcd => Value::from(self.uint(2)?),
             0xce => Value::from(self.uint(4)?),
-            // 64-bit integers are BigInts, which the web UI wrote as decimal strings.
+            // 64-bit integers are BigInts, which the former web UI wrote as decimal strings.
             0xcf => Value::String(self.uint(8)?.to_string()),
             0xd0 => Value::from(self.int(1)?),
             0xd1 => Value::from(self.int(2)?),
@@ -157,7 +157,7 @@ impl Reader<'_> {
         }
         let mut fields = Map::new();
         for _ in 0..n {
-            // Keys are strings or numbers, as the web UI's decoder allows.
+            // Keys are strings or numbers, as the former web UI's decoder allows.
             let key = match self.value(depth + 1)? {
                 Value::String(key) => key,
                 Value::Number(number) => number.to_string(),

@@ -1,5 +1,5 @@
 //! Where updates come from and the key they are signed with: the same as
-//! the Tauri app's (`tauri.conf.json`'s `plugins.updater`), so installed
+//! the former Tauri app's (its `plugins.updater` settings), so installed
 //! copies and this one read the same manifest and trust the same signatures.
 
 use std::path::PathBuf;

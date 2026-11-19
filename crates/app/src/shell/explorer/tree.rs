@@ -124,7 +124,7 @@ pub fn connection_node(connection: &Connection) -> TreeNode {
     }
 }
 
-/// A row estimate as the web UI wrote it: `612`, `48.2k`, `1.5m`.
+/// A row estimate as the former web UI wrote it: `612`, `48.2k`, `1.5m`.
 pub fn compact(count: i64) -> String {
     const UNITS: [(f64, &str); 4] = [(1e12, "t"), (1e9, "b"), (1e6, "m"), (1e3, "k")];
     let value = count as f64;

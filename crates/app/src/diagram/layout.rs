@@ -189,7 +189,7 @@ pub fn layout<'a>(tables: &[Placed<'a>], relationships: &[(&str, &str)]) -> Hash
     positions
 }
 
-/// Names in the order the web UI sorted them (`localeCompare`): ignoring
+/// Names in the order the former web UI sorted them (`localeCompare`): ignoring
 /// case first, then lower case before upper.
 fn compare_names(a: &str, b: &str) -> Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| b.cmp(a))

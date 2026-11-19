@@ -1,4 +1,4 @@
-//! The commands the palette offers, as the web UI's `App.tsx` lists them: a
+//! The commands the palette offers, as the former web UI's `App.tsx` lists them: a
 //! new query and the ER diagram of what is selected, when there is one,
 //! then a new connection, the three themes and the settings. Pure, so the
 //! list is tested without a window; the window runs each one.

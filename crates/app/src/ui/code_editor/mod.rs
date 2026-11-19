@@ -117,7 +117,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-x", Cut, context),
         KeyBinding::new("secondary-v", Paste, context),
         KeyBinding::new("secondary-z", Undo, context),
-        // Ctrl+Y stays the console's history, as in the web UI.
+        // Ctrl+Y stays the console's history, as in the former web UI.
         KeyBinding::new("secondary-shift-z", Redo, context),
         KeyBinding::new("enter", Newline, context),
         KeyBinding::new("tab", Indent, context),

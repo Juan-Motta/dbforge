@@ -1,4 +1,4 @@
-//! The palette's search, as the web UI's `search.ts`: a case-insensitive
+//! The palette's search, as the former web UI's `search.ts`: a case-insensitive
 //! substring match scored so an exact name beats a prefix, a prefix beats
 //! the start of a word, which beats any other hit; a leading `>` limits the
 //! search to commands. Pure, so it is tested without a window.

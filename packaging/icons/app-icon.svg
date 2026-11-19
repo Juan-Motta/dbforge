@@ -2,8 +2,12 @@
   <!-- DBForge's app icon: a database cylinder opened on its right side by a four-point
        spark (the agents' MCP access), in white on a terracotta gradient.
        macOS layout: an 824 px rounded square centred on the 1024 px canvas,
-       the margin left for the shadow the Dock expects. Source of every size:
-       `pnpm tauri icon packaging/icons/app-icon.svg -o packaging/icons`. -->
+       the margin left for the shadow the Dock expects. Source of every size, which are
+       committed pre-rendered: 32x32.png, 128x128.png, 128x128@2x.png (256 px) and
+       icon.png (512 px) for Linux; icon.icns for macOS; icon.ico for Windows. To redo
+       them after a change, render the PNGs with `rsvg-convert -w <px> -h <px>` (librsvg),
+       build icon.icns with `iconutil -c icns` from an .iconset of 16 to 1024 px, and
+       icon.ico with ImageMagick: `magick app-icon.svg -define icon:auto-resize=256,128,64,48,32,16 icon.ico`. -->
   <defs>
     <linearGradient id="background" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#D45325"/>

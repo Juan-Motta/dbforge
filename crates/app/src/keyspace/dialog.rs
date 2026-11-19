@@ -1,4 +1,4 @@
-//! A small form in a dialog, as the web UI's `FormDialog.tsx`: adding a
+//! A small form in a dialog, as the former web UI's `FormDialog.tsx`: adding a
 //! key or an element, setting a TTL, renaming or deleting a key. It stays
 //! open and shows the error when its action fails, and closes
 //! ([`DismissEvent`]) when it succeeds. Enter submits from a one-line field
@@ -27,7 +27,7 @@ actions!(keyspace_dialog, [Submit, Dismiss]);
 
 const CONTEXT: &str = "KeyspaceDialog";
 
-/// A text area's rows, as the web UI's `rows={5}`.
+/// A text area's rows, as the former web UI's `rows={5}`.
 const AREA_ROWS: f32 = 5.;
 
 pub fn key_bindings() -> Vec<KeyBinding> {

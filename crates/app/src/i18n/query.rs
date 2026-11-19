@@ -83,7 +83,7 @@ pub struct HistoryMessages {
     pub rows: fn(u64) -> String,
 }
 
-/// `n` with a comma between thousands, as the web UI wrote counts in both languages.
+/// `n` with a comma between thousands, as the former web UI wrote counts in both languages.
 pub fn thousands(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);

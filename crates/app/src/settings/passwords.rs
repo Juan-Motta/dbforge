@@ -1,7 +1,7 @@
 //! The Passwords section: where connection passwords are kept, the system
-//! keychain or the encrypted file, as the web UI's `Passwords`. Picking the
+//! keychain or the encrypted file, as the former web UI's `Passwords`. Picking the
 //! other one asks the core to move every saved secret there
-//! ([`commands::set_credential_storage`]), exactly as the web UI did; the
+//! ([`commands::set_credential_storage`]), exactly as the former web UI did; the
 //! window only shows the core's progress and outcome. No secret ever
 //! reaches this view: it reads the storage's name and the file's path.
 

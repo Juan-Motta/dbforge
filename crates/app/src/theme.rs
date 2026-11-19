@@ -156,7 +156,7 @@ impl Theme {
         }
     }
 
-    /// A tag's colour in this theme: the web UI's palette, lighter on dark.
+    /// A tag's colour in this theme: the former web UI's palette, lighter on dark.
     pub fn tag(&self, tag: TagColor) -> Hsla {
         let dark = self.appearance == Appearance::Dark;
         let (d, l) = match tag {

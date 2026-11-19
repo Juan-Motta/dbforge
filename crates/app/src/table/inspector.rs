@@ -3,7 +3,7 @@
 //! time controls, or text, shown as text, as indented JSON or as rendered
 //! Markdown. Save puts the value in the cell as a pending edit; ⌘S (Ctrl+S)
 //! does too, and a second one applies every change. Its left edge resizes
-//! it; the width is kept under `dbforge.inspectorWidth`, as the web UI kept it.
+//! it; the width is kept under `dbforge.inspectorWidth`, as the former web UI kept it.
 
 use dbforge_core::drivers::Column;
 use gpui::{
@@ -244,7 +244,7 @@ impl CellInspector {
         }
     }
 
-    /// Back to the default width (double-click on the edge), kept as the web UI kept it.
+    /// Back to the default width (double-click on the edge), kept as the former web UI kept it.
     fn reset_width(&mut self, cx: &mut Context<Self>) {
         let width = WIDTH.to_string();
         cx.update_global::<Preferences, _>(|preferences, _| preferences.set(keys::INSPECTOR_WIDTH, Some(width)));

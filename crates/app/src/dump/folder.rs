@@ -1,5 +1,5 @@
 //! Where database exports go: the folder chosen in Settings, kept under the
-//! web UI's `dbforge.exportFolder` preference, else `DBForge` in the user's
+//! former web UI's `dbforge.exportFolder` preference, else `DBForge` in the user's
 //! Documents.
 
 use gpui::{App, BorrowAppContext};

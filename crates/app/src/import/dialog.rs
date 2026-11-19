@@ -1,4 +1,4 @@
-//! The import dialog, as the web UI's `ImportDialog.tsx`: a file picked with
+//! The import dialog, as the former web UI's `ImportDialog.tsx`: a file picked with
 //! the OS's dialog, its format (guessed from its name) and how it is read,
 //! its first rows, and the column each field goes into; then its rows are
 //! added, counted as they go, and the import can be stopped. On a

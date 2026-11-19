@@ -1,4 +1,4 @@
-//! Where an update stands, as the web UI's `useUpdates.ts`: an automatic
+//! Where an update stands, as the former web UI's `useUpdates.ts`: an automatic
 //! check says something only when there is an update; a check the user asks
 //! for (the menu, Settings › About) always gets an answer.
 

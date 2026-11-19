@@ -1,4 +1,4 @@
-//! Settings › Agents (MCP), as the web UI's `McpSettings.tsx`: the MCP
+//! Settings › Agents (MCP), as the former web UI's `McpSettings.tsx`: the MCP
 //! server on or off, its port, the token agents send, and the steps that add
 //! DBForge to an agent ([`super::agent_setup`]). The core saves the settings
 //! and starts, restarts or stops the server to match.
@@ -25,7 +25,7 @@ use crate::ui::modal::{form_section, note};
 use crate::ui::option_list::{Mark, OptionItem, option_list};
 use crate::ui::{TextInput, TextInputEvent, enabled, icon, icon_button, primary_button};
 
-/// Bullets in place of the token while it is hidden: as many as the web UI shows.
+/// Bullets in place of the token while it is hidden: as many as the former web UI shows.
 const HIDDEN_TOKEN_LENGTH: usize = 32;
 
 /// The server's settings and state, as the core last reported them.

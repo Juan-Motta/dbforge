@@ -1,4 +1,4 @@
-//! The command palette (⌘K / Ctrl+K), as the web UI's `CommandPalette.tsx`:
+//! The command palette (⌘K / Ctrl+K), as the former web UI's `CommandPalette.tsx`:
 //! jump to a table or view of the selected connection, or run a command.
 //! [`search`] ranks what is typed; [`commands`] lists what can be run.
 

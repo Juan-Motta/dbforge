@@ -1,4 +1,4 @@
-//! The settings' list of tags, as the web UI's `TagsSection.tsx`. Colours,
+//! The settings' list of tags, as the former web UI's `TagsSection.tsx`. Colours,
 //! the confirmation switch, adding and deleting save at once; a name saves
 //! on Enter or when its field is left. Saves run one after another: a
 //! change made while one runs waits and applies to what that one saved. A
@@ -115,7 +115,7 @@ impl TagsSection {
         let edited = {
             let id = id.clone();
             cx.subscribe_in(&input, window, move |this, input, event: &TextInputEvent, window, cx| match event {
-                // A badge has room for so many characters, as the web UI's field allowed.
+                // A badge has room for so many characters, as the former web UI's field allowed.
                 TextInputEvent::Changed => {
                     let text = input.read(cx).text().to_owned();
                     let kept = clamp_tag_name(&text);

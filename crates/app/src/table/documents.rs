@@ -676,7 +676,7 @@ fn card(index: usize, context: &CardContext, _cx: &mut App) -> AnyElement {
     let card = &context.cards[index];
     let selected = context.selected.contains(&card.id);
     let editing = context.editing.as_ref().filter(|editing| editing.id == card.id);
-    // The pending state shows over the selection, as in the web UI.
+    // The pending state shows over the selection, as in the former web UI.
     let (border, background) = match card.state {
         Some(DocumentState::Edited) => (theme.warn.opacity(0.6), theme.warn.opacity(0.07)),
         Some(DocumentState::New) => (theme.ok.opacity(0.6), theme.ok.opacity(0.06)),

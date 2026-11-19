@@ -1,5 +1,5 @@
 //! The keys of a database found with `SCAN`, as a `:` tree or a flat list,
-//! as the web UI's `KeyList.tsx`: a pattern (applied with Enter) and a
+//! as the former web UI's `KeyList.tsx`: a pattern (applied with Enter) and a
 //! type to narrow them, a page at a time with "Load more", and each key's
 //! menu. A new scan keeps the keys shown until its page arrives, and a page
 //! of a scan that was replaced is dropped.

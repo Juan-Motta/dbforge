@@ -62,7 +62,7 @@ struct GlobalUpdates(Entity<Updates>);
 
 impl Global for GlobalUpdates {}
 
-/// Milliseconds since the epoch, as the web UI kept the last check.
+/// Milliseconds since the epoch, as the former web UI kept the last check.
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as i64)
 }

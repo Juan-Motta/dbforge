@@ -1,4 +1,4 @@
-//! The statement console, as the web UI's `StatementConsole.tsx`: the
+//! The statement console, as the former web UI's `StatementConsole.tsx`: the
 //! statements DBForge (and the agents using its MCP server) send to the
 //! databases, newest at the bottom, under the workspace. [`log`] holds its
 //! rules; [`StatementConsole`] draws it while it is open.
@@ -22,7 +22,7 @@ pub fn height(saved: Option<&str>) -> f32 {
     }
 }
 
-/// Whether the console was left open, as the web UI kept it (`true` or `false`); closed until one was kept.
+/// Whether the console was left open, as the former web UI kept it (`true` or `false`); closed until one was kept.
 pub fn is_open(saved: Option<&str>) -> bool {
     saved == Some("true")
 }

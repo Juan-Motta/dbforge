@@ -1,4 +1,4 @@
-//! redis-cli in a panel, as the web UI's `CliPanel.tsx`: one command per
+//! redis-cli in a panel, as the former web UI's `CliPanel.tsx`: one command per
 //! Enter, run in the tab's own session (it keeps the connection between
 //! commands and closes with the tab), replies printed as redis-cli prints
 //! them, ↑/↓ through the commands run, and a stop for a blocking command.
@@ -19,7 +19,7 @@ use crate::ui::{TextInput, TextInputEvent, icon_button};
 actions!(key_cli, [Older, Newer]);
 
 const CONTEXT: &str = "KeyCli";
-/// The panel's height, as the web UI's.
+/// The panel's height, as the former web UI's.
 pub const CLI_HEIGHT: f32 = 200.;
 
 pub fn key_bindings() -> Vec<KeyBinding> {

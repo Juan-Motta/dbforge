@@ -1,5 +1,5 @@
 //! The texts of Settings › Agents (MCP) and of the dialog asking the user to
-//! approve an agent's change, as the web UI's `mcp/messages.ts`.
+//! approve an agent's change, as the former web UI's `mcp/messages.ts`.
 
 /// The MCP settings' and approvals' texts in one language.
 pub struct McpMessages {

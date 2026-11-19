@@ -37,11 +37,12 @@
   <img src="docs/images/workspace.png" alt="The workspace: the explorer, a SQL console and its results">
 </p>
 
-> The screenshots come from the app's design canvas, which the app follows.
+> The screenshots show the previous (web-based) version of DBForge. The native app has the same layout and
+> features with its new look; the images are due to be retaken.
 
 ## Install
 
-**macOS:** download `DBForge-x.y.z.dmg` from the [latest release](https://github.com/Juan-Motta/dbforge/releases/latest), open it and drag **DBForge** to **Applications**. It runs on Apple silicon and Intel Macs with **macOS 10.13** or later, signed and notarized by Apple.
+**macOS:** download `DBForge-x.y.z.dmg` from the [latest release](https://github.com/Juan-Motta/dbforge/releases/latest), open it and drag **DBForge** to **Applications**. It runs on Apple silicon and Intel Macs with **macOS 10.15.7** or later, signed and notarized by Apple.
 
 **Linux (x86_64):** download `DBForge-x.y.z-amd64.AppImage`, make it executable (`chmod +x`) and open it. On Debian or Ubuntu you can install `DBForge-x.y.z-amd64.deb` instead (`sudo apt install ./DBForge-x.y.z-amd64.deb`). Both update themselves.
 
@@ -59,7 +60,7 @@
 | **Cosmos DB** | Containers as rows or as JSON items, and a SQL console per container |
 | **Redis** | A key browser by pattern and type, each type's editor, and a redis-cli console |
 
-Reach servers through an **SSH tunnel** — with a password, a private key or your SSH agent — and choose how **SSL** is used: from off to verifying the server's certificate and name, with your own CA and client certificates. Passwords stay in the macOS keychain, or in an encrypted file if you choose. Tag a connection as **PROD** and DBForge asks before anything changes it.
+Reach servers through an **SSH tunnel** — with a password, a private key or your SSH agent — and choose how **SSL** is used: from off to verifying the server's certificate and name, with your own CA and client certificates. Passwords stay in the system's credential store (the macOS Keychain, Windows Credential Manager or the Secret Service on Linux), or in an encrypted file if you choose. Tag a connection as **PROD** and DBForge asks before anything changes it.
 
 ## Updates
 
@@ -69,7 +70,7 @@ DBForge checks for a new version once a day and shows it with the release notes.
 
 ### Query
 
-A console per tab with highlighting and completion. Run one statement or the whole script, see each result in its own tab, with timing and row counts, and export or copy them. A script that stops partway still shows what its earlier statements did.
+A console per tab with highlighting and completion. Run the selection or the whole script, see each result in its own tab, with timing and row counts, and export or copy them. A script that stops partway still shows what its earlier statements did.
 
 ### Browse and edit tables
 
@@ -125,41 +126,81 @@ Turn on **Settings → Agents (MCP)**, pick your agent and copy its command. By 
 
 ## Build from source
 
-You need Node.js 24 with pnpm, and Rust 1.90 or later.
+DBForge is a native Rust app: its window is drawn with [GPUI](https://www.gpui.rs). You need Rust 1.90 or later
+([rustup](https://rustup.rs)) and, per system:
+
+- **macOS:** the Xcode Command Line Tools (`xcode-select --install`). The Metal shaders compile when the app
+  starts, so the full Xcode isn't needed.
+- **Linux (Debian or Ubuntu):** the libraries GPUI builds against:
+
+  ```bash
+  sudo apt-get install -y build-essential pkg-config cmake clang libfontconfig-dev libfreetype-dev \
+    libwayland-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev
+  ```
+
+- **Windows:** the Visual Studio Build Tools with the "Desktop development with C++" workload (the MSVC
+  compiler and the Windows SDK).
 
 ```bash
-pnpm install
-pnpm tauri dev            # run the app from source
-pnpm dev                  # run the UI in the browser, with sample data, at http://localhost:5173
+cargo run -p dbforge              # run the app from source
+cargo run -p dbforge --release    # the same, optimised
 ```
+
+The executable also serves AI agents over stdio with `--mcp-stdio` (see above).
+
+### Tests and checks
 
 ```bash
-pnpm test                 # frontend tests (Vitest)
-pnpm lint                 # oxlint
-cd backend && cargo test --lib   # backend tests; the ones that need database containers are ignored
+cargo test --workspace --lib                         # unit tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
 ```
 
-```bash
-scripts/make-dmg.sh       # build release/DBForge-<version>.dmg (needs dmgbuild)
-```
+Tests that need a real database are ignored by default; each names the server and port it expects (for
+example a PostgreSQL on port 55432). Start those servers, for instance in Docker, and run
+`cargo test --workspace --lib -- --ignored`. `scripts/test-tls-certs.sh` makes the certificates the TLS tests use.
 
-Releases, signing and updates: [docs/RELEASING.md](docs/RELEASING.md).
+### Packages and releases
+
+`scripts/make-app.sh` builds the Mac app, `scripts/make-dmg.sh` the DMG, `scripts/make-linux.sh` the AppImage and
+the .deb, and `scripts/make-windows.sh` the Windows installer, all into `release/`. How a version is signed,
+notarized, published and updated: [docs/RELEASING.md](docs/RELEASING.md).
 
 ### Structure
 
 ```
-frontend/
-  app/          The shell: the window, its tabs and dialogs
-  components/   Reusable, feature-agnostic UI (Button, Modal, Select, data grid…)
-  domain/       Core types shared across features (Connection, Engine, TableRef)
-  features/     One folder per feature, with its components, logic and styles
-  styles/       Design tokens (theme.css) and global base styles
-backend/        Rust backend (Tauri): one driver per engine, and the commands the UI calls
-scripts/        Release tooling: the DMG, the Linux and Windows packages, release notes and the update manifest
+crates/
+  core/       dbforge-core: the logic, with no UI. One driver per engine, connections, credentials,
+              SSH tunnels, queries, edits, export and import, dumps, backups, history, the statement
+              log, and the MCP server with its stdio bridge
+  app/        dbforge: the GPUI app. One module per feature (explorer, query, table, structure,
+              diagram, keyspace, palette, settings, export, import, dump, backup, mcp, updates…),
+              reusable controls in ui/, texts in English and Spanish in i18n/, colours in theme.rs
+  release/    dbforge-release: signs and verifies the updater's packages
+packaging/    Icons, the macOS Info.plist, the Linux .desktop and .deb control, the Windows NSIS script,
+              and the updater's public key
+scripts/      Packaging and release tooling
+docs/         Releasing, and the README's images
 ```
 
 Conventions:
 
-- Styles use CSS Modules next to each component; colors come only from the tokens in `styles/theme.css`.
-- Pure logic lives outside components and is unit tested.
-- A feature imports from `components/` and `domain/`, not from another feature.
+- Pure logic lives outside the views and is unit tested; views only draw and dispatch.
+- The UI never blocks on the database: core calls run off the UI thread, and a late answer to an outdated
+  request is dropped.
+- Every text the UI shows is in `crates/app/src/i18n`, in both languages; colours come only from `theme.rs`.
+- Configuration and data live where earlier versions kept them (identifier `dev.dbforge.app`), in the same
+  formats, so an update keeps everything.
+
+### Development hooks
+
+These environment variables help while working on the app:
+
+| Variable | What it does |
+| --- | --- |
+| `DBFORGE_DIR` | Keeps the configuration and data in `$DBFORGE_DIR/config` and `$DBFORGE_DIR/data` instead of the installed app's folders, so a development run never touches your real connections |
+| `DBFORGE_OPEN` | Debug builds: opens a view or dialog at start, such as `settings#agents`, `palette`, `query:<connection id>#history` or `table:<connection id>/<path>#edits` (the full list is on `Shell::open_for_development` in `crates/app/src/shell/mod.rs`) |
+| `DBFORGE_SQL`, `DBFORGE_KEY` | Debug builds: the script a `DBFORGE_OPEN` console runs, the Redis key a key browser selects |
+| `DBFORGE_PICK` | Debug builds: the path file dialogs answer with, instead of asking |
+| `DBFORGE_EXPAND` | Debug builds: connection ids (comma-separated, or `all`) whose whole tree opens at start |
+| `DBFORGE_UPDATE_ENDPOINT`, `DBFORGE_UPDATE_PUBKEY`, `DBFORGE_UPDATE_INSTALL_PATH` | Debug builds: try the updater against a local manifest (see [docs/RELEASING.md](docs/RELEASING.md)) |

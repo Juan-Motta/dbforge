@@ -1,8 +1,8 @@
 //! A node's right-click menu: the commands it offers. Only commands whose
 //! behaviour exists are listed; features that open tabs or dialogs add theirs.
-//! A connection's own commands follow the web UI's order: a new query first,
+//! A connection's own commands follow the former web UI's order: a new query first,
 //! then copy its URL, duplicate, edit, delete. A table's or view's start
-//! with opening its rows, its structure, then a new query, as the web UI's
+//! with opening its rows, its structure, then a new query, as the former web UI's
 //! do; a schema's (or a database that is its own schema) offer its ER
 //! diagram after the new query. A MongoDB collection's copies also offer its
 //! mongosh `find()` and `countDocuments()`. A connection's server objects

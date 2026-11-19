@@ -232,7 +232,7 @@ impl Shell {
                 self.open_export_dialog(source, window, cx);
             }
             ExplorerEvent::ImportRows { connection, table } => {
-                // An open tab of the table shows the new rows on its next refresh, as in the web UI.
+                // An open tab of the table shows the new rows on its next refresh, as in the former web UI.
                 let target = ImportTarget { connection: connection.clone(), table: table.clone(), rows: None };
                 self.open_import_dialog(target, window, cx);
             }
@@ -365,7 +365,7 @@ impl Shell {
         let palette = cx.new(|cx| CommandPalette::new(source, commands, window, cx));
         palette.read(cx).focus(window, cx);
         let chosen = cx.subscribe_in(&palette, window, |this, _, event: &PaletteEvent, window, cx| {
-            // The palette closes first, as the web UI's did, then what was chosen runs.
+            // The palette closes first, as the former web UI's did, then what was chosen runs.
             this.close_dialog(window, cx);
             this.run_palette(event.clone(), window, cx);
         });

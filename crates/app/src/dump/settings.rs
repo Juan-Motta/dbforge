@@ -1,4 +1,4 @@
-//! Settings › Export and import, as the web UI's `ExportSettings.tsx` and
+//! Settings › Export and import, as the former web UI's `ExportSettings.tsx` and
 //! `ExportFolderUsage.tsx`: where database exports go (and back to the
 //! default), how much the exports there take and deleting them (the first
 //! press asks, with the count and size; the second deletes, only files

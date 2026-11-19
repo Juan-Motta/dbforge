@@ -1,4 +1,4 @@
-//! Drawing Settings › Backup, as the web UI's `BackupSettings.tsx`: Export
+//! Drawing Settings › Backup, as the former web UI's `BackupSettings.tsx`: Export
 //! writes the configuration where the OS's save dialog says (passwords and
 //! the MCP token only when ticked: the core writes them in plain text, in a
 //! file only its owner can read); Import reads a file, says what it holds
@@ -62,7 +62,7 @@ struct Ticked {
 }
 
 pub struct BackupSection {
-    /// Passwords and the MCP token go in the file: on by default, as in the web UI.
+    /// Passwords and the MCP token go in the file: on by default, as in the former web UI.
     secrets: bool,
     busy: bool,
     outcome: Option<Outcome>,

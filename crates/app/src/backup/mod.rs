@@ -1,4 +1,4 @@
-//! Settings › Backup, as the web UI's `features/backup`: DBForge's
+//! Settings › Backup, as the former web UI's `features/backup`: DBForge's
 //! configuration written to a file (passwords and the MCP token only when
 //! asked, in plain text, as the core writes them), or a file read back,
 //! showing what it holds and applying the parts ticked, merging: nothing
@@ -16,7 +16,7 @@ pub use section::{BackupEvent, BackupSection};
 use crate::i18n::Language;
 use crate::theme::ThemePreference;
 
-/// The keys a backup keeps the window's preferences under, as the web UI wrote them.
+/// The keys a backup keeps the window's preferences under, as the former web UI wrote them.
 pub mod keys {
     pub const THEME: &str = "theme";
     pub const LANGUAGE: &str = "language";

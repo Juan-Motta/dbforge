@@ -1,5 +1,5 @@
 //! What the New database / role / user dialog asks for on each engine, as
-//! the web UI's `newObject.ts`: its fields, when it is complete, the request
+//! the former web UI's `newObject.ts`: its fields, when it is complete, the request
 //! it sends and the texts it shows. Pure, so it is tested without a window.
 
 use dbforge_core::connections::model::Engine;

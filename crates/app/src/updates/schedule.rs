@@ -1,7 +1,7 @@
-//! When the automatic check runs, as the web UI's `schedule.ts`: once a day,
+//! When the automatic check runs, as the former web UI's `schedule.ts`: once a day,
 //! a moment after launch when a day has passed, and while the app stays
 //! open. The last check is kept in the preferences, in milliseconds since
-//! the epoch, under the web UI's key.
+//! the epoch, under the former web UI's key.
 
 use std::time::Duration;
 
@@ -30,7 +30,7 @@ pub fn last_check(saved: Option<&str>) -> Option<i64> {
 }
 
 /// Whether the automatic check is on: on until the user turns it off, as
-/// the web UI's stored flag (`"true"` or `"false"`).
+/// the former web UI's stored flag (`"true"` or `"false"`).
 pub fn automatic(saved: Option<&str>) -> bool {
     saved.is_none_or(|saved| saved == "true")
 }
@@ -69,6 +69,6 @@ mod tests {
         assert!(automatic(None));
         assert!(automatic(Some("true")));
         assert!(!automatic(Some("false")));
-        assert!(!automatic(Some("anything else")), "as the web UI read its flag");
+        assert!(!automatic(Some("anything else")), "as the former web UI read its flag");
     }
 }

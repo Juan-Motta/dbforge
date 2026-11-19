@@ -18,8 +18,8 @@ func color(_ hex: UInt32, alpha: CGFloat = 1) -> NSColor {
             blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
 }
 
-// The window stays light: Finder draws the icon labels dark in light mode. Colours are the light theme's
-// tokens (frontend/styles/theme.css).
+// The window stays light: Finder draws the icon labels dark in light mode. Colours are a light background,
+// the app's terracotta accent and a dark grey for the text.
 let top = color(0xFAFAF8)
 let bottom = color(0xECECE8)
 let accent = color(0xB9521A)

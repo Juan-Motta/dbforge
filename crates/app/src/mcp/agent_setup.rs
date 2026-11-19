@@ -1,4 +1,4 @@
-//! Settings › Agents › Add DBForge to an agent, as the web UI's
+//! Settings › Agents › Add DBForge to an agent, as the former web UI's
 //! `AgentSetup.tsx`: pick an agent and how it reaches DBForge, then the
 //! steps that add DBForge to it, a prompt that has the agent do it itself,
 //! and the note that has it use DBForge in a project. Over stdio (the

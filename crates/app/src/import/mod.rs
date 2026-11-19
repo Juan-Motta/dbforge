@@ -1,4 +1,4 @@
-//! Importing a CSV, TSV or JSON file into a table, as the web UI's
+//! Importing a CSV, TSV or JSON file into a table, as the former web UI's
 //! `features/import`: the file's first rows, each field mapped to a column
 //! (by name until the user picks), then its rows added. SQL engines take
 //! them in one transaction; document databases a batch at a time. On a
@@ -17,7 +17,7 @@ pub use dialog::{ImportDialog, ImportEvent, key_bindings};
 use crate::table::TableView;
 
 /// Where an import goes, and the rows view to read again once rows went in
-/// (the table's tab it was opened from; none from the explorer, as in the web UI).
+/// (the table's tab it was opened from; none from the explorer, as in the former web UI).
 #[derive(Debug, Clone)]
 pub struct ImportTarget {
     pub connection: Connection,

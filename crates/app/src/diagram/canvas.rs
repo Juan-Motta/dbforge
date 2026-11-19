@@ -250,7 +250,7 @@ impl Element for DiagramCanvas {
     }
 }
 
-/// The background's dots, fixed to the canvas as the web UI's were.
+/// The background's dots, fixed to the canvas as the former web UI's were.
 fn dots(bounds: Bounds<Pixels>, theme: &Theme) -> Vec<PaintQuad> {
     let tint = theme.text3.opacity(0.3);
     let (width, height) = (f32::from(bounds.size.width), f32::from(bounds.size.height));

@@ -1,4 +1,4 @@
-//! One key, as the web UI's `KeyDetail.tsx`: its type, TTL and size, its
+//! One key, as the former web UI's `KeyDetail.tsx`: its type, TTL and size, its
 //! value a page at a time (fields, items, members or entries, filtered by
 //! the server where the type allows), the picked element in a viewer that
 //! shows it as text, JSON, hex or MessagePack and edits it, and the key's
@@ -553,7 +553,7 @@ impl From<KeyAction> for DialogKind {
     }
 }
 
-/// A field of the dialog adding an element, as the web UI's `addFields`.
+/// A field of the dialog adding an element, as the former web UI's `addFields`.
 fn add_field(name: FieldName, m: &KeyspaceMessages) -> FormField {
     match name {
         FieldName::Field => FormField::new(name, m.field, FieldKind::Text),

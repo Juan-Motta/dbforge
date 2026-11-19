@@ -1,4 +1,4 @@
-//! The statement console's rules, as the web UI's `statementLog.ts`: how
+//! The statement console's rules, as the former web UI's `statementLog.ts`: how
 //! statements read at start and those arriving meanwhile merge, what each
 //! filter shows, a statement as it is pasted into a console, and how times
 //! and durations are written. Pure, so they are tested without a window.
@@ -108,7 +108,7 @@ pub fn duration(ms: u64) -> String {
         return format!("{ms} ms");
     }
     // JavaScript's `toFixed(2)` rounds an exact half up, where Rust's
-    // formatting rounds it to even: 1125 ms is 1.13 s, as the web UI wrote it.
+    // formatting rounds it to even: 1125 ms is 1.13 s, as the former web UI wrote it.
     // Only multiples of 125 ms are exact in binary.
     if ms.is_multiple_of(125) && ms % 10 == 5 {
         let hundredths = ms / 10 + 1;

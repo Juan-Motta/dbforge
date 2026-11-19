@@ -1,4 +1,4 @@
-//! A database's two dialogs, as the web UI's `DumpDialogs.tsx`.
+//! A database's two dialogs, as the former web UI's `DumpDialogs.tsx`.
 //!
 //! Export writes the whole database with pg_dump to a .sql file in the
 //! export folder (or one picked for this export only): what it holds,

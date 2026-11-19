@@ -1,6 +1,6 @@
 //! How the key browser writes and reads values: TTLs, sizes, the hit rate,
 //! a value as JSON or hex, scores and `field=value` lines, and the
-//! redis-cli commands it copies. A port of the web UI's `keyspace.ts`.
+//! redis-cli commands it copies. A port of the former web UI's `keyspace.ts`.
 
 use dbforge_core::drivers::redis::{Entry, KeyEdit, NewKey, Text};
 use serde_json::{Number, Value};

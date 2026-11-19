@@ -55,7 +55,7 @@ impl Render for NoPreview {
 }
 
 /// A statement on one line, its runs of spaces and line breaks one space
-/// each, as the web UI's one-line row showed it.
+/// each, as the former web UI's one-line row showed it.
 fn on_one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -242,7 +242,7 @@ impl StatementConsole {
         }
     }
 
-    /// Back to the default height (double-click on the edge), kept as the web UI kept it.
+    /// Back to the default height (double-click on the edge), kept as the former web UI kept it.
     fn reset_height(&mut self, cx: &mut Context<Self>) {
         let height = super::height(None).to_string();
         cx.update_global::<Preferences, _>(|preferences, _| preferences.set(keys::STATEMENTS_HEIGHT, Some(height)));

@@ -60,7 +60,7 @@ impl Approvals {
     }
 
     /// The user's answer to request `id`, from the approval dialog's buttons
-    /// only. It leaves the queue whatever the core says, as in the web UI;
+    /// only. It leaves the queue whatever the core says, as in the former web UI;
     /// false when the core had nothing waiting under it any more.
     pub fn answer(&mut self, id: &str, approved: bool, cx: &mut Context<Self>) -> bool {
         self.queue.take(id);

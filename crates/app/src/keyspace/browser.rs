@@ -1,4 +1,4 @@
-//! A Redis database in its tab, as the web UI's `KeyBrowser.tsx`: its keys
+//! A Redis database in its tab, as the former web UI's `KeyBrowser.tsx`: its keys
 //! on the left; the server's metrics, the selected key and the CLI on the
 //! right. Choosing a key mounts its detail anew; a change of the keys (a
 //! key added, renamed or deleted) scans again and reads the metrics again,

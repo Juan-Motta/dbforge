@@ -1,6 +1,6 @@
 //! The Redis key browser: a database's keys found with `SCAN` (as a `:`
 //! tree or a flat list), the selected key's value a page at a time with
-//! its edits, the server's metrics and a redis-cli panel. A port of the web
+//! its edits, the server's metrics and a redis-cli panel. A port of the former web
 //! UI's `features/keyspace`.
 
 mod browser;
@@ -31,7 +31,7 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
     bindings
 }
 
-/// A type's colours, as the web UI's `kind-*` classes: its text and its
+/// A type's colours, as the former web UI's `kind-*` classes: its text and its
 /// badge's tint; module types share a neutral one.
 fn kind_tint(theme: &Theme, kind: &str) -> (Hsla, Hsla) {
     match kind {

@@ -211,7 +211,7 @@ fn num(raw: &Map<String, Value>, key: &str, fallback: f64) -> f64 {
     raw.get(key).and_then(Value::as_f64).unwrap_or(fallback)
 }
 
-/// A value as the web UI wrote it (JavaScript's `String`): a list's items
+/// A value as the former web UI wrote it (JavaScript's `String`): a list's items
 /// joined with commas, `null` inside one as nothing.
 fn js_string(value: &Value) -> String {
     match value {
@@ -235,7 +235,7 @@ fn rounded(n: f64) -> String {
     if n < 0. { format!("-{}", thousands((-n) as u64)) } else { thousands(n as u64) }
 }
 
-/// `n` as the web UI wrote counts (`toLocaleString('en-US')`): commas
+/// `n` as the former web UI wrote counts (`toLocaleString('en-US')`): commas
 /// between thousands, up to three decimals.
 pub fn format_count(n: f64) -> String {
     let negative = n < 0.;

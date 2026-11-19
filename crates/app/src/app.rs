@@ -108,7 +108,7 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::updates::dialog_key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
     set_menus(cx);
-    // Closing the window quits, as the Tauri app did.
+    // Closing the window quits, as the former Tauri app did.
     cx.on_window_closed(|cx| {
         if cx.windows().is_empty() {
             cx.quit();
