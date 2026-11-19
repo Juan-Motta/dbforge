@@ -40,6 +40,10 @@ pub struct SettingsMessages {
     pub about: &'static str,
     pub tagline: &'static str,
     pub version: &'static str,
+    pub check_automatically: &'static str,
+    pub check_automatically_description: &'static str,
+    /// Settings › About's button, and the app menu's item.
+    pub check_now: &'static str,
 }
 
 /// The settings' list of tags in one language.

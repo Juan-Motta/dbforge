@@ -22,6 +22,7 @@ pub fn setup(cx: &mut TestAppContext) -> tempfile::TempDir {
         let (_core_side, received) = channel();
         EventHub::start(received, cx);
         crate::mcp::Approvals::start(cx);
+        crate::updates::Updates::start_with(crate::updates::config::Settings::current(), false, cx);
         dir
     })
 }

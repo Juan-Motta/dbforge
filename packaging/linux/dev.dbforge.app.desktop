@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DBForge
+Comment=A fast desktop viewer and editor for your databases
+Exec=DBForge
+Icon=dev.dbforge.app
+Terminal=false
+Categories=Development;Database;
+StartupWMClass=dev.dbforge.app

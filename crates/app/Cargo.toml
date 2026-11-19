@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+# The updater's signatures (base64 of minisign text) and their public key.
+base64 = "0.22"
 # Local dates and times for the query history, as the core reads them.
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
 dbforge-core = { path = "../core" }
@@ -27,6 +29,16 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # The OS's preferred languages, for the first language DBForge speaks.
 sys-locale = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+# The updater: latest.json's versions, compared as Tauri's updater compared them.
+semver = "1"
+# The updater's signature check, the one Tauri's updater made, so both accept the same updates.
+minisign-verify = "0.3"
+# The updater's downloads (latest.json and the update), over rustls with the core's crypto provider.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
+# Where the updater stages an update before it replaces the app, on the app's own volume.
+tempfile = "3"
+# The update manifest (latest.json).
+serde = { version = "1", features = ["derive"] }
 # Grapheme boundaries, so the caret steps over a whole "é" or emoji.
 unicode-segmentation = "1"
 # Account URIs (Cosmos DB) and URL query strings.
@@ -38,8 +50,19 @@ uuid = { version = "1.29", features = ["v4"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
 
+# The update of a Mac app (a .app.tar.gz) and of an AppImage; macOS swaps the bundles with `renamex_np`.
+[target.'cfg(unix)'.dependencies]
+flate2 = "1"
+libc = "0.2"
+tar = "0.4"
+
+# The executable's icon and version on Windows (build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 # Windows drawn headless in tests.
 gpui = { version = "=0.2.2", features = ["test-support"] }
-tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "time"] }
+# Signs test updates with a throwaway key, as the release does (crates/release).
+minisign = "0.10"

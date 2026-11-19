@@ -1,0 +1,22 @@
+[package]
+name = "dbforge-release"
+description = "DBForge's release tooling: signs the updates the app installs, as its updater verifies them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "dbforge-release"
+path = "src/main.rs"
+
+[dependencies]
+# The updater key, the signatures and their check: minisign, the format the app's updater (and Tauri's
+# before it) verifies.
+minisign = "0.10"
+base64 = "0.22"
+
+[dev-dependencies]
+# What the app's updater (and the Tauri updater of installed 0.3.x copies) verifies signatures with.
+minisign-verify = "0.3"
+tempfile = "3"

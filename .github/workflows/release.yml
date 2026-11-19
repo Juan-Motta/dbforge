@@ -1,9 +1,9 @@
-# Each pushed version tag (v1.2.3) builds a signed, notarized universal DMG
-# (Apple silicon and Intel) with the installer window of scripts/make-dmg.sh,
-# the Linux AppImage and .deb of scripts/make-linux.sh, and the Windows
-# installer of scripts/make-windows.sh, then publishes them as one GitHub
-# Release with the updater's latest.json for every platform. The tag must
-# match the version in backend/tauri.conf.json.
+# Each pushed version tag (v1.2.3) builds the GPUI app (crates/app) into a signed, notarized universal DMG
+# (Apple silicon and Intel) with the installer window of scripts/make-dmg.sh, the Linux AppImage and .deb of
+# scripts/make-linux.sh, and the Windows installer of scripts/make-windows.sh, then publishes them as one
+# GitHub Release with the updater's latest.json for every platform. Installed copies, the Tauri 0.3.x ones
+# included, update from that manifest: the artifacts keep their names and formats, and every update is
+# signed with the same updater key (scripts/sign-update.sh). The tag must match the version in Cargo.toml.
 name: Release
 
 on:
@@ -27,7 +27,7 @@ jobs:
   macos:
     if: github.event_name == 'push' || inputs.macos
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,9 +35,9 @@ jobs:
 
       - name: Check the tag matches the app's version
         run: |
-          VERSION="$(jq -r .version backend/tauri.conf.json)"
+          VERSION="$(scripts/app-version.sh)"
           if [[ "$GITHUB_REF_TYPE" == tag && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
-            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in backend/tauri.conf.json" >&2
+            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in Cargo.toml" >&2
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -57,31 +57,15 @@ jobs:
             [[ -n "${!name}" ]] || { echo "The secret for $name is missing" >&2; exit 1; }
           done
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
 
       - name: Test
         # The tests that need database containers are ignored by default and don't run here.
-        run: |
-          pnpm test
-          cargo test --manifest-path backend/Cargo.toml --lib
+        run: cargo test --workspace --lib --locked
 
       - name: Import the Developer ID certificate
         env:
@@ -90,7 +74,7 @@ jobs:
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
-          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          (umask 077; echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12")
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
@@ -116,15 +100,15 @@ jobs:
           NOTARY_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          UPDATER_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TARGET: universal-apple-darwin
         run: |
           export NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           # The secret holds the .p8 file's text as is, like ColiUI's.
           (umask 077; printf '%s\n' "$NOTARY_KEY_P8" > "$NOTARY_KEY_PATH")
-          # Tauri signs the app with the identity imported above; the script signs and notarizes the DMG,
-          # then packs and signs the update the app's updater installs.
+          # scripts/make-app.sh signs the app with the identity imported above (hardened runtime); the
+          # script signs and notarizes the DMG, then packs and signs the update the app's updater installs.
           scripts/make-dmg.sh
 
       - name: Check the DMG and its app are signed and notarized
@@ -138,6 +122,12 @@ jobs:
           trap 'hdiutil detach "$MOUNT" -quiet || true' EXIT
           codesign --verify --deep --strict --verbose=2 "$MOUNT/DBForge.app"
           spctl --assess --type execute --verbose=2 "$MOUNT/DBForge.app"
+          # The identity installed copies are replaced by.
+          [[ "$(defaults read "$MOUNT/DBForge.app/Contents/Info.plist" CFBundleIdentifier)" == dev.dbforge.app ]]
+          [[ "$(defaults read "$MOUNT/DBForge.app/Contents/Info.plist" CFBundleShortVersionString)" == "$VERSION" ]]
+          lipo -verify_arch arm64 x86_64 "$MOUNT/DBForge.app/Contents/MacOS/DBForge"
+          # The update holds the same app, at the top of the archive as the updaters expect.
+          tar -tzf "release/DBForge-$VERSION.app.tar.gz" | grep -qx "DBForge.app/Contents/MacOS/DBForge"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -152,19 +142,19 @@ jobs:
         if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/cert.p12"
 
   linux:
     runs-on: ubuntu-22.04 # the oldest supported glibc, so the AppImage runs on more distributions
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
       - name: Check the tag matches the app's version
         run: |
-          VERSION="$(jq -r .version backend/tauri.conf.json)"
+          VERSION="$(scripts/app-version.sh)"
           if [[ "$GITHUB_REF_TYPE" == tag && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
-            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in backend/tauri.conf.json" >&2
+            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in Cargo.toml" >&2
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -174,39 +164,43 @@ jobs:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: '[[ -n "$UPDATER_KEY" ]] || { echo "The secret for UPDATER_KEY is missing" >&2; exit 1; }'
 
-      - name: Install Tauri's Linux packages
+      - name: Install the libraries GPUI builds against
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libssl-dev build-essential file patchelf
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
+          sudo apt-get install -y build-essential pkg-config cmake clang file \
+            libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
 
       - name: Test
-        # The macOS job runs the frontend tests; the backend's run here too, on Linux.
-        run: cargo test --manifest-path backend/Cargo.toml --lib
+        run: cargo test --workspace --lib --locked
 
+      # Building runs third-party code (build scripts, appimagetool), so the key only reaches the
+      # signing step, which runs the signer built beforehand.
       - name: Build the AppImage and the .deb
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: scripts/make-linux.sh
+
+      - name: Build the signer
+        run: cargo build --release --locked -p dbforge-release
+
+      - name: Sign the updates
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          scripts/sign-update.sh "release/DBForge-$VERSION-amd64.AppImage" "$VERSION"
+          scripts/sign-update.sh "release/DBForge-$VERSION-amd64.deb" "$VERSION"
+
+      - name: Check the packages
+        run: |
+          DEB="release/DBForge-$VERSION-amd64.deb"
+          [[ "$(dpkg-deb --field "$DEB" Package)" == db-forge ]]
+          [[ "$(dpkg-deb --field "$DEB" Version)" == "$VERSION" ]]
+          dpkg-deb --contents "$DEB" | grep -q ' ./usr/bin/DBForge$'
+          file "release/DBForge-$VERSION-amd64.AppImage" | grep -q ELF
 
       - uses: actions/upload-artifact@v4
         with:
@@ -220,7 +214,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -229,9 +223,9 @@ jobs:
 
       - name: Check the tag matches the app's version
         run: |
-          VERSION="$(jq -r .version backend/tauri.conf.json)"
+          VERSION="$(scripts/app-version.sh)"
           if [[ "$GITHUB_REF_TYPE" == tag && "${GITHUB_REF_NAME#v}" != "$VERSION" ]]; then
-            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in backend/tauri.conf.json" >&2
+            echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in Cargo.toml" >&2
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -241,32 +235,28 @@ jobs:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: '[[ -n "$UPDATER_KEY" ]] || { echo "The secret for UPDATER_KEY is missing" >&2; exit 1; }'
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: cargo test --manifest-path backend/Cargo.toml --lib
+        run: cargo test --workspace --lib --locked
 
+      # As on Linux: the key only reaches the signing step, which runs the signer built beforehand.
       - name: Build the installer
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: scripts/make-windows.sh
+
+      - name: Build the signer
+        run: cargo build --release --locked -p dbforge-release
+
+      - name: Sign the update
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/sign-update.sh "release/DBForge-$VERSION-x64-setup.exe" "$VERSION"
 
       - uses: actions/upload-artifact@v4
         with:

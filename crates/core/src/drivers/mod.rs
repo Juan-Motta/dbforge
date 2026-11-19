@@ -927,7 +927,8 @@ pub async fn drop_database(connection: &Connection, password: Option<&str>, name
 
 /// rustls needs one process-wide crypto provider when several are compiled in,
 /// as here (the drivers bring their own). Installing it twice is harmless.
-pub(crate) fn install_crypto() {
+/// The app calls it too before its own HTTPS requests (the updater's).
+pub fn install_crypto() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();

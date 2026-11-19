@@ -3,7 +3,8 @@
 //! while it is open; and a dialog over them when one is open (the command
 //! palette, the settings, the connection and admin dialogs, exporting and
 //! importing rows, a database's dump and restore, the notice of unreadable
-//! settings); and over everything, while an agent waits for the user, the
+//! settings); over those, while a check found something to say, the update
+//! dialog; and over everything, while an agent waits for the user, the
 //! dialog approving its change. Each part is its own view, which its
 //! feature grows.
 //! ⌘K / Ctrl+K toggles the palette, ⌘B / Ctrl+B the explorer and ⌘J /
@@ -38,6 +39,7 @@ use crate::preferences::{Preferences, keys};
 use crate::settings::{Section, SettingsDialog, SettingsEvent};
 use crate::statement_log::{StatementConsole, StatementConsoleEvent};
 use crate::theme::{ActiveTheme, Theme};
+use crate::updates::{Phase, UpdateDialog, Updates};
 use crate::workspace::WorkspaceEvent;
 
 actions!(shell, [TogglePalette, ToggleExplorer, ToggleStatements]);
@@ -76,6 +78,13 @@ struct OpenApproval {
     restore: Option<gpui::FocusHandle>,
 }
 
+/// The update dialog while a check has something to say, and where the
+/// keyboard was before it took it.
+struct OpenUpdate {
+    dialog: Entity<UpdateDialog>,
+    restore: Option<gpui::FocusHandle>,
+}
+
 /// The statement console while it is open, and what the window hears from it.
 struct OpenStatements {
     console: Entity<StatementConsole>,
@@ -92,6 +101,7 @@ pub struct Shell {
     statements: Option<OpenStatements>,
     dialog: Option<OpenDialog>,
     approval: Option<OpenApproval>,
+    update: Option<OpenUpdate>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -108,6 +118,9 @@ impl Shell {
             cx.observe_global_in::<Preferences>(window, |_, window, cx| {
                 let themed = Theme::sync(window.appearance().into(), cx);
                 let translated = Locale::sync(cx);
+                if translated {
+                    crate::app::set_menus(cx);
+                }
                 if themed || translated {
                     window.refresh();
                 }
@@ -142,6 +155,10 @@ impl Shell {
         subscriptions.push(cx.observe_in(&Approvals::global(cx), window, |this, _, window, cx| {
             this.sync_approval(window, cx);
         }));
+        // A check found an update, or the user asked: the dialog shows until it is dismissed.
+        subscriptions.push(cx.observe_in(&Updates::global(cx), window, |this, _, window, cx| {
+            this.sync_update(window, cx);
+        }));
         let mut shell = Self {
             explorer,
             explorer_open: true,
@@ -150,6 +167,7 @@ impl Shell {
             statements: None,
             dialog: None,
             approval: None,
+            update: None,
             _subscriptions: subscriptions,
         };
         // Requests that came while the window opened.
@@ -329,7 +347,7 @@ impl Shell {
 
     /// Opens the command palette on the selected connection's tables, with the commands that apply now.
     pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() || self.approval.is_some() {
+        if self.dialog.is_some() || self.approval.is_some() || self.update.is_some() {
             return;
         }
         let explorer = self.explorer.read(cx);
@@ -513,7 +531,7 @@ impl Shell {
     /// Closes the dialog shown; the explorer (or, hidden, the window) takes the keyboard back.
     fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dialog = None;
-        if self.approval.is_none() {
+        if self.approval.is_none() && self.update.is_none() {
             self.focus_explorer(window, cx);
         }
         cx.notify();
@@ -563,6 +581,35 @@ impl Shell {
         cx.notify();
     }
 
+    /// Shows the update dialog while the updater has something to say, over
+    /// any other dialog (Settings › About asks from one); once it closes, the
+    /// keyboard goes back where it was.
+    fn sync_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = Updates::global(cx).read(cx).phase().shown();
+        match (shown, self.update.is_some()) {
+            (true, false) => {
+                let restore = window.focused(cx);
+                let dialog = cx.new(UpdateDialog::new);
+                if self.approval.is_none() {
+                    dialog.read(cx).focus(window);
+                }
+                self.update = Some(OpenUpdate { dialog, restore });
+            }
+            (false, true) => {
+                let restore = self.update.take().and_then(|open| open.restore);
+                if self.approval.is_none() {
+                    match restore {
+                        Some(handle) => window.focus(&handle),
+                        None if self.dialog.is_none() => self.focus_explorer(window, cx),
+                        None => window.blur(),
+                    }
+                }
+            }
+            _ => return,
+        }
+        cx.notify();
+    }
+
     /// `DBFORGE_OPEN`, in development builds: a dialog to open at start, for
     /// screenshots without clicking: `new-connection`, `edit:<id>` or
     /// `delete:<id>`, and for the connection dialog `#ssl` or `#ssh` to show
@@ -594,6 +641,11 @@ impl Shell {
     /// `statement-log` the statement console, `new-object:<id>` the New
     /// database dialog (`#role`, `#user` for the others) and
     /// `drop-database:<id>/<database>` the Drop database dialog.
+    /// `update` checks for updates as the menu does (point it at a local
+    /// manifest with `DBFORGE_UPDATE_ENDPOINT`), and `update#install` installs
+    /// what it finds (over `DBFORGE_UPDATE_INSTALL_PATH`, a stand-in);
+    /// `update#downloading`, `#installing` and `#failed` show a sample update
+    /// in that phase.
     /// `approval` shows a sample of an agent's request to approve, on the
     /// first saved connection (`#plain`: no agent name, tag or database;
     /// `#many`: two waiting); answering it reaches the core, which has
@@ -633,6 +685,7 @@ impl Shell {
                 return self.open_settings(section, window, cx);
             }
             ("approval", _) => return self.show_approval_for_development(seed.as_deref(), cx),
+            ("update", _) => return show_update_for_development(seed.as_deref(), cx),
             ("statement-log", _) => {
                 if self.statements.is_none() {
                     self.set_statements(true, cx);
@@ -969,6 +1022,43 @@ fn press_when_ready<V: 'static>(
     .detach();
 }
 
+/// `DBFORGE_OPEN=update`: a check, or a sample update in the phase `seed` names.
+#[cfg(debug_assertions)]
+fn show_update_for_development(seed: Option<&str>, cx: &mut Context<Shell>) {
+    use std::sync::Arc;
+
+    use crate::updates::{Stage, Update};
+
+    let update = Arc::new(Update {
+        version: "0.4.0".into(),
+        current_version: dbforge_core::VERSION.into(),
+        notes: Some(
+            "## Features\n\n- **app:** a native window, drawn with GPUI\n- **updates:** install and restart\n\n\
+             ## Fixes\n\n- **explorer:** keep the tree on refresh"
+                .into(),
+        ),
+        url: "http://127.0.0.1:9/never".into(),
+        signature: String::new(),
+        installer: crate::updates::target::Installer::App,
+    });
+    let phase = match seed {
+        Some("downloading") => Some(Phase::Installing {
+            update,
+            stage: Stage::Downloading { downloaded: 12 * 1024 * 1024 + 300 * 1024, total: Some(31 * 1024 * 1024) },
+        }),
+        Some("installing") => Some(Phase::Installing { update, stage: Stage::Installing }),
+        Some("failed") => {
+            Some(Phase::Failed { error: "The update's signature is not valid".into(), update: Some(update) })
+        }
+        _ => None,
+    };
+    Updates::global(cx).update(cx, |updates, cx| match phase {
+        Some(phase) => updates.show_for_development(phase, cx),
+        None if seed == Some("install") => updates.check_and_install_for_development(cx),
+        None => updates.check(true, cx),
+    });
+}
+
 /// A dialog over the window, on its scrim. Render it as the window's last
 /// child, so it paints over the rest. It must not be deferred: a dialog's
 /// dropdowns are, and GPUI panics on a deferred draw inside another
@@ -1023,6 +1113,11 @@ impl Render for Shell {
                 self.dialog
                     .as_ref()
                     .map(|dialog| dialog_layer("dialog-scrim", theme, dialog.view.clone(), dialog.placement)),
+            )
+            .children(
+                self.update
+                    .as_ref()
+                    .map(|open| dialog_layer("update-scrim", theme, open.dialog.clone().into(), Placement::Center)),
             )
             // Last, so it covers any other dialog.
             .children(

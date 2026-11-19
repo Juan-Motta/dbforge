@@ -34,6 +34,7 @@ pub mod tags;
 pub mod test_support;
 pub mod theme;
 pub mod ui;
+pub mod updates;
 pub mod workspace;
 
 pub use app::run;

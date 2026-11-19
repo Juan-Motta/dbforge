@@ -27,6 +27,7 @@ pub mod statement_log;
 pub mod tunnel;
 
 pub use crate::core::{Core, Dirs, IDENTIFIER};
+pub use crate::drivers::install_crypto;
 pub use crate::error::{AppError, Result};
 pub use crate::events::{Event, Events};
 

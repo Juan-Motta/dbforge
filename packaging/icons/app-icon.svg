@@ -3,7 +3,7 @@
        spark (the agents' MCP access), in white on a terracotta gradient.
        macOS layout: an 824 px rounded square centred on the 1024 px canvas,
        the margin left for the shadow the Dock expects. Source of every size:
-       `pnpm tauri icon backend/icons/app-icon.svg -o backend/icons`. -->
+       `pnpm tauri icon packaging/icons/app-icon.svg -o packaging/icons`. -->
   <defs>
     <linearGradient id="background" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#D45325"/>

@@ -9,10 +9,10 @@ format = "UDZO"
 filesystem = "HFS+"
 files = [app]
 symlinks = {"Applications": "/Applications"}
-icon = "backend/icons/icon.icns"
+icon = "packaging/icons/icon.icns"
 
 # Drawn by scripts/make-dmg-background.swift: the arrow and the INSERT INTO statement between the icons.
-background = "backend/dmg/background.tiff"
+background = "packaging/macos/dmg-background.tiff"
 # Content size; it matches the 660 x 380 background.
 window_rect = ((200, 120), (660, 380))
 default_view = "icon-view"

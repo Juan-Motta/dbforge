@@ -18,7 +18,9 @@ use crate::tags::TagsSection;
 use crate::tags::section::TagsEvent;
 use crate::theme::{ActiveTheme, Appearance, Theme, ThemePreference};
 use crate::ui::field::Tooltip;
-use crate::ui::{choice, choice_group, glass, icon, icon_button};
+use crate::ui::option_list::{Mark, OptionItem, option_list};
+use crate::ui::{button, choice, choice_group, glass, icon, icon_button};
+use crate::updates::Updates;
 
 actions!(settings_dialog, [Dismiss]);
 
@@ -286,6 +288,38 @@ impl SettingsDialog {
                     .child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(m.version))
                     .child(div().text_size(px(13.)).text_color(theme.text2).child(dbforge_core::VERSION)),
             )
+            .child(self.render_updates(cx))
+    }
+
+    /// Below the version, as the web UI: the daily check, then a check now.
+    fn render_updates(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = *cx.theme();
+        let m = &cx.messages().settings_dialog;
+        let automatic = Updates::automatic(cx);
+        div()
+            .mt(px(18.))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(option_list(
+                &theme,
+                vec![
+                    OptionItem::new("updates-automatic", Mark::Check, m.check_automatically, automatic)
+                        .description(m.check_automatically_description)
+                        .on_select(cx.listener(move |_, _, _, cx| {
+                            Updates::set_automatic(!automatic, cx);
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                ],
+            ))
+            .child(div().flex().child(
+                button(&theme, Some("refresh"), m.check_now).id("updates-check").cursor_pointer().on_click(
+                    cx.listener(|_, _, _, cx| {
+                        Updates::global(cx).update(cx, |updates, cx| updates.check(true, cx));
+                    }),
+                ),
+            ))
     }
 }
 

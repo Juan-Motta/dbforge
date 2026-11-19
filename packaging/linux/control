@@ -1,0 +1,14 @@
+Package: db-forge
+Version: @VERSION@
+Architecture: amd64
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: dbforge
+Section: devel
+Priority: optional
+Depends: libc6 (>= 2.35), libfontconfig1, libfreetype6, libwayland-client0, libx11-xcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1
+Recommends: mesa-vulkan-drivers
+Conflicts: dbforge
+Replaces: dbforge
+Description: A fast desktop viewer and editor for your databases
+ DBForge connects to PostgreSQL, MySQL, SQLite, SQL Server, MongoDB, Cosmos DB
+ and Redis: browse, query, edit, export and import their data.

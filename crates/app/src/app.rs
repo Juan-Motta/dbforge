@@ -13,10 +13,12 @@ use crate::assets::Assets;
 use crate::backend::{Backend, runtime};
 use crate::events::{self, EventHub};
 use crate::i18n::Locale;
+use crate::i18n::Translate;
 use crate::mcp::Approvals;
 use crate::preferences::{PreferenceFile, Preferences};
 use crate::shell::{self, Shell};
 use crate::theme::Theme;
+use crate::updates::{CheckForUpdates, Updates};
 
 actions!(dbforge, [Quit]);
 
@@ -60,6 +62,7 @@ pub fn run() -> i32 {
         EventHub::start(received, cx);
         // Before the hub forwards anything, so an agent's request sent while the window opens waits for it.
         Approvals::start(cx);
+        Updates::start(cx);
         // Theme and language before the first frame, so it never flickers.
         Theme::sync(cx.window_appearance().into(), cx);
         Locale::sync(cx);
@@ -102,9 +105,9 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::import::key_bindings());
     cx.bind_keys(crate::dump::key_bindings());
     cx.bind_keys(crate::mcp::key_bindings());
+    cx.bind_keys(crate::updates::dialog_key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
-    // The app menu: on macOS the menu bar's DBForge menu, with Quit.
-    cx.set_menus(vec![Menu { name: "DBForge".into(), items: vec![MenuItem::action("Quit DBForge", Quit)] }]);
+    set_menus(cx);
     // Closing the window quits, as the Tauri app did.
     cx.on_window_closed(|cx| {
         if cx.windows().is_empty() {
@@ -118,6 +121,20 @@ fn bind_keys(cx: &mut App) {
         async {}
     })
     .detach();
+}
+
+/// The app menu (on macOS the menu bar's DBForge menu): Check for Updates…
+/// and Quit, in the language in use. Set again when the language changes.
+pub fn set_menus(cx: &mut App) {
+    let check = cx.messages().settings_dialog.check_now;
+    cx.set_menus(vec![Menu {
+        name: "DBForge".into(),
+        items: vec![
+            MenuItem::action(check, CheckForUpdates),
+            MenuItem::separator(),
+            MenuItem::action("Quit DBForge", Quit),
+        ],
+    }]);
 }
 
 fn open_window(cx: &mut App) {

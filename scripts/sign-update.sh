@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Signs an update the app's updater installs, writing <file>.sig beside it. The signature is bound to
-# <version>, so a manifest can't pair the file with another version number.
+# Signs an update the app's updater installs, writing <file>.sig beside it, then checks the signature with
+# the public key the app ships (packaging/updater.pub), so a release never carries an update no installed
+# copy would accept. The signature is bound to <version>, so a manifest can't pair the file with another
+# version number. Its format is the one `tauri signer` wrote, which DBForge 0.3.x copies verify too.
 # Usage: scripts/sign-update.sh <file> <version>
-# Needs TAURI_SIGNING_PRIVATE_KEY: the updater key, its text or the path of its file; and, when the key
-# has one, TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+# Needs UPDATER_PRIVATE_KEY: the updater key, its text or the path of its file; and, when the key has one,
+# UPDATER_PRIVATE_KEY_PASSWORD. Both stay in the environment, out of every command line.
+# Optional: UPDATER_PUBLIC_KEY_FILE, the public key to check against (default packaging/updater.pub), for a
+# test key.
 set -euo pipefail
 
 FILE="${1:?usage: scripts/sign-update.sh <file> <version>}"
 VERSION="${2:?missing the version}"
-: "${TAURI_SIGNING_PRIVATE_KEY:?the updater key is missing}"
+: "${UPDATER_PRIVATE_KEY:?the updater key is missing}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PUBLIC_KEY="${UPDATER_PUBLIC_KEY_FILE:-$ROOT/packaging/updater.pub}"
 
 rm -f "$FILE.sig"
-# The signer reads a key file from TAURI_SIGNING_PRIVATE_KEY_PATH and only the key's text from
-# TAURI_SIGNING_PRIVATE_KEY; either way the key stays out of the command line.
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
-if [[ -f "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
-    env -u TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH="$TAURI_SIGNING_PRIVATE_KEY" \
-        pnpm tauri signer sign --app-version "$VERSION" "$FILE"
-else
-    pnpm tauri signer sign --app-version "$VERSION" "$FILE"
-fi
+cargo build --quiet --release --locked --manifest-path "$ROOT/Cargo.toml" -p dbforge-release
+SIGNER="$ROOT/target/release/dbforge-release"
+"$SIGNER" sign "$FILE" "$VERSION"
+"$SIGNER" verify "$FILE" "$VERSION" "$PUBLIC_KEY"

@@ -16,6 +16,7 @@ mod statements;
 mod structure;
 mod table;
 mod transfer;
+mod updates;
 
 use gpui::{App, BorrowAppContext, Global};
 
@@ -31,6 +32,7 @@ pub use self::statements::StatementMessages;
 pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
 pub use self::transfer::{BackupMessages, DumpMessages, ExportMessages, ImportMessages};
+pub use self::updates::UpdateMessages;
 use crate::preferences::{Preferences, keys};
 
 /// The languages DBForge speaks.
@@ -181,6 +183,8 @@ pub struct Messages {
     pub backup: BackupMessages,
     /// Settings › Agents (MCP) and the dialog approving an agent's change.
     pub mcp: McpMessages,
+    /// The update dialog.
+    pub updates: UpdateMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

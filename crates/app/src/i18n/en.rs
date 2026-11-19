@@ -3,7 +3,7 @@ use dbforge_core::connections::tags::TagColor;
 use super::{
     AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, ExportMessages, HistoryMessages,
     ImportMessages, KeyspaceMessages, McpMessages, Messages, PaletteMessages, PlanMessages, QueryMessages,
-    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
+    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, UpdateMessages, thousands,
 };
 
 pub(super) const MESSAGES: Messages = Messages {
@@ -659,6 +659,9 @@ pub(super) const MESSAGES: Messages = Messages {
         about: "About",
         tagline: "A fast desktop viewer and editor for your databases.",
         version: "Version",
+        check_automatically: "Check for updates automatically",
+        check_automatically_description: "Once a day; DBForge asks before installing anything.",
+        check_now: "Check for Updates…",
     },
     tags: TagsMessages {
         tags: "Tags",
@@ -1003,5 +1006,24 @@ pub(super) const MESSAGES: Messages = Messages {
                       choose Agent access. Read only blocks writes, not everything an administrator account can \
                       do (ending sessions, server settings); for agents, a database user with only the rights \
                       they need is safest.",
+    },
+    updates: UpdateMessages {
+        title: "Software Update",
+        checking: "Checking for updates…",
+        available: |version| format!("DBForge {version} is available"),
+        current: |version| format!("You have {version}."),
+        notes: "What’s new",
+        no_notes: "No notes for this version.",
+        up_to_date: "DBForge is up to date",
+        up_to_date_detail: |version| format!("{version} is the latest version."),
+        downloading: "Downloading the update…",
+        downloaded: |done, total| format!("{done} of {total}"),
+        downloaded_so_far: |done| format!("{done} downloaded"),
+        installing: "Installing the update…",
+        failed: "The update couldn’t be completed",
+        later: "Later",
+        install: "Install and Restart",
+        retry: "Try Again",
+        ok: "OK",
     },
 };

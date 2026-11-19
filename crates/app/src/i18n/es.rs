@@ -3,7 +3,7 @@ use dbforge_core::connections::tags::TagColor;
 use super::{
     AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, ExportMessages, HistoryMessages,
     ImportMessages, KeyspaceMessages, McpMessages, Messages, PaletteMessages, PlanMessages, QueryMessages,
-    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
+    SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages, UpdateMessages, thousands,
 };
 
 pub(super) const MESSAGES: Messages = Messages {
@@ -691,6 +691,9 @@ pub(super) const MESSAGES: Messages = Messages {
         about: "Acerca de",
         tagline: "Un visor y editor de escritorio rápido para tus bases de datos.",
         version: "Versión",
+        check_automatically: "Buscar actualizaciones automáticamente",
+        check_automatically_description: "Una vez al día; DBForge pregunta antes de instalar nada.",
+        check_now: "Buscar actualizaciones…",
     },
     tags: TagsMessages {
         tags: "Etiquetas",
@@ -1038,6 +1041,25 @@ pub(super) const MESSAGES: Messages = Messages {
                       conexión y elige Acceso de agentes. Solo lectura bloquea las escrituras, no todo lo que \
                       puede hacer una cuenta de administrador (cerrar sesiones, ajustes del servidor); para \
                       agentes, lo más seguro es un usuario con solo los permisos que necesitan.",
+    },
+    updates: UpdateMessages {
+        title: "Actualización",
+        checking: "Buscando actualizaciones…",
+        available: |version| format!("DBForge {version} está disponible"),
+        current: |version| format!("Tienes la {version}."),
+        notes: "Novedades",
+        no_notes: "Esta versión no trae notas.",
+        up_to_date: "DBForge está al día",
+        up_to_date_detail: |version| format!("La {version} es la última versión."),
+        downloading: "Descargando la actualización…",
+        downloaded: |done, total| format!("{done} de {total}"),
+        downloaded_so_far: |done| format!("{done} descargados"),
+        installing: "Instalando la actualización…",
+        failed: "No se pudo completar la actualización",
+        later: "Más tarde",
+        install: "Instalar y reiniciar",
+        retry: "Reintentar",
+        ok: "OK",
     },
 };
 

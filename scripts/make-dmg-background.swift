@@ -1,4 +1,4 @@
-// Renders the DMG window background into backend/dmg/background.tiff.
+// Renders the DMG window background into packaging/macos/dmg-background.tiff.
 // Usage: swift scripts/make-dmg-background.swift
 //
 // The window is 660 x 380 pt. Finder draws the two icons and their labels itself (centres at x 180 and
@@ -10,7 +10,7 @@ import Foundation
 
 let size = CGSize(width: 660, height: 380)
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let output = root.appendingPathComponent("backend/dmg/background.tiff")
+let output = root.appendingPathComponent("packaging/macos/dmg-background.tiff")
 let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("dbforge-dmg-background")
 
 func color(_ hex: UInt32, alpha: CGFloat = 1) -> NSColor {

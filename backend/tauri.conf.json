@@ -35,11 +35,11 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
+      "../packaging/icons/32x32.png",
+      "../packaging/icons/128x128.png",
+      "../packaging/icons/128x128@2x.png",
+      "../packaging/icons/icon.icns",
+      "../packaging/icons/icon.ico"
     ]
   },
   "plugins": {
