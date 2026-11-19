@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 
+use dbforge_core::connections::model::Engine;
 use gpui::{AssetSource, SharedString};
 
 /// Each icon's path, drawn with a round 1.5px stroke.
@@ -79,6 +80,20 @@ const FILLED: &[(&str, &str)] = &[
 
 /// The app's assets: the icons.
 pub struct Assets;
+
+/// `engine`'s logo, in its own colours (drawn by `ui::engine_logo`, never tinted).
+pub fn engine_logo_svg(engine: Engine) -> &'static [u8] {
+    match engine {
+        Engine::Postgres => include_bytes!("../assets/engines/postgresql.svg"),
+        Engine::Mysql => include_bytes!("../assets/engines/mysql.svg"),
+        Engine::Mariadb => include_bytes!("../assets/engines/mariadb.svg"),
+        Engine::Sqlite => include_bytes!("../assets/engines/sqlite.svg"),
+        Engine::Sqlserver => include_bytes!("../assets/engines/sql-server.svg"),
+        Engine::Mongodb => include_bytes!("../assets/engines/mongodb.svg"),
+        Engine::Cosmosdb => include_bytes!("../assets/engines/cosmosdb.svg"),
+        Engine::Redis => include_bytes!("../assets/engines/redis.svg"),
+    }
+}
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {

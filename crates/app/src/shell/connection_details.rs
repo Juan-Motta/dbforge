@@ -18,7 +18,7 @@ use super::connection_facts::connection_facts;
 use crate::backend::Backend;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
-use crate::ui::{button, dot, engine_dot, glass, tag_badge};
+use crate::ui::{button, dot, engine_logo, glass, tag_badge};
 
 actions!(connection_details, [Dismiss]);
 
@@ -157,7 +157,7 @@ impl Render for ConnectionDetails {
                     .flex()
                     .items_center()
                     .gap(px(10.))
-                    .child(engine_dot(&theme, self.connection.engine).size(px(12.)).rounded(px(6.)))
+                    .child(engine_logo(self.connection.engine, 22.))
                     .child(
                         div()
                             .flex_1()
@@ -257,8 +257,14 @@ mod tests {
         let dir = crate::test_support::setup(cx);
         let file = dir.path().join("shop.db");
         std::fs::write(&file, b"").unwrap();
-        let (details, cx) = open(sqlite(file.to_str().unwrap()), cx);
-        assert_eq!(details.read_with(cx, |details, _| details.server().clone()), Server::Checking);
+        cx.update(|cx| cx.bind_keys(key_bindings()));
+        let connection = sqlite(file.to_str().unwrap());
+        // Checked as the view is made: the reply may come back as soon as the window yields.
+        let (details, cx) = cx.add_window_view(|window, cx| {
+            let details = ConnectionDetails::new(connection, None, window, cx);
+            assert_eq!(details.server(), &Server::Checking);
+            details
+        });
         crate::test_support::draw(cx);
         crate::test_support::wait_until(cx, "the test", |cx| {
             details.read_with(cx, |details, _| details.server() != &Server::Checking)

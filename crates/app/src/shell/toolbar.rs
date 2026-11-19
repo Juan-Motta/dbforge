@@ -16,7 +16,7 @@ use super::connection_details::{ConnectionDetails, ConnectionDetailsEvent};
 use crate::i18n::Translate;
 use crate::theme::{ActiveTheme, MONO};
 use crate::ui::field::Tooltip;
-use crate::ui::{any, capsule, engine_dot, group, icon, segment, shortcut, tag_badge};
+use crate::ui::{any, capsule, engine_logo, group, icon, segment, shortcut, tag_badge};
 
 /// Room for the traffic lights on macOS, when the explorer that holds them is hidden.
 const TRAFFIC_LIGHTS: f32 = 72.;
@@ -123,7 +123,7 @@ impl Toolbar {
                             MouseButton::Left,
                             cx.listener(|this, _, window, cx| this.toggle_details(window, cx)),
                         )
-                        .child(engine_dot(theme, connection.engine))
+                        .child(engine_logo(connection.engine, 16.))
                         .child(div().min_w_0().truncate().child(connection.name.clone()))
                         .children(tag.as_ref().map(|tag| tag_badge(theme, tag)))
                         .child(icon("down", theme.text3, 12.)),

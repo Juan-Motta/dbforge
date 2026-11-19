@@ -11,6 +11,7 @@ pub mod choices;
 pub mod code_editor;
 pub mod edit;
 pub mod editing;
+pub mod engine_logo;
 pub mod error_line;
 pub mod field;
 pub mod file_field;
@@ -27,7 +28,6 @@ pub mod type_ahead;
 
 use std::time::Duration;
 
-use dbforge_core::connections::model::Engine;
 use dbforge_core::connections::tags::Tag;
 use gpui::{
     Animation, AnimationExt, AnyElement, BoxShadow, Div, ElementId, FontWeight, Hsla, IntoElement, ParentElement,
@@ -38,6 +38,7 @@ pub use button::{button, enabled, ghost_button, icon_button};
 pub use checkbox::Checkbox;
 pub use choices::{choice, choice_group};
 pub use code_editor::{CodeEditor, CodeEditorEvent};
+pub use engine_logo::engine_logo;
 pub use file_field::FileField;
 pub use menu::{MenuItem, PopoverMenu, Swatch, popover};
 pub use select::{Select, SelectEvent, SelectOption};
@@ -127,11 +128,6 @@ pub fn pill(label: &str, tint: Hsla) -> Div {
 /// A coloured dot: a connection's colour.
 pub fn dot(tint: Hsla) -> Div {
     div().size(px(8.)).rounded(px(4.)).flex_none().bg(tint)
-}
-
-/// A connection's engine, as a dot in its colour.
-pub fn engine_dot(theme: &Theme, engine: Engine) -> Div {
-    dot(theme.engine(engine))
 }
 
 /// A connection's tag (its environment: PROD, STAGE…) as a badge in the tag's colour.

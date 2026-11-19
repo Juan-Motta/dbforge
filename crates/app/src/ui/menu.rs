@@ -15,8 +15,9 @@ use gpui::{
 };
 
 use super::type_ahead::{TypeAhead, typed_text};
-use super::{dot, glass, icon};
+use super::{dot, engine_logo, glass, icon};
 use crate::theme::ActiveTheme;
+use dbforge_core::connections::model::Engine;
 
 actions!(popover_menu, [SelectPrevious, SelectNext, Confirm, Dismiss]);
 
@@ -44,6 +45,8 @@ pub type MenuHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 pub enum Swatch {
     Color(Hsla),
     Empty,
+    /// An engine's logo, in its own colours.
+    Engine(Engine),
 }
 
 /// One command in a [`PopoverMenu`].
@@ -112,8 +115,11 @@ impl MenuItem {
 /// A [`Swatch`] as drawn: a dot, or a dashed-looking ring for none.
 pub fn swatch(swatch: Swatch, ring: Hsla) -> impl IntoElement {
     match swatch {
-        Swatch::Color(tint) => dot(tint),
-        Swatch::Empty => div().size(px(8.)).rounded(px(4.)).flex_none().border_1().border_color(ring),
+        Swatch::Color(tint) => dot(tint).into_any_element(),
+        Swatch::Empty => {
+            div().size(px(8.)).rounded(px(4.)).flex_none().border_1().border_color(ring).into_any_element()
+        }
+        Swatch::Engine(engine) => engine_logo(engine, 16.).into_any_element(),
     }
 }
 

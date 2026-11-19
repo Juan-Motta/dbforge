@@ -11,6 +11,8 @@ pub mod backend;
 pub mod backup;
 pub mod connections;
 pub mod diagram;
+#[cfg(target_os = "macos")]
+pub mod dock_icon;
 pub mod dump;
 pub mod events;
 pub mod export;

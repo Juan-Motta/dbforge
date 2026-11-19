@@ -68,6 +68,8 @@ pub fn run() -> i32 {
         Locale::sync(cx);
         bind_keys(cx);
         open_window(cx);
+        #[cfg(target_os = "macos")]
+        crate::dock_icon::show_when_unbundled();
         cx.activate(true);
     });
     0

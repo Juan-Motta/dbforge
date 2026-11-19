@@ -40,9 +40,11 @@ actions!(connection_dialog, [Submit, Close, FocusNext, FocusPrevious]);
 
 const CONTEXT: &str = "ConnectionDialog";
 
-/// One size for every engine, so switching never resizes the dialog; the form scrolls.
+/// One size for every engine, so switching never resizes the dialog. Tall enough
+/// for the longest General form (MongoDB's, with its security option) to show
+/// whole; on a shorter window the form scrolls.
 const WIDTH: f32 = 640.;
-const HEIGHT: f32 = 640.;
+const HEIGHT: f32 = 760.;
 /// Room kept between the dialog and the window's edges.
 const MARGIN: f32 = 16.;
 
@@ -354,7 +356,7 @@ impl ConnectionDialog {
             .map(|engine| {
                 SelectOption::new(engine, engine.label())
                     .group(if is_relational(engine) { m.relational } else { m.nosql })
-                    .swatch(Swatch::Color(cx.theme().engine(engine)))
+                    .swatch(Swatch::Engine(engine))
             })
             .collect();
         let engine = form.engine;

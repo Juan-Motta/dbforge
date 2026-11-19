@@ -13,7 +13,7 @@ use super::{Activate, CONTEXT, Collapse, Expand, Explorer, ExplorerEvent, Select
 use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
 use crate::theme::{ActiveTheme, MONO, Theme};
-use crate::ui::{any, engine_dot, glass, group, icon, popover, segment, spinner, tag_badge};
+use crate::ui::{any, engine_logo, glass, group, icon, popover, segment, spinner, tag_badge};
 
 /// Every row is this tall, which lets the list draw only those in view.
 const ROW: f32 = 28.;
@@ -84,7 +84,7 @@ impl Explorer {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(engine_dot(&theme, node.engine))
+                        .child(engine_logo(node.engine, 16.))
                 } else {
                     div().flex_none().child(icon(kind_icon(node.kind), theme.text3, 15.))
                 };

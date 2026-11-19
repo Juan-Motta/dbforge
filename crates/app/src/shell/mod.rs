@@ -43,7 +43,7 @@ use crate::settings::{Section, SettingsDialog, SettingsEvent};
 use crate::statement_log::{StatementConsole, StatementConsoleEvent};
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::notice::{Notices, notice_layer};
-use crate::updates::{Phase, UpdateDialog, Updates};
+use crate::updates::{UpdateDialog, Updates};
 use crate::workspace::WorkspaceEvent;
 
 actions!(shell, [TogglePalette, ToggleExplorer, ToggleStatements]);
@@ -1072,7 +1072,7 @@ fn press_when_ready<V: 'static>(
 fn show_update_for_development(seed: Option<&str>, cx: &mut Context<Shell>) {
     use std::sync::Arc;
 
-    use crate::updates::{Stage, Update};
+    use crate::updates::{Phase, Stage, Update};
 
     let update = Arc::new(Update {
         version: "0.4.0".into(),

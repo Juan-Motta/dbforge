@@ -2,7 +2,6 @@
 //! OS shows ("system"). The colours are the Liquid Glass look's: a near-solid
 //! wall, translucent panels with a light rim, and the terracotta accent.
 
-use dbforge_core::connections::model::Engine;
 use dbforge_core::connections::tags::TagColor;
 use gpui::{App, BorrowAppContext, Global, Hsla, WindowAppearance, rgba};
 
@@ -173,20 +172,6 @@ impl Theme {
         color(if dark { d } else { l })
     }
 
-    /// An engine's colour, from its logo, for the dot beside a connection.
-    pub fn engine(&self, engine: Engine) -> Hsla {
-        color(match engine {
-            Engine::Postgres => 0x4F8CC9FF,
-            Engine::Mysql => 0x00A1C9FF,
-            Engine::Mariadb => 0xC49A6CFF,
-            Engine::Sqlite => 0x5FB0E3FF,
-            Engine::Sqlserver => 0xD8463BFF,
-            Engine::Mongodb => 0x4DB33DFF,
-            Engine::Redis => 0xE5473BFF,
-            Engine::Cosmosdb => 0x2F9BE8FF,
-        })
-    }
-
     /// Sets the theme the saved preference shows while the OS shows `system`;
     /// whether it changed, so the caller redraws only then.
     pub fn sync(system: Appearance, cx: &mut App) -> bool {
@@ -241,10 +226,6 @@ mod tests {
     fn tags_read_in_both_themes_as_the_web_ui_drew_them() {
         assert_eq!(Theme::new(Appearance::Dark).tag(TagColor::Red), color(0xF06A6AFF));
         assert_eq!(Theme::new(Appearance::Light).tag(TagColor::Red), color(0xC23030FF));
-        assert_eq!(
-            Theme::new(Appearance::Light).engine(Engine::Sqlite),
-            Theme::new(Appearance::Dark).engine(Engine::Sqlite)
-        );
     }
 
     #[test]
