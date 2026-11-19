@@ -199,6 +199,11 @@ impl Shell {
     /// `diagram:<id>/<database>/<schema>` opens a schema's ER diagram.
     /// `query:<id>#explain` explains `DBFORGE_SQL`'s statement instead of
     /// running it, and `#analyze` explains it with Analyze on.
+    /// `keyspace:<id>/<database>` opens a Redis database's key browser
+    /// (`keyspace:cache/db0`): `DBFORGE_KEY` selects a key, `#ttl`,
+    /// `#rename` or `#delete` then opens that dialog on it, `#add-key` the
+    /// dialog adding a key, `#list` shows the flat list, and `DBFORGE_SQL`
+    /// runs a command in the CLI.
     #[cfg(debug_assertions)]
     fn open_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::connections::form::Section;
@@ -222,6 +227,11 @@ impl Shell {
                 let section =
                     std::env::var("DBFORGE_OPEN").ok().and_then(|open| open.split_once('#').map(|(_, s)| s.to_owned()));
                 return self.open_table_for_development(target, section, window, cx);
+            }
+            Some(("keyspace", target)) => {
+                let seed =
+                    std::env::var("DBFORGE_OPEN").ok().and_then(|open| open.split_once('#').map(|(_, s)| s.to_owned()));
+                return self.open_keyspace_for_development(target, seed.as_deref(), window, cx);
             }
             Some(("query", target)) => {
                 return self.open_query_for_development(target, wanted_history, wanted_explain, window, cx);
@@ -295,6 +305,44 @@ impl Shell {
             }
             if history {
                 console.toggle_history(window, cx);
+            }
+        });
+    }
+
+    /// `DBFORGE_OPEN=keyspace:…`: a key browser, a key in it, a dialog, a CLI command.
+    #[cfg(debug_assertions)]
+    fn open_keyspace_for_development(
+        &mut self,
+        target: &str,
+        seed: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keyspace::{KeyAction, KeyView};
+        let Some((connection_id, database)) = target.split_once('/') else {
+            return eprintln!("DBFORGE_OPEN: keyspace:<id>/<database>, not {target}");
+        };
+        let browser =
+            self.workspace.update(cx, |workspace, cx| workspace.open_keyspace(connection_id, database, window, cx));
+        let Some(browser) = browser else { return eprintln!("DBFORGE_OPEN: no Redis connection {connection_id}") };
+        let action = match seed {
+            Some("ttl") => Some(KeyAction::Ttl),
+            Some("rename") => Some(KeyAction::Rename),
+            Some("delete") => Some(KeyAction::Delete),
+            _ => None,
+        };
+        browser.update(cx, |browser, cx| {
+            if let Ok(key) = std::env::var("DBFORGE_KEY") {
+                let key = dbforge_core::drivers::redis::Text::from(key.as_str());
+                browser.select(Some(key), action, window, cx);
+            }
+            match seed {
+                Some("add-key") => browser.open_add_key(window, cx),
+                Some("list") => browser.list().update(cx, |list, cx| list.set_view(KeyView::List, cx)),
+                _ => {}
+            }
+            if let Ok(command) = std::env::var("DBFORGE_SQL") {
+                browser.cli().update(cx, |cli, cx| cli.run(command, cx));
             }
         });
     }

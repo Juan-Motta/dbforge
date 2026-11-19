@@ -1,5 +1,5 @@
 //! The main area: the tab strip and the open tab under it (a query console,
-//! a table, a schema's diagram). With no tab open,
+//! a table, a schema's diagram, a Redis database's keys). With no tab open,
 //! it says how to open one. Tabs that aren't shown keep their state (a
 //! console's text and results, a table's page and pending changes) until
 //! they close. A dialog a tab opens (a table's PROD question) goes to the
@@ -22,6 +22,7 @@ use self::tabs::{TabKind, TableName, Tabs};
 use crate::backend::Backend;
 use crate::diagram::DiagramView;
 use crate::i18n::Translate;
+use crate::keyspace::{KeyBrowser, KeyBrowserEvent};
 use crate::query::{ConsoleEvent, QueryConsole};
 use crate::shell::OpenObject;
 use crate::shell::explorer::tree::NodeKind;
@@ -34,8 +35,7 @@ use crate::ui::card;
 const GAP: f32 = 10.;
 
 /// Whether `engine` has a query console: SQL, mongosh for MongoDB, SQL
-/// over a container for Cosmos DB. Redis's key browser holds its CLI and
-/// comes with its own feature.
+/// over a container for Cosmos DB. Redis's key browser holds its CLI.
 pub fn has_query_console(engine: Engine) -> bool {
     engine != Engine::Redis
 }
@@ -63,6 +63,12 @@ struct OpenTable {
     _events: Subscription,
 }
 
+/// An open key browser and what the workspace hears from it.
+struct OpenKeyspace {
+    browser: Entity<KeyBrowser>,
+    _events: Subscription,
+}
+
 /// What the workspace asks of the window.
 #[derive(Debug, Clone)]
 pub enum WorkspaceEvent {
@@ -76,6 +82,7 @@ pub struct Workspace {
     consoles: HashMap<String, OpenConsole>,
     tables: HashMap<String, OpenTable>,
     diagrams: HashMap<String, Entity<DiagramView>>,
+    keyspaces: HashMap<String, OpenKeyspace>,
     /// The connection selected in the explorer, and where in it: what "New query" queries.
     target: Option<(Connection, Vec<String>)>,
 }
@@ -220,6 +227,37 @@ impl Workspace {
         self.diagram(&tab.id).cloned()
     }
 
+    /// The key browser of tab `id`, if it is one.
+    pub fn keyspace(&self, id: &str) -> Option<&Entity<KeyBrowser>> {
+        self.keyspaces.get(id).map(|open| &open.browser)
+    }
+
+    /// Opens Redis database `database` (`db0`) of `connection_id` in the
+    /// key browser, or shows its tab when it is open. Nothing for a
+    /// connection that is gone.
+    pub fn open_keyspace(
+        &mut self,
+        connection_id: &str,
+        database: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<KeyBrowser>> {
+        let connection = Backend::global(cx).core().connections().list().into_iter().find(|c| c.id == connection_id)?;
+        if connection.engine != Engine::Redis {
+            return None;
+        }
+        let tab = self.tabs.open_keyspace(connection_id, &connection.name, database).clone();
+        if !self.keyspaces.contains_key(&tab.id) {
+            let browser = cx.new(|cx| KeyBrowser::new(&tab.id, connection_id.to_owned(), database, window, cx));
+            let events = cx.subscribe(&browser, |_, _, KeyBrowserEvent::Dialog(dialog), cx| {
+                cx.emit(WorkspaceEvent::Dialog(dialog.clone()));
+            });
+            self.keyspaces.insert(tab.id.clone(), OpenKeyspace { browser, _events: events });
+        }
+        cx.notify();
+        self.keyspace(&tab.id).cloned()
+    }
+
     /// Shows tab `id`, its console or its rows taking the keyboard.
     pub fn activate(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.tabs.activate(id);
@@ -254,6 +292,11 @@ impl Workspace {
     fn forget(&mut self, id: &str, cx: &mut Context<Self>) {
         self.tables.remove(id);
         self.diagrams.remove(id);
+        // The CLI's session keeps a connection until the tab closes.
+        if let Some(open) = self.keyspaces.remove(id) {
+            let session = open.browser.read(cx).session_id(cx);
+            QueryConsole::close_session(session, cx);
+        }
         if let Some(open) = self.consoles.remove(id) {
             let session = open.console.read(cx).session_id().to_owned();
             QueryConsole::close_session(session, cx);
@@ -261,9 +304,14 @@ impl Workspace {
     }
 
     /// Opens a table or view the explorer asked for, on its rows or on
-    /// `view`. Redis databases open in the key browser, which comes with its
-    /// feature; until then, nothing.
+    /// `view`, or a Redis database in the key browser.
     pub fn open(&mut self, object: &OpenObject, window: &mut Window, cx: &mut Context<Self>) {
+        if object.kind == NodeKind::Database {
+            if let [database] = object.path.as_slice() {
+                self.open_keyspace(&object.connection_id, database, window, cx);
+            }
+            return;
+        }
         if !matches!(object.kind, NodeKind::Table | NodeKind::View) {
             return;
         }
@@ -296,12 +344,18 @@ impl Render for Workspace {
         let console = id.and_then(|id| self.console(id)).cloned();
         let table = id.and_then(|id| self.table(id)).cloned();
         let diagram = id.and_then(|id| self.diagram(id)).cloned();
+        let keyspace = id.and_then(|id| self.keyspace(id)).cloned();
         let theme = *cx.theme();
-        let content = match (console, table, diagram) {
-            (Some(console), _, _) => div().flex_1().min_h_0().flex().flex_col().child(console).into_any_element(),
-            (_, Some(table), _) => div().flex_1().min_h_0().flex().flex_col().child(table).into_any_element(),
-            (_, _, Some(diagram)) => card(&theme).child(diagram).into_any_element(),
-            _ => self.empty(cx).into_any_element(),
+        let content = if let Some(console) = console {
+            div().flex_1().min_h_0().flex().flex_col().child(console).into_any_element()
+        } else if let Some(table) = table {
+            div().flex_1().min_h_0().flex().flex_col().child(table).into_any_element()
+        } else if let Some(diagram) = diagram {
+            card(&theme).child(diagram).into_any_element()
+        } else if let Some(keyspace) = keyspace {
+            card(&theme).flex().child(keyspace).into_any_element()
+        } else {
+            self.empty(cx).into_any_element()
         };
         div().flex_1().min_h_0().flex().flex_col().gap(px(GAP)).child(self.strip(cx)).child(content)
     }

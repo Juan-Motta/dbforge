@@ -13,6 +13,7 @@ pub mod events;
 pub mod grid;
 pub mod history;
 pub mod i18n;
+pub mod keyspace;
 pub mod preferences;
 pub mod query;
 pub mod shell;

@@ -2,8 +2,8 @@
 //! and how opening and closing change that. Query consoles are numbered
 //! "Query 1", "Query 2"… for as long as the app runs. A table opens once
 //! (opening it again shows its tab), or filtered in a tab of its own (a
-//! foreign key followed); a schema's diagram opens once too. Key browsers
-//! join with their feature.
+//! foreign key followed); a schema's diagram and a Redis database's key
+//! browser open once too.
 
 use dbforge_core::query::QueryScope;
 
@@ -18,6 +18,8 @@ pub enum TabKind {
     Table { table: TableName, filter: Option<String> },
     /// A schema's ER diagram.
     Diagram { database: String, schema: String },
+    /// A Redis database (`db0`) in the key browser.
+    Keyspace { database: String },
 }
 
 /// A table as a tab names it: its database, schema and name.
@@ -104,6 +106,17 @@ impl Tabs {
             title: title(schema),
             connection_id: connection_id.to_owned(),
             kind: TabKind::Diagram { database: database.to_owned(), schema: schema.to_owned() },
+        })
+    }
+
+    /// Opens a Redis database in the key browser, titled
+    /// `connection · db0`, or shows its tab when it is open already.
+    pub fn open_keyspace(&mut self, connection_id: &str, connection_name: &str, database: &str) -> &Tab {
+        self.open(Tab {
+            id: format!("keyspace:{connection_id}:{database}"),
+            title: format!("{connection_name} · {database}"),
+            connection_id: connection_id.to_owned(),
+            kind: TabKind::Keyspace { database: database.to_owned() },
         })
     }
 
@@ -223,6 +236,16 @@ mod tests {
         assert_eq!(tabs.active_id(), Some("query:2"));
         tabs.activate("nope");
         assert_eq!(tabs.active().map(|tab| tab.title.as_str()), Some("Query 2"));
+    }
+
+    #[test]
+    fn opens_one_key_browser_per_redis_database() {
+        let mut tabs = Tabs::default();
+        tabs.open_keyspace("cache", "cache-redis", "db0");
+        tabs.open_keyspace("cache", "cache-redis", "db1");
+        tabs.open_keyspace("cache", "cache-redis", "db0");
+        assert_eq!(titles(&tabs), ["cache-redis · db0", "cache-redis · db1"]);
+        assert_eq!(tabs.active_id(), Some("keyspace:cache:db0"));
     }
 
     fn orders() -> TableName {

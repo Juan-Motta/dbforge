@@ -6,6 +6,7 @@ mod connection;
 mod diagram;
 mod en;
 mod es;
+mod keyspace;
 mod query;
 mod structure;
 mod table;
@@ -14,6 +15,7 @@ use gpui::{App, Global};
 
 pub use self::connection::ConnectionMessages;
 pub use self::diagram::DiagramMessages;
+pub use self::keyspace::KeyspaceMessages;
 pub use self::query::{HistoryMessages, PlanMessages, QueryMessages, thousands};
 pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
@@ -125,6 +127,8 @@ pub struct Messages {
     pub structure: StructureMessages,
     /// An ER diagram.
     pub diagram: DiagramMessages,
+    /// The Redis key browser.
+    pub keyspace: KeyspaceMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).
