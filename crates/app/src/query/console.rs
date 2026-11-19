@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use dbforge_core::connections::model::Engine;
-use dbforge_core::drivers::ObjectKind;
+use dbforge_core::drivers::{ObjectKind, StatementResult};
 use dbforge_core::explorer::{completion_schema, list_objects};
 use dbforge_core::history::HistoryEntry;
 use dbforge_core::query::{QueryScope, cancel_query, close_session, explain_query, run_query};
@@ -26,7 +26,7 @@ use gpui::{
 };
 
 use super::plan::parse_plan;
-use super::results::{LastRun, ResultsPanel};
+use super::results::{LastRun, ResultsEvent, ResultsPanel};
 use super::shortcuts;
 use crate::backend::Backend;
 use crate::connections::engine::is_relational;
@@ -62,6 +62,8 @@ pub fn key_bindings() -> Vec<KeyBinding> {
 pub enum ConsoleEvent {
     /// Open this past run in a new console on its own connection.
     OpenQuery(HistoryEntry),
+    /// Export this result's rows.
+    ExportResult(StatementResult),
 }
 
 /// A run going now.
@@ -124,6 +126,10 @@ impl QueryConsole {
     ) -> Self {
         let syntax = Syntax::console(engine);
         let editor = cx.new(|cx| CodeEditor::new(sql.as_deref().unwrap_or(""), syntax, cx));
+        let results = cx.new(ResultsPanel::new);
+        let exporting = cx.subscribe(&results, |_, _, ResultsEvent::Export(result): &ResultsEvent, cx| {
+            cx.emit(ConsoleEvent::ExportResult(result.clone()));
+        });
         let mut console = Self {
             session_id,
             connection_id,
@@ -135,7 +141,7 @@ impl QueryConsole {
             picked_container: scope.container,
             containers_generation: 0,
             editor,
-            results: cx.new(ResultsPanel::new),
+            results,
             history: None,
             running: None,
             explaining: false,
@@ -144,7 +150,7 @@ impl QueryConsole {
             picker_menu: None,
             names_generation: 0,
             focus: cx.focus_handle(),
-            _subscriptions: Vec::new(),
+            _subscriptions: vec![exporting],
         };
         console.load_databases(cx);
         console.load_containers(cx);

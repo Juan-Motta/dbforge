@@ -7,7 +7,9 @@
 //! diagram after the new query. A MongoDB collection's copies also offer its
 //! mongosh `find()` and `countDocuments()`. A connection's server objects
 //! it can create follow its new query under a "New" heading; a database
-//! that can be dropped offers it last.
+//! that can be dropped offers it last. A table's or view's export, and a
+//! table's import of a file's rows, follow its new query; a PostgreSQL
+//! database's export to a .sql file and import of one come before its drop.
 
 use dbforge_core::connections::model::Engine;
 
@@ -15,6 +17,7 @@ use super::tree::{Node, NodeKind};
 use crate::admin::NewObjectKind;
 use crate::admin::new_object::{drops_databases, menu_icon_of, menu_label_of, new_objects};
 use crate::connections::engine::is_relational;
+use crate::dump::dumps;
 use crate::i18n::Messages;
 use crate::workspace::has_query_console;
 
@@ -50,6 +53,14 @@ pub enum NodeCommand {
     NewObject(NewObjectKind),
     /// Drops the database from its server, once its name is typed again.
     DropDatabase,
+    /// Exports a table's or view's rows.
+    ExportTable,
+    /// Imports a file's rows into a table (a view can't take them).
+    ImportRows,
+    /// Writes the database to a .sql file with pg_dump.
+    ExportDatabase,
+    /// Restores a .sql file into the database with psql.
+    ImportSqlFile,
 }
 
 impl NodeCommand {
@@ -70,6 +81,10 @@ impl NodeCommand {
             Self::DeleteConnection => m.delete_connection,
             Self::NewObject(kind) => menu_label_of(kind, &m.admin),
             Self::DropDatabase => m.admin.drop_menu,
+            Self::ExportTable => m.export_menu,
+            Self::ImportRows => m.import_menu,
+            Self::ExportDatabase => m.export_database,
+            Self::ImportSqlFile => m.import_sql_file,
         }
     }
 
@@ -91,6 +106,8 @@ impl NodeCommand {
             Self::EditConnection => "edit",
             Self::DeleteConnection | Self::DropDatabase => "trash",
             Self::NewObject(kind) => menu_icon_of(kind),
+            Self::ExportTable | Self::ExportDatabase => "export",
+            Self::ImportRows | Self::ImportSqlFile => "upload",
         }
     }
 }
@@ -105,6 +122,11 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
     if query {
         commands.push(NewQuery);
     }
+    match node.kind {
+        NodeKind::Table => commands.extend([ExportTable, ImportRows]),
+        NodeKind::View => commands.push(ExportTable),
+        _ => {}
+    }
     if diagram_target(node).is_some() {
         commands.push(ShowDiagram);
     }
@@ -117,7 +139,16 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
             vec![Refresh, CopyName, CopyConnectionUrl, DuplicateConnection, EditConnection, DeleteConnection]
         }
         NodeKind::Folder => vec![Refresh, RefreshConnection],
-        NodeKind::Database if drops_databases(node.engine) => vec![Refresh, RefreshConnection, CopyName, DropDatabase],
+        NodeKind::Database if dumps(node.engine) || drops_databases(node.engine) => {
+            let mut database = vec![Refresh, RefreshConnection, CopyName];
+            if dumps(node.engine) {
+                database.extend([ExportDatabase, ImportSqlFile]);
+            }
+            if drops_databases(node.engine) {
+                database.push(DropDatabase);
+            }
+            database
+        }
         NodeKind::Database | NodeKind::Schema => vec![Refresh, RefreshConnection, CopyName],
         NodeKind::Table | NodeKind::View if node.engine == Engine::Mongodb => {
             vec![Refresh, RefreshConnection, CopyName, CopyFind, CopyCount]
@@ -196,7 +227,7 @@ mod tests {
         assert_eq!(commands(&sql_node(NodeKind::Schema)), [NewQuery, Refresh, RefreshConnection, CopyName]);
         assert_eq!(
             commands(&sql_node(NodeKind::Database)),
-            [NewQuery, Refresh, RefreshConnection, CopyName, DropDatabase]
+            [NewQuery, Refresh, RefreshConnection, CopyName, ExportDatabase, ImportSqlFile, DropDatabase]
         );
         assert_eq!(commands(&sql_node(NodeKind::Folder)), [Refresh, RefreshConnection]);
         for engine in [Engine::Mongodb, Engine::Cosmosdb] {
@@ -210,19 +241,20 @@ mod tests {
     #[test]
     fn opens_a_table_s_or_view_s_rows_first_on_every_engine() {
         use NodeCommand::*;
-        for kind in [NodeKind::Table, NodeKind::View] {
-            assert_eq!(
-                commands(&sql_node(kind)),
-                [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName],
-                "{kind:?}"
-            );
-            let cosmos = Node { engine: Engine::Cosmosdb, ..sql_node(kind) };
-            assert_eq!(
-                commands(&cosmos),
-                [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName],
-                "{kind:?}"
-            );
-        }
+        assert_eq!(
+            commands(&sql_node(NodeKind::Table)),
+            [OpenData, ViewStructure, NewQuery, ExportTable, ImportRows, Refresh, RefreshConnection, CopyName]
+        );
+        let cosmos = Node { engine: Engine::Cosmosdb, ..sql_node(NodeKind::Table) };
+        assert_eq!(
+            commands(&cosmos),
+            [OpenData, ViewStructure, NewQuery, ExportTable, ImportRows, Refresh, RefreshConnection, CopyName]
+        );
+        // A view can't be imported into.
+        assert_eq!(
+            commands(&sql_node(NodeKind::View)),
+            [OpenData, ViewStructure, NewQuery, ExportTable, Refresh, RefreshConnection, CopyName]
+        );
         assert_eq!(OpenData.label(Language::En.messages()), "Open data");
         assert_eq!(OpenData.label(Language::Es.messages()), "Abrir datos");
         assert_eq!(ViewStructure.label(Language::En.messages()), "View structure");
@@ -270,7 +302,18 @@ mod tests {
         let collection = at(NodeKind::Table, Engine::Mongodb, &["shop", "orders"]);
         assert_eq!(
             commands(&collection),
-            [OpenData, ViewStructure, NewQuery, Refresh, RefreshConnection, CopyName, CopyFind, CopyCount]
+            [
+                OpenData,
+                ViewStructure,
+                NewQuery,
+                ExportTable,
+                ImportRows,
+                Refresh,
+                RefreshConnection,
+                CopyName,
+                CopyFind,
+                CopyCount
+            ]
         );
         assert_eq!(CopyFind.label(Language::En.messages()), "Copy find() query");
         assert_eq!(CopyCount.label(Language::Es.messages()), "Copiar consulta countDocuments()");
@@ -305,5 +348,19 @@ mod tests {
         assert_eq!(DropDatabase.label(m), "Drop database…");
         assert_eq!(DropDatabase.label(Language::Es.messages()), "Eliminar base de datos…");
         assert_eq!(Refresh.group(m), None);
+    }
+
+    #[test]
+    fn offers_a_postgresql_database_s_export_and_import_before_its_drop_and_names_them() {
+        use NodeCommand::*;
+        let mysql = at(NodeKind::Database, Engine::Mysql, &["app"]);
+        assert!(!commands(&mysql).contains(&ExportDatabase), "only PostgreSQL has pg_dump and psql");
+        let m = Language::En.messages();
+        assert_eq!(ExportTable.label(m), "Export…");
+        assert_eq!(ImportRows.label(m), "Import rows…");
+        assert_eq!(ExportDatabase.label(m), "Export database…");
+        assert_eq!(ImportSqlFile.label(Language::Es.messages()), "Importar archivo SQL…");
+        assert_eq!(ExportTable.icon(), "export");
+        assert_eq!(ImportRows.icon(), "upload");
     }
 }

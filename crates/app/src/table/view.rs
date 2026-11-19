@@ -38,7 +38,7 @@ use crate::i18n::Translate;
 use crate::sql::Syntax;
 use crate::structure::StructureSource;
 use crate::structure::format::summary;
-use crate::tags::confirming_tag;
+use crate::tags::confirming_tag_of;
 use crate::theme::ActiveTheme;
 use crate::ui::field::Tooltip;
 use crate::ui::{
@@ -296,6 +296,11 @@ impl TableView {
             }
         });
         self.refresh_grid(None, cx);
+    }
+
+    /// The filter the rows are shown with.
+    pub fn filter(&self) -> &RowFilter {
+        &self.filter
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
@@ -613,14 +618,7 @@ impl TableView {
         if !self.edits.has_edits() || self.applying() {
             return;
         }
-        let core = Backend::global(cx).core();
-        let environment = core
-            .connections()
-            .list()
-            .into_iter()
-            .find(|connection| connection.id == self.connection_id)
-            .and_then(|connection| connection.environment);
-        match confirming_tag(&core.tags().list(), environment.as_deref()) {
+        match confirming_tag_of(cx, &self.connection_id) {
             Some(tag) => self.confirm(tag, window, cx),
             None => self.apply(cx),
         }

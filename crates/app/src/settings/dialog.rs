@@ -9,6 +9,8 @@ use gpui::{
 };
 
 use super::{PasswordsSection, Section};
+use crate::backup::{BackupEvent, BackupSection};
+use crate::dump::ExportSettings;
 use crate::i18n::{Language, Locale, Translate};
 use crate::preferences::Preferences;
 use crate::tags::TagsSection;
@@ -34,12 +36,16 @@ pub enum SettingsEvent {
     /// The tags were saved: connections show their new names and colours,
     /// and lost a deleted tag when `removed`.
     TagsSaved { removed: bool },
+    /// A backup brought connections and tags in: the explorer reads them again.
+    ConnectionsChanged,
 }
 
 pub struct SettingsDialog {
     section: Section,
     tags: Entity<TagsSection>,
     passwords: Entity<PasswordsSection>,
+    exports: Entity<ExportSettings>,
+    backup: Entity<BackupSection>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -57,12 +63,21 @@ impl SettingsDialog {
     pub fn new(section: Section, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tags = cx.new(|cx| TagsSection::new(window, cx));
         let passwords = cx.new(PasswordsSection::new);
-        let subscriptions = vec![cx.subscribe(&tags, |_, _, TagsEvent::Saved { removed }, cx| {
-            cx.emit(SettingsEvent::TagsSaved { removed: *removed });
-        })];
+        let exports = cx.new(ExportSettings::new);
+        let backup = cx.new(BackupSection::new);
+        let subscriptions = vec![
+            cx.subscribe(&tags, |_, _, TagsEvent::Saved { removed }, cx| {
+                cx.emit(SettingsEvent::TagsSaved { removed: *removed });
+            }),
+            cx.subscribe_in(&backup, window, |this, _, BackupEvent::ConnectionsChanged, window, cx| {
+                // The tags may have come with them.
+                this.tags.update(cx, |tags, cx| tags.reload(window, cx));
+                cx.emit(SettingsEvent::ConnectionsChanged);
+            }),
+        ];
         let section =
             if Section::available().any(|available| available == section) { section } else { Section::Appearance };
-        Self { section, tags, passwords, focus: cx.focus_handle(), _subscriptions: subscriptions }
+        Self { section, tags, passwords, exports, backup, focus: cx.focus_handle(), _subscriptions: subscriptions }
     }
 
     /// Takes the keyboard, so Escape reaches it.
@@ -123,11 +138,11 @@ impl SettingsDialog {
                 (t.tags, Some(t.tags_intro), self.tags.clone().into_any_element())
             }
             Section::Passwords => (m.passwords, Some(m.passwords_intro), self.passwords.clone().into_any_element()),
+            Section::Exports => (m.exports, Some(m.exports_intro), self.exports.clone().into_any_element()),
+            Section::Backup => (m.backup, Some(m.backup_intro), self.backup.clone().into_any_element()),
             Section::About => (m.about, None, self.render_about(cx).into_any_element()),
-            // Not drawn until their features join (`Section::available`).
-            Section::Exports | Section::Agents | Section::Backup => {
-                (self.section.label(m), None, div().into_any_element())
-            }
+            // Not drawn until its feature joins (`Section::available`).
+            Section::Agents => (self.section.label(m), None, div().into_any_element()),
         };
         div()
             .id("settings-content")
@@ -349,7 +364,7 @@ mod tests {
     #[gpui::test]
     fn draws_every_section_it_offers_and_applies_a_theme_and_a_language_at_once(cx: &mut TestAppContext) {
         let _dir = setup(cx);
-        let (dialog, cx) = cx.add_window_view(|window, cx| SettingsDialog::new(Section::Exports, window, cx));
+        let (dialog, cx) = cx.add_window_view(|window, cx| SettingsDialog::new(Section::Agents, window, cx));
         // A section that isn't drawn yet opens on Appearance.
         dialog.read_with(cx, |dialog, _| assert_eq!(dialog.section, Section::Appearance));
         for section in Section::available() {

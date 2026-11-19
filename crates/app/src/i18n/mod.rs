@@ -14,6 +14,7 @@ mod settings;
 mod statements;
 mod structure;
 mod table;
+mod transfer;
 
 use gpui::{App, BorrowAppContext, Global};
 
@@ -27,6 +28,7 @@ pub use self::settings::{SettingsMessages, TagsMessages};
 pub use self::statements::StatementMessages;
 pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
+pub use self::transfer::{BackupMessages, DumpMessages, ExportMessages, ImportMessages};
 use crate::preferences::{Preferences, keys};
 
 /// The languages DBForge speaks.
@@ -121,6 +123,13 @@ pub struct Messages {
     /// The name a duplicated connection gets.
     pub duplicate_name: fn(&str) -> String,
     pub resize_explorer: &'static str,
+    /// A table's or view's menu: export its rows.
+    pub export_menu: &'static str,
+    /// A table's menu: import a file's rows into it.
+    pub import_menu: &'static str,
+    /// A database's menu, where the engine has pg_dump and psql: dump it to a file, and restore one.
+    pub export_database: &'static str,
+    pub import_sql_file: &'static str,
     // Toolbar
     pub no_connection: &'static str,
     pub search_everywhere: &'static str,
@@ -160,6 +169,14 @@ pub struct Messages {
     pub tags: TagsMessages,
     /// Creating databases, roles and users, and dropping databases.
     pub admin: AdminMessages,
+    /// Exporting rows to a file or the clipboard.
+    pub export: ExportMessages,
+    /// Importing a file's rows into a table.
+    pub import: ImportMessages,
+    /// A whole database to a .sql file with pg_dump and back with psql, and where exports go.
+    pub dump: DumpMessages,
+    /// The settings' backup of DBForge's configuration.
+    pub backup: BackupMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

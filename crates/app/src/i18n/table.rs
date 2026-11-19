@@ -22,6 +22,9 @@ pub struct TableMessages {
     pub add_row: &'static str,
     pub delete_selected: &'static str,
     pub reload_rows: &'static str,
+    /// The tab bar's export and import of the table's rows.
+    pub export_rows: &'static str,
+    pub import_rows: &'static str,
     pub inspect_cell: &'static str,
     // Documents (MongoDB, Cosmos DB)
     pub switch_views_locked: &'static str,

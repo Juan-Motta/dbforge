@@ -5,12 +5,16 @@
 //! content, or is an entity its owner keeps.
 
 pub mod button;
+pub mod callout;
 pub mod checkbox;
 pub mod code_editor;
 pub mod editing;
 pub mod field;
 pub mod file_field;
+pub mod file_prompt;
 pub mod menu;
+pub mod modal;
+pub mod option_list;
 pub mod select;
 pub mod sheet;
 pub mod tabs;

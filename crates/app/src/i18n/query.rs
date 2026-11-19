@@ -31,6 +31,8 @@ pub struct QueryMessages {
     pub no_statements: &'static str,
     pub result: fn(usize) -> String,
     pub stopped_tab: &'static str,
+    /// The results bar's button that exports the result shown.
+    pub export: &'static str,
     pub stopped_after: fn(usize) -> String,
     pub statement_executed: &'static str,
     pub history_panel: HistoryMessages,

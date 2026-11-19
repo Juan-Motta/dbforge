@@ -14,6 +14,8 @@ anyhow = "1"
 # Local dates and times for the query history, as the core reads them.
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
 dbforge-core = { path = "../core" }
+# Where save dialogs start and exports go by default: the user's Documents, as the core finds its own folders.
+dirs = "7"
 gpui = "=0.2.2"
 # Percent-encoding for connection URLs, as the web UI's encodeURIComponent did.
 percent-encoding = "2"

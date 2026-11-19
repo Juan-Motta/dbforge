@@ -10,8 +10,8 @@ use std::time::Instant;
 
 use dbforge_core::drivers::{QueryOutcome, StatementResult};
 use gpui::{
-    AnyElement, AppContext, ClipboardItem, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
+    AnyElement, AppContext, ClipboardItem, Context, Entity, EventEmitter, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 use serde_json::Value;
 
@@ -21,7 +21,7 @@ use crate::grid::DataGrid;
 use crate::history::format::format_duration;
 use crate::i18n::{QueryMessages, Translate};
 use crate::theme::{ActiveTheme, MONO};
-use crate::ui::{any, group, icon, pill, segment, spinner};
+use crate::ui::{any, ghost_button, group, icon, pill, segment, spinner};
 
 /// The results bar's height.
 const BAR_HEIGHT: f32 = 44.;
@@ -33,6 +33,13 @@ pub enum LastRun {
     /// An explained statement's plan, as the server returned it.
     Plan(Rc<Value>),
     Failed(String),
+}
+
+/// What the panel asks of its console.
+#[derive(Debug, Clone)]
+pub enum ResultsEvent {
+    /// Export the result shown.
+    Export(StatementResult),
 }
 
 pub struct ResultsPanel {
@@ -57,6 +64,8 @@ pub fn summary(result: &StatementResult, m: &QueryMessages) -> String {
         (m.rows)(result.rows_affected)
     }
 }
+
+impl EventEmitter<ResultsEvent> for ResultsPanel {}
 
 impl ResultsPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -163,6 +172,13 @@ impl ResultsPanel {
             (None, Some(LastRun::Outcome(outcome))) => format!("{} ms", outcome.elapsed_ms).into(),
             _ => "".into(),
         };
+        // A result with columns can be exported, at the bar's end.
+        let exportable = match &self.last {
+            Some(LastRun::Outcome(outcome)) => {
+                outcome.results.get(self.selected).filter(|result| !result.columns.is_empty()).cloned()
+            }
+            _ => None,
+        };
         bar.child(
             div()
                 .min_w(px(110.))
@@ -175,6 +191,16 @@ impl ResultsPanel {
                 .when(self.running.is_some(), |timing| timing.child(spinner("run-spinner", theme.text3, 12.)))
                 .child(timing),
         )
+        .child(div().flex_1())
+        .children(exportable.map(|result| {
+            ghost_button(&theme, m.export)
+                .id("export-result")
+                .gap(px(7.))
+                .cursor_pointer()
+                .hover(|button| button.bg(theme.sel))
+                .child(icon("export", theme.text2, 14.))
+                .on_click(cx.listener(move |_, _, _, cx| cx.emit(ResultsEvent::Export(result.clone()))))
+        }))
         .into_any_element()
     }
 

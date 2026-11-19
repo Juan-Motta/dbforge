@@ -209,7 +209,7 @@ pub struct ApplySummary {
 }
 
 /// Identifies a table or view to read rows from.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct TableRef {
     pub database: String,
     pub schema: String,

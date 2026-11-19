@@ -74,6 +74,12 @@ impl TagsSection {
         section
     }
 
+    /// Reads the tags again, e.g. once a backup brought some in.
+    pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tags = Backend::global(cx).core().tags().list();
+        self.show(tags, window, cx);
+    }
+
     /// Shows `tags` as saved: each name field holds its tag's name, except
     /// the one being typed in, which keeps what was typed.
     fn show(&mut self, tags: Vec<Tag>, window: &mut Window, cx: &mut Context<Self>) {

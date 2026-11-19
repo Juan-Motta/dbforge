@@ -1,9 +1,9 @@
 use dbforge_core::connections::tags::TagColor;
 
 use super::{
-    AdminMessages, ConnectionMessages, DiagramMessages, HistoryMessages, KeyspaceMessages, Messages, PaletteMessages,
-    PlanMessages, QueryMessages, SettingsMessages, StatementMessages, StructureMessages, TableMessages, TagsMessages,
-    thousands,
+    AdminMessages, BackupMessages, ConnectionMessages, DiagramMessages, DumpMessages, ExportMessages, HistoryMessages,
+    ImportMessages, KeyspaceMessages, Messages, PaletteMessages, PlanMessages, QueryMessages, SettingsMessages,
+    StatementMessages, StructureMessages, TableMessages, TagsMessages, thousands,
 };
 
 pub(super) const MESSAGES: Messages = Messages {
@@ -30,6 +30,10 @@ pub(super) const MESSAGES: Messages = Messages {
     delete_connection: "Eliminar conexión",
     duplicate_name: |name| format!("{name} (copia)"),
     resize_explorer: "Cambiar el ancho del explorador",
+    export_menu: "Exportar…",
+    import_menu: "Importar filas…",
+    export_database: "Exportar base de datos…",
+    import_sql_file: "Importar archivo SQL…",
     no_connection: "Ninguna conexión seleccionada",
     search_everywhere: "Buscar en todo…",
     settings: "Configuración",
@@ -223,6 +227,7 @@ pub(super) const MESSAGES: Messages = Messages {
         no_statements: "El script no tenía sentencias.",
         result: |n| format!("Resultado {n}"),
         stopped_tab: "Error",
+        export: "Exportar",
         stopped_after: |n| {
             if n == 1 {
                 "El script se detuvo después de su primera sentencia, que se aplicó:".into()
@@ -302,6 +307,8 @@ pub(super) const MESSAGES: Messages = Messages {
         add_row: "Agregar fila",
         delete_selected: "Eliminar las filas seleccionadas",
         reload_rows: "Recargar filas",
+        export_rows: "Exportar filas",
+        import_rows: "Importar filas",
         inspect_cell: "Inspeccionar el valor de la celda (⇧↵)",
         switch_views_locked: "Aplica o descarta los cambios para cambiar de vista",
         show_as_table: "Mostrar como tabla",
@@ -743,6 +750,241 @@ pub(super) const MESSAGES: Messages = Messages {
         drop_confirm: |database| format!("Escribe {database} para confirmar"),
         drop_database: "Eliminar base de datos",
         dropping: "Eliminando…",
+    },
+    export: ExportMessages {
+        title: "Exportar datos",
+        every_row: "todas las filas",
+        query_result: "Resultado de la consulta",
+        rows_shown: |count| format!("{count} filas mostradas"),
+        format: "Formato",
+        csv_description: "Hojas de cálculo y herramientas",
+        tsv_description: "Separado por tabulaciones",
+        json_description: "Un arreglo de objetos",
+        sql_description: "Para reimportar en cualquier lado",
+        markdown_description: "Documentación y pull requests",
+        json_lines_description: "Un objeto por línea",
+        scope: "Filas",
+        scope_filtered: "Las filas que deja el filtro",
+        scope_filtered_description: "En el orden en que las muestra la tabla.",
+        scope_all: "La tabla entera",
+        scope_all_description: "Todas las filas, sin filtro ni orden.",
+        options: "Opciones",
+        header: "Encabezado",
+        header_include: "Nombres de columna primero",
+        header_leave_out: "Solo los valores",
+        null_text: "NULL se escribe como",
+        null_text_placeholder: "Nada",
+        json_layout: "Forma",
+        json_array: "Un arreglo de objetos",
+        json_lines: "Un objeto por línea (NDJSON)",
+        rows_per_insert: "Filas por INSERT",
+        rows_per_insert_option: |count| {
+            if count == 1 { "Una fila por INSERT".to_owned() } else { format!("{count} filas por INSERT") }
+        },
+        no_options: "Markdown no tiene opciones. NULL se escribe como NULL.",
+        columns: "Columnas",
+        all_columns: |count| format!("Las {count} columnas"),
+        some_columns: |chosen, count| format!("{chosen} de {count} columnas"),
+        loading_columns: "Cargando las columnas…",
+        columns_unavailable: "Se exportan todas las columnas.",
+        choose_columns: "Elegir…",
+        hide_columns: "Ocultar",
+        select_all: "Todas",
+        select_none: "Ninguna",
+        no_column_chosen: "Elige al menos una columna.",
+        stop: "Detener",
+        reveal: |mac| if mac { "Mostrar en Finder" } else { "Mostrar en la carpeta" },
+        exporting: "Exportando…",
+        copied: "Copiado al portapapeles.",
+        exported_rows: |count| format!("Se exportaron {count} filas"),
+        rows_written: |count| format!("{count} filas escritas"),
+        stopped: "Exportación detenida",
+        stopped_detail: "El archivo que ya existía quedó como estaba.",
+        failed: "La exportación falló",
+        done: "Listo",
+        cancel: "Cancelar",
+        copy_to_clipboard: "Copiar al portapapeles",
+        export: "Exportar…",
+    },
+    import: ImportMessages {
+        title: "Importar filas",
+        file: "Archivo",
+        no_file: "Ningún archivo elegido",
+        choose: "Elegir…",
+        format: "Formato",
+        csv_description: "Separado por comas",
+        tsv_description: "Separado por tabulaciones",
+        json_description: "Objetos, en un arreglo o uno por línea",
+        options: "Lectura",
+        header: "Primera línea",
+        header_names: "Nombres de columna",
+        header_data: "Una fila de datos",
+        null_text: "NULL se escribe como",
+        null_text_placeholder: "Nada",
+        delimiter: "Separador",
+        comma: "Coma ( , )",
+        semicolon: "Punto y coma ( ; )",
+        pipe: "Barra ( | )",
+        json_note: "Cada objeto es una fila y sus claves son los campos. El null de JSON es NULL.",
+        preview: "Primeras filas del archivo",
+        preview_empty: "Elige un archivo para ver sus primeras filas.",
+        reading_file: "Leyendo el archivo…",
+        no_rows: "El archivo no tiene filas.",
+        mapping: "Columnas",
+        leave_out: "Se omite",
+        loading_columns: "Cargando las columnas de la tabla…",
+        repeated: |columns| format!("Más de un campo va a {columns}."),
+        nothing_mapped: "Elige una columna para al menos un campo.",
+        transaction: "Todas las filas van en una sola transacción: si una falla, o detienes el import, no se agrega \
+                      ninguna.",
+        batches: "Las filas van por lotes, sin transacción: un error detiene el import, y las filas que ya entraron \
+                  se quedan.",
+        importing: "Importando…",
+        rows_imported: |count| format!("{count} filas importadas"),
+        imported: |count| format!("Se importaron {count} filas"),
+        stopped: "Import detenido",
+        stopped_nothing: "No se agregó nada a la tabla.",
+        stopped_some: |count| format!("Se habían importado unas {count} filas, y se quedan."),
+        failed: "El import falló",
+        failed_nothing: "No se agregó nada a la tabla.",
+        confirm: |tag| format!("Esta conexión está marcada como {tag}"),
+        confirm_detail: |table| {
+            format!("Las filas del archivo se agregarán a {table}. Pulsa Importar de nuevo para continuar.")
+        },
+        stop: "Detener",
+        import: "Importar",
+        import_into: |tag| format!("Importar en {tag}"),
+        cancel: "Cancelar",
+        done: "Listo",
+    },
+    dump: DumpMessages {
+        content: "Contenido",
+        default_folder: "Carpeta de exportación por defecto",
+        use_default_folder: "Usar la por defecto",
+        default_folder_help: "Los exports se guardan aquí salvo que elijas otra carpeta para alguno. Por defecto es \
+                              DBForge en Documentos.",
+        export_files: |count, size| {
+            if count == 0 {
+                "No hay exports en esta carpeta".to_owned()
+            } else {
+                format!("{count} {} · {size}", if count == 1 { "export" } else { "exports" })
+            }
+        },
+        export_files_help: "Solo cuentan y se borran los archivos que nombró DBForge, como shop-2026-11-10-1432.sql.",
+        measuring: "Midiendo…",
+        clear_folder: "Borrar exports…",
+        confirm_clear: |count, size| {
+            format!("¿Borrar {count} {} ({size})? No se puede deshacer.", if count == 1 { "export" } else { "exports" })
+        },
+        delete_exports: "Borrar",
+        cleared: |count, size| {
+            format!("Se borraron {count} {} y se liberaron {size}.", if count == 1 { "export" } else { "exports" })
+        },
+        client_tools: "Herramientas cliente de PostgreSQL",
+        client_tools_help: "DBForge encuentra el pg_dump y el psql más nuevos instalados. Elige otro si toma la \
+                            versión equivocada.",
+        options: "Opciones",
+        save_to: "Guardar en",
+        file_name: "Nombre del archivo",
+        change: "Cambiar…",
+        folder_help: "El cambio aplica solo a este export; la carpeta por defecto se define en Configuración.",
+        looking_for_folder: "Buscando la carpeta por defecto…",
+        file_exists: |name| format!("{name} ya existe en esa carpeta"),
+        file_exists_detail: "Pulsa Reemplazar para sobrescribirlo, o cambia el nombre del archivo.",
+        replace: "Reemplazar",
+        tool_chosen: "elegido",
+        tool_looking: |name| format!("Buscando {name}…"),
+        tool_use_found: "Usar el encontrado",
+        tool_choose: |name| format!("Elegir {name}…"),
+        export_title: |database| format!("Exportar {database}"),
+        all_label: "Estructura y datos",
+        all_description: "Toda la base de datos",
+        structure_label: "Solo estructura",
+        structure_description: "Esquemas, tablas, vistas, funciones…",
+        data_label: "Solo datos",
+        data_description: "Filas, para tablas que ya existen",
+        clean: "Eliminar los objetos antes de crearlos",
+        clean_description: "Para que el archivo se restaure sobre una base de datos existente.",
+        keep_owners: "Conservar propietarios y privilegios",
+        keep_owners_description: "Al restaurar, ese servidor necesita los mismos roles.",
+        exporting_into: |database| format!("Exportando {database}…"),
+        exported: |database, size, time| format!("{database} exportada: {size} en {time}"),
+        export_stopped: "Exportación detenida. No se escribió ningún archivo.",
+        export_failed: "La exportación falló. No se escribió ningún archivo.",
+        stop: "Detener",
+        done: "Listo",
+        cancel: "Cancelar",
+        exporting: "Exportando…",
+        export: "Exportar",
+        import_title: "Importar archivo SQL",
+        file: "Archivo",
+        file_placeholder: "Un archivo .sql, como lo escribe pg_dump",
+        choose: "Elegir…",
+        database_on: |connection| format!("Base de datos en {connection}"),
+        import_note_before: "Se ejecuta en una sola transacción: si una sentencia falla, no cambia nada. Importa \
+                             solo archivos de confianza, porque psql también puede ejecutar comandos de la shell con ",
+        import_note_after: ".",
+        confirm_import: |connection, tag| format!("{connection} tiene la etiqueta {tag}"),
+        confirm_import_detail: |tag| {
+            format!("El archivo va a cambiar datos ahí. Pulsa Importar en {tag} para continuar.")
+        },
+        importing_into: |database| format!("Importando en {database}…"),
+        created_and_restored: |database, time| format!("Se creó {database} y se importó el archivo en {time}"),
+        restored: |database, time| format!("Importado en {database} en {time}"),
+        skipped_extensions: |names| format!("Se omitieron extensiones que este servidor no tiene: {names}"),
+        import_stopped: "Importación detenida. No se cambió nada.",
+        import_failed: "La importación falló. No se cambió nada.",
+        importing: "Importando…",
+        import_into: |tag| format!("Importar en {tag}"),
+        import: "Importar",
+        note_name_target: "Escribe el nombre de la base de datos donde restaurar.",
+        note_restore_or_create: "Restaura en esta base de datos y la crea si no existe.",
+        note_restore_existing: "Restaura en esta base de datos existente.",
+        note_create_then_restore: "Crea esta base de datos y luego restaura en ella.",
+    },
+    backup: BackupMessages {
+        export_title: "Exportar",
+        include_secrets: "Incluir contraseñas y el token MCP",
+        include_secrets_description: "Se escriben en texto plano: cualquiera con el archivo puede leerlas. Guárdalo \
+                                      en un lugar seguro.",
+        export_button: "Exportar configuración…",
+        exported: |connections, passwords| {
+            format!(
+                "Se exportaron {connections} {}, {passwords} con su contraseña",
+                if connections == 1 { "conexión" } else { "conexiones" }
+            )
+        },
+        import_title: "Importar",
+        import_help: "Añade lo que trae el archivo a esta instalación: las conexiones y etiquetas que ya existen se \
+                      actualizan, no se borra nada.",
+        choose_file: "Elegir una copia…",
+        from_file: |path, when, version| format!("{path} · exportada el {when} por DBForge {version}"),
+        part_preferences: "Preferencias",
+        part_preferences_detail: |theme, language, folder| {
+            let folder = folder.map(|folder| format!(", exports en {folder}")).unwrap_or_default();
+            format!("Tema {theme}, idioma {language}{folder}")
+        },
+        part_connections: |added, updated| format!("Conexiones: {added} nuevas, {updated} actualizadas"),
+        part_connections_detail: |passwords, tags| {
+            format!("{passwords} con contraseña, y {tags} {}", if tags == 1 { "etiqueta" } else { "etiquetas" })
+        },
+        part_mcp: "Servidor MCP",
+        part_mcp_detail: |enabled, port, token| {
+            format!(
+                "{}, puerto {port}{}",
+                if enabled { "Activado" } else { "Desactivado" },
+                if token { ", con su token" } else { "" }
+            )
+        },
+        part_tools: "pg_dump y psql",
+        part_tools_detail: |count| format!("{count} elegidos; solo se conservan los que existen en este equipo"),
+        not_in_file: "No viene en este archivo",
+        import_button: "Importar",
+        cancel: "Cancelar",
+        imported: |added, updated| format!("Importado: {added} nuevas, {updated} actualizadas"),
+        need_password: |names| format!("Sin contraseña, escríbela en su configuración: {names}."),
+        missing_tools: |names| format!("No se encontraron en este equipo y quedaron como estaban: {names}."),
+        failed: "No se pudo completar",
     },
 };
 

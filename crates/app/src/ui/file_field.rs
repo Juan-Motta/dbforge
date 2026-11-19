@@ -4,9 +4,8 @@
 //! pick included as [`TextInputEvent::Changed`].
 
 use gpui::{
-    App, AppContext, Context, Entity, EventEmitter, Focusable, InteractiveElement, IntoElement, ParentElement,
-    PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
-    prelude::FluentBuilder, px,
+    App, AppContext, Context, Entity, EventEmitter, Focusable, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::button::{button, enabled};
@@ -77,14 +76,12 @@ impl FileField {
 
     /// Opens the OS's file dialog; a chosen file replaces the path.
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picked =
-            cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
+        let picked = super::file_prompt::pick_file(cx);
         let input = self.input.clone();
         window.focus(&input.focus_handle(cx));
         cx.spawn(async move |this, cx| {
             // Cancelled, or the platform has no dialog: the path stays as it was.
-            let Ok(Ok(Some(paths))) = picked.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
+            let Some(path) = picked.await else { return };
             let path = path.to_string_lossy().into_owned();
             let _ = this.update(cx, |_, cx| {
                 input.update(cx, |input, cx| input.set_text(&path, cx));

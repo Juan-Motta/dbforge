@@ -17,6 +17,9 @@ pub fn runtime() -> &'static Runtime {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name("dbforge-core")
+            // A file import's future nests the drivers' deeply (a debug build
+            // overflows tokio's 2 MiB default); room as a main thread has.
+            .thread_stack_size(8 * 1024 * 1024)
             .build()
             .expect("DBForge needs a tokio runtime to run its core")
     })

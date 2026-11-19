@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use dbforge_core::connections::model::{Connection, Engine};
 use dbforge_core::connections::tags::Tag;
+use dbforge_core::drivers::TableRef;
 use dbforge_core::explorer;
 use dbforge_core::query::QueryScope;
 use gpui::{
@@ -23,6 +24,7 @@ use self::tree::{ChildState, Node, NodeKind, TreeNode, TreeRow};
 use crate::admin::NewObjectKind;
 use crate::backend::Backend;
 use crate::connections::url::connection_url;
+use crate::dump::DumpMode;
 use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
 use crate::structure::sections::Section;
@@ -65,6 +67,13 @@ pub enum ExplorerEvent {
     NewObject { connection: Connection, kind: NewObjectKind },
     /// Ask before dropping this database from its server.
     DropDatabase { connection: Connection, database: String },
+    /// Export this table's or view's rows.
+    ExportTable { connection: Connection, table: TableRef },
+    /// Import a file's rows into this table.
+    ImportRows { connection: Connection, table: TableRef },
+    /// Dump this database to a file, or restore one into it; `node_id` is
+    /// the database's node, listed again once a restore changed it.
+    Dump { mode: DumpMode, connection: Connection, database: String, node_id: String },
 }
 
 const CONTEXT: &str = "Explorer";
@@ -579,6 +588,34 @@ impl Explorer {
                             let Some((connection, _)) = this.connection(&node.connection_id) else { return };
                             let (connection, database) = (connection.clone(), node.name.clone());
                             cx.emit(ExplorerEvent::DropDatabase { connection, database });
+                        });
+                    }
+                    NodeCommand::ExportTable | NodeCommand::ImportRows => {
+                        let Some(table) = crate::sql::snippets::table_ref(&node.path) else { return };
+                        let _ = this.update(cx, |this, cx| {
+                            let Some((connection, _)) = this.connection(&node.connection_id) else { return };
+                            let connection = connection.clone();
+                            cx.emit(if command == NodeCommand::ExportTable {
+                                ExplorerEvent::ExportTable { connection, table }
+                            } else {
+                                ExplorerEvent::ImportRows { connection, table }
+                            });
+                        });
+                    }
+                    NodeCommand::ExportDatabase | NodeCommand::ImportSqlFile => {
+                        let _ = this.update(cx, |this, cx| {
+                            let Some((connection, _)) = this.connection(&node.connection_id) else { return };
+                            let mode = if command == NodeCommand::ExportDatabase {
+                                DumpMode::Export
+                            } else {
+                                DumpMode::Import
+                            };
+                            cx.emit(ExplorerEvent::Dump {
+                                mode,
+                                connection: connection.clone(),
+                                database: node.name.clone(),
+                                node_id: node.id.clone(),
+                            });
                         });
                     }
                     NodeCommand::EditConnection | NodeCommand::DeleteConnection => {

@@ -21,7 +21,9 @@ use gpui::{
 use self::tabs::{TabKind, TableName, Tabs};
 use crate::backend::Backend;
 use crate::diagram::DiagramView;
+use crate::export::ExportSource;
 use crate::i18n::Translate;
+use crate::import::ImportTarget;
 use crate::keyspace::{KeyBrowser, KeyBrowserEvent};
 use crate::query::{ConsoleEvent, QueryConsole};
 use crate::shell::OpenObject;
@@ -83,6 +85,10 @@ struct OpenKeyspace {
 pub enum WorkspaceEvent {
     /// Show this dialog over the window, or close the one shown.
     Dialog(Option<AnyView>),
+    /// A tab asks to export these rows.
+    Export(ExportSource),
+    /// A table's tab asks to import a file's rows into it.
+    Import(Box<ImportTarget>),
 }
 
 #[derive(Default)]
@@ -156,6 +162,11 @@ impl Workspace {
                 let scope = QueryScope { database: entry.database.clone(), container: entry.container.clone() };
                 this.new_query(&entry.connection_id, scope, Some(entry.sql.clone()), window, cx);
             }
+            ConsoleEvent::ExportResult(result) => cx.emit(WorkspaceEvent::Export(ExportSource::Rows {
+                name: "query_result".into(),
+                columns: result.columns.clone(),
+                rows: std::sync::Arc::new(result.rows.clone()),
+            })),
         });
         self.consoles.insert(tab.id, OpenConsole { console: console.clone(), _events: events });
         console.read(cx).focus(window, cx);
@@ -187,6 +198,7 @@ impl Workspace {
         let tab = self.tabs.open_table(connection_id, name, condition).clone();
         if !self.tables.contains_key(&tab.id) {
             let (id, engine) = (connection_id.to_owned(), connection.engine);
+            let (saved, opened) = (connection.clone(), table.clone());
             let page = cx.new(|cx| TablePage::new(id, engine, table, filter.unwrap_or_default(), window, cx));
             let source = connection_id.to_owned();
             let events =
@@ -198,6 +210,16 @@ impl Workspace {
                         this.open_diagram(&source, database, schema, window, cx);
                     }
                     TablePageEvent::Dialog(dialog) => cx.emit(WorkspaceEvent::Dialog(dialog.clone())),
+                    TablePageEvent::Export(filter) => cx.emit(WorkspaceEvent::Export(ExportSource::Table {
+                        connection_id: source.clone(),
+                        table: opened.clone(),
+                        filter: filter.clone(),
+                    })),
+                    TablePageEvent::Import(rows) => cx.emit(WorkspaceEvent::Import(Box::new(ImportTarget {
+                        connection: saved.clone(),
+                        table: opened.clone(),
+                        rows: Some(rows.clone()),
+                    }))),
                 });
             self.tables.insert(tab.id.clone(), OpenTable { page, _events: events });
         }

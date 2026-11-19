@@ -38,6 +38,20 @@ pub fn confirming_tag(tags: &[Tag], id: Option<&str>) -> Option<String> {
     tag_of(tags, id).filter(|tag| tag.confirm).map(|tag| tag.name.clone())
 }
 
+/// The name of the tag that makes changes on connection `connection_id`
+/// ask first, as the connections and tags are saved now; `None` when they
+/// don't. The core keeps both in memory, so it is always known.
+pub fn confirming_tag_of(cx: &gpui::App, connection_id: &str) -> Option<String> {
+    let core = crate::backend::Backend::global(cx).core();
+    let environment = core
+        .connections()
+        .list()
+        .into_iter()
+        .find(|connection| connection.id == connection_id)
+        .and_then(|connection| connection.environment);
+    confirming_tag(&core.tags().list(), environment.as_deref())
+}
+
 /// A new tag named `name`, with the first colour no other tag uses yet.
 pub fn new_tag(tags: &[Tag], name: impl Into<String>, id: impl Into<String>) -> Tag {
     let color =

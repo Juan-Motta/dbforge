@@ -37,6 +37,7 @@ const STROKED: &[(&str, &str)] = &[
     ("clock", "M13.5 8a5.5 5.5 0 1 1-11 0a5.5 5.5 0 1 1 11 0M8 5v3l2 1.5"),
     ("chart", "M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5"),
     ("export", "M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"),
+    ("upload", "M8 10.5v-8M4.5 6 8 2.5 11.5 6M3 13.5h10"),
     (
         "database",
         "M3 4c0-1 2.2-1.8 5-1.8s5 .8 5 1.8v8c0 1-2.2 1.8-5 1.8s-5-.8-5-1.8zM3 4c0 1 2.2 1.8 5 1.8s5-.8 5-1.8M3 8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8",
@@ -70,7 +71,10 @@ const STROKED: &[(&str, &str)] = &[
 ];
 
 /// Icons filled rather than stroked.
-const FILLED: &[(&str, &str)] = &[("play", "M5 3.5v9l7-4.5z")];
+const FILLED: &[(&str, &str)] = &[
+    ("play", "M5 3.5v9l7-4.5z"),
+    ("stop", "M5.5 4h5A1.5 1.5 0 0 1 12 5.5v5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 10.5v-5A1.5 1.5 0 0 1 5.5 4z"),
+];
 
 /// The app's assets: the icons.
 pub struct Assets;

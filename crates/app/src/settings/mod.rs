@@ -1,8 +1,9 @@
 //! The settings dialog, as the web UI's `SettingsDialog.tsx`: a list of
 //! sections on the left and the chosen one on the right, applied as soon as
 //! something is picked. Appearance (the theme), Language, Tags, Passwords
-//! (where credentials are kept) and About live here; Export and import,
-//! Agents (MCP) and Backup join from their own features ([`Section::available`]).
+//! (where credentials are kept), Export and import (the export folder and
+//! PostgreSQL's tools, from `dump`), Backup (from `backup`) and About live
+//! here; Agents (MCP) joins with its feature ([`Section::available`]).
 
 mod dialog;
 mod passwords;
@@ -39,11 +40,10 @@ impl Section {
         Section::About,
     ];
 
-    /// The sections this app draws, in order. Export and import and Backup
-    /// come with their features (T10), Agents with the MCP settings (T11):
-    /// each joins the list once its body exists.
+    /// The sections this app draws, in order. Agents comes with the MCP
+    /// settings (T11): it joins the list once its body exists.
     pub fn available() -> impl Iterator<Item = Section> {
-        Self::ALL.into_iter().filter(|section| !matches!(section, Section::Exports | Section::Agents | Section::Backup))
+        Self::ALL.into_iter().filter(|section| *section != Section::Agents)
     }
 
     /// `DBFORGE_OPEN=settings#<name>`: the section named so.
@@ -118,7 +118,18 @@ mod tests {
         }
         assert_eq!(Section::parse("nope"), None);
         let shown: Vec<Section> = Section::available().collect();
-        assert_eq!(shown, [Section::Appearance, Section::Language, Section::Tags, Section::Passwords, Section::About]);
+        assert_eq!(
+            shown,
+            [
+                Section::Appearance,
+                Section::Language,
+                Section::Tags,
+                Section::Exports,
+                Section::Passwords,
+                Section::Backup,
+                Section::About
+            ]
+        );
     }
 
     #[test]

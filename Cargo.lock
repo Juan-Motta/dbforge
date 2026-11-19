@@ -1794,6 +1794,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dbforge-core",
+ "dirs 7.0.0",
  "gpui",
  "percent-encoding",
  "regex",

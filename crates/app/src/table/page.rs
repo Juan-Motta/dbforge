@@ -7,7 +7,7 @@
 //! at the structure.
 
 use dbforge_core::connections::model::Engine;
-use dbforge_core::drivers::{RowFilter, TableRef};
+use dbforge_core::drivers::{ObjectKind, RowFilter, TableRef};
 use gpui::{
     AnyElement, AnyView, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
     Render, StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
@@ -40,6 +40,10 @@ pub enum TablePageEvent {
     OpenSchemaDiagram { database: String, schema: String },
     /// Show this dialog over the window, or close the one shown.
     Dialog(Option<AnyView>),
+    /// Export the rows `filter` keeps.
+    Export(RowFilter),
+    /// Import a file's rows into the table; its rows here are read again once they are in.
+    Import(gpui::WeakEntity<TableView>),
 }
 
 pub struct TablePage {
@@ -194,6 +198,23 @@ impl TablePage {
             }
             TableTabView::Diagram => Vec::new(),
         };
+        // The table's own actions after the view's: export, and import into a table (not a view).
+        let mut actions = actions;
+        let export = icon_button(&theme, "export-rows", "export", true, false)
+            .tooltip(Tooltip::text(messages.table.export_rows))
+            .on_click(cx.listener(|this, _, _, cx| {
+                let filter = this.data.read(cx).filter().clone();
+                cx.emit(TablePageEvent::Export(filter));
+            }));
+        let insert_at = if matches!(self.view, TableTabView::Section(_)) { actions.len() - 1 } else { actions.len() };
+        let mut own = vec![export.into_any_element()];
+        if structure.as_ref().is_none_or(|structure| structure.kind != ObjectKind::View) {
+            let import = icon_button(&theme, "import-rows", "upload", true, false)
+                .tooltip(Tooltip::text(messages.table.import_rows))
+                .on_click(cx.listener(|this, _, _, cx| cx.emit(TablePageEvent::Import(this.data.downgrade()))));
+            own.push(import.into_any_element());
+        }
+        actions.splice(insert_at..insert_at, own);
         let mut tabs = vec![self.view_tab(TableTabView::Data, messages.table.data, None, cx)];
         for section in Section::ALL {
             let count = structure.as_ref().and_then(|structure| section.count(structure));

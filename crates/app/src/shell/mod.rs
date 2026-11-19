@@ -1,8 +1,9 @@
 //! The window's layout: the explorer on the left; the toolbar, the tab strip
 //! and the main area on the right, with the statement console under them
 //! while it is open; and a dialog over them when one is open (the command
-//! palette, the settings, the connection and admin dialogs, the notice of
-//! unreadable settings). Each part is its own view, which its feature grows.
+//! palette, the settings, the connection and admin dialogs, exporting and
+//! importing rows, a database's dump and restore, the notice of unreadable
+//! settings). Each part is its own view, which its feature grows.
 //! ⌘K / Ctrl+K toggles the palette, ⌘B / Ctrl+B the explorer and ⌘J /
 //! Ctrl+J the statement console, from anywhere in the window.
 
@@ -25,7 +26,10 @@ pub use toolbar::{Toolbar, ToolbarEvent};
 use crate::admin::{AdminEvent, DropDatabaseDialog, NewObjectDialog, NewObjectKind};
 use crate::backend::Backend;
 use crate::connections::{ConnectionDialog, ConnectionDialogEvent, DeleteConnectionDialog, DeleteConnectionEvent};
+use crate::dump::{DumpEvent, DumpMode, ExportDatabaseDialog, ImportDatabaseDialog};
+use crate::export::{ExportDialog, ExportSource};
 use crate::i18n::{Locale, Translate};
+use crate::import::{ImportDialog, ImportEvent, ImportTarget};
 use crate::palette::{CommandAction, CommandPalette, PaletteEvent, PaletteSource};
 use crate::preferences::{Preferences, keys};
 use crate::settings::{Section, SettingsDialog, SettingsEvent};
@@ -107,14 +111,22 @@ impl Shell {
         subscriptions.push(cx.subscribe_in(&toolbar, window, Self::on_toolbar));
         let workspace = cx.new(|_| Workspace::default());
         // A tab's dialog (a table's PROD question): its owner closes it and takes the keyboard back.
-        subscriptions.push(cx.subscribe(&workspace, |this, _, WorkspaceEvent::Dialog(dialog), cx| {
-            this.dialog = dialog.clone().map(|view| OpenDialog {
-                view,
-                placement: Placement::Center,
-                _subscriptions: Vec::new(),
-            });
-            cx.notify();
-        }));
+        subscriptions.push(cx.subscribe_in(
+            &workspace,
+            window,
+            |this, _, event: &WorkspaceEvent, window, cx| match event {
+                WorkspaceEvent::Dialog(dialog) => {
+                    this.dialog = dialog.clone().map(|view| OpenDialog {
+                        view,
+                        placement: Placement::Center,
+                        _subscriptions: Vec::new(),
+                    });
+                    cx.notify();
+                }
+                WorkspaceEvent::Export(source) => this.open_export_dialog(source.clone(), window, cx),
+                WorkspaceEvent::Import(target) => this.open_import_dialog((**target).clone(), window, cx),
+            },
+        ));
         let mut shell = Self {
             explorer,
             explorer_open: true,
@@ -174,6 +186,70 @@ impl Shell {
             }
             ExplorerEvent::DropDatabase { connection, database } => {
                 self.open_drop_database_dialog(connection.clone(), database.clone(), window, cx)
+            }
+            ExplorerEvent::ExportTable { connection, table } => {
+                let source = ExportSource::Table {
+                    connection_id: connection.id.clone(),
+                    table: table.clone(),
+                    filter: Default::default(),
+                };
+                self.open_export_dialog(source, window, cx);
+            }
+            ExplorerEvent::ImportRows { connection, table } => {
+                // An open tab of the table shows the new rows on its next refresh, as in the web UI.
+                let target = ImportTarget { connection: connection.clone(), table: table.clone(), rows: None };
+                self.open_import_dialog(target, window, cx);
+            }
+            ExplorerEvent::Dump { mode, connection, database, node_id } => {
+                self.open_dump_dialog(*mode, connection.clone(), database.clone(), Some(node_id.clone()), window, cx);
+            }
+        }
+    }
+
+    /// Exports `source`'s rows to a file or the clipboard.
+    pub fn open_export_dialog(&mut self, source: ExportSource, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = cx.new(|cx| ExportDialog::new(source, window, cx));
+        dialog.read(cx).focus(window);
+        self.show_dialog(dialog, Vec::new(), window, cx);
+    }
+
+    /// Imports a file's rows into `target`'s table; the tab it came from reads its rows again once they are in.
+    pub fn open_import_dialog(&mut self, target: ImportTarget, window: &mut Window, cx: &mut Context<Self>) {
+        let rows = target.rows.clone();
+        let dialog = cx.new(|cx| ImportDialog::new(target, window, cx));
+        dialog.read(cx).focus(window);
+        let imported = cx.subscribe(&dialog, move |_, _, ImportEvent::Imported, cx| {
+            if let Some(rows) = rows.as_ref().and_then(|rows| rows.upgrade()) {
+                rows.update(cx, |rows, cx| rows.reload(cx));
+            }
+        });
+        self.show_dialog(dialog, vec![imported], window, cx);
+    }
+
+    /// A database's export with pg_dump, or a restore into it with psql; a
+    /// restore lists the database's node (`node_id`) again.
+    pub fn open_dump_dialog(
+        &mut self,
+        mode: DumpMode,
+        connection: Connection,
+        database: String,
+        node_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match mode {
+            DumpMode::Export => {
+                let dialog = cx.new(|cx| ExportDatabaseDialog::new(connection, database, window, cx));
+                dialog.read(cx).focus(window);
+                self.show_dialog(dialog, Vec::new(), window, cx);
+            }
+            DumpMode::Import => {
+                let dialog = cx.new(|cx| ImportDatabaseDialog::new(connection, database, window, cx));
+                dialog.read(cx).focus(window);
+                let imported = cx.subscribe(&dialog, move |this, _, DumpEvent::Imported, cx| {
+                    this.explorer.update(cx, |explorer, cx| explorer.refresh(node_id.as_deref(), cx));
+                });
+                self.show_dialog(dialog, vec![imported], window, cx);
             }
         }
     }
@@ -286,8 +362,9 @@ impl Shell {
     pub fn open_settings(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = cx.new(|cx| SettingsDialog::new(section, window, cx));
         dialog.read(cx).focus(window);
-        let saved = cx.subscribe(&dialog, |this, _, SettingsEvent::TagsSaved { .. }: &SettingsEvent, cx| {
-            // Badges show the new names and colours; connections lost a deleted tag.
+        // Badges show new names and colours, connections lost a deleted tag,
+        // or a backup brought connections in: the explorer reads them again.
+        let saved = cx.subscribe(&dialog, |this, _, _: &SettingsEvent, cx| {
             this.explorer.update(cx, |explorer, cx| explorer.reload_connections(None, None, cx));
             this.show_selected_connection(cx);
         });
@@ -535,6 +612,9 @@ impl Shell {
             Some(("query", target)) => {
                 return self.open_query_for_development(target, wanted_history, wanted_explain, window, cx);
             }
+            Some((kind @ ("export" | "import" | "export-database" | "import-database"), target)) => {
+                return self.open_transfer_for_development(kind, target, seed.as_deref().unwrap_or(""), window, cx);
+            }
             Some(("diagram", target)) => {
                 let parts: Vec<&str> = target.split('/').collect();
                 let [connection_id, database, schema] = parts[..] else {
@@ -646,6 +726,78 @@ impl Shell {
         });
     }
 
+    /// `DBFORGE_OPEN=export:<id>/<path>` or `import:<id>/<path>` (a table, as
+    /// `table:` names it), `export-database:<id>/<database>` or
+    /// `import-database:<id>/<database>`: that dialog. Native file dialogs
+    /// can't be driven, so `DBFORGE_PICK` answers them (`ui::file_prompt`):
+    /// an import picks its file at once, and `#run` presses the main button
+    /// once, as soon as it can be pressed (on a connection whose tag asks
+    /// first, that only shows the warning).
+    #[cfg(debug_assertions)]
+    fn open_transfer_for_development(
+        &mut self,
+        kind: &str,
+        target: &str,
+        section: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut parts = target.split('/').map(str::to_owned);
+        let Some(connection_id) = parts.next() else { return };
+        let path: Vec<String> = parts.collect();
+        let Some(connection) =
+            Backend::global(cx).core().connections().list().into_iter().find(|c| c.id == connection_id)
+        else {
+            return eprintln!("DBFORGE_OPEN: no connection {connection_id}");
+        };
+        let press = section == "run";
+        let picked = std::env::var_os("DBFORGE_PICK").is_some();
+        match kind {
+            "export-database" | "import-database" => {
+                let [database] = &path[..] else { return eprintln!("DBFORGE_OPEN: {kind}:<id>/<database>") };
+                let mode = if kind == "export-database" { DumpMode::Export } else { DumpMode::Import };
+                self.open_dump_dialog(mode, connection, database.clone(), None, window, cx);
+            }
+            _ => {
+                let Some(table) = crate::sql::snippets::table_ref(&path) else {
+                    return eprintln!("DBFORGE_OPEN: no table in {target}");
+                };
+                if kind == "export" {
+                    let source = ExportSource::Table { connection_id, table, filter: Default::default() };
+                    self.open_export_dialog(source, window, cx);
+                } else {
+                    self.open_import_dialog(ImportTarget { connection, table, rows: None }, window, cx);
+                }
+            }
+        }
+        let Some(view) = self.dialog.as_ref().map(|open| open.view.clone()) else { return };
+        if let Ok(dialog) = view.clone().downcast::<ImportDialog>() {
+            if picked {
+                dialog.update(cx, |dialog, cx| dialog.pick_for_development(window, cx));
+            }
+            if press {
+                press_when_ready(dialog, ImportDialog::ready, ImportDialog::start, window, cx);
+            }
+        } else if let Ok(dialog) = view.clone().downcast::<ImportDatabaseDialog>() {
+            if picked {
+                dialog.update(cx, |dialog, cx| dialog.choose(window, cx));
+            }
+            if press {
+                press_when_ready(
+                    dialog,
+                    ImportDatabaseDialog::ready_for_development,
+                    ImportDatabaseDialog::start,
+                    window,
+                    cx,
+                );
+            }
+        } else if press && let Ok(dialog) = view.clone().downcast::<ExportDialog>() {
+            press_when_ready(dialog, ExportDialog::ready_for_development, ExportDialog::export_to_file, window, cx);
+        } else if press && let Ok(dialog) = view.downcast::<ExportDatabaseDialog>() {
+            press_when_ready(dialog, |_, _| true, ExportDatabaseDialog::start, window, cx);
+        }
+    }
+
     /// `DBFORGE_OPEN=table:…`: a table's rows, with what `seed` asks for once they load.
     #[cfg(debug_assertions)]
     fn open_table_for_development(
@@ -693,6 +845,34 @@ impl Shell {
         dialog.read(cx).focus(window);
         self.show_dialog(dialog, Vec::new(), window, cx);
     }
+}
+
+/// Development only: presses a dialog's main button once, as soon as `ready`
+/// says it can be (its file read, its columns known), giving up after 15 s.
+#[cfg(debug_assertions)]
+fn press_when_ready<V: 'static>(
+    dialog: Entity<V>,
+    ready: fn(&V, &gpui::App) -> bool,
+    press: fn(&mut V, &mut Window, &mut Context<V>),
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    cx.spawn_in(window, async move |_, cx| {
+        for _ in 0..75 {
+            cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
+            let pressed = dialog.update_in(cx, |dialog, window, cx| {
+                let can = ready(dialog, cx);
+                if can {
+                    press(dialog, window, cx);
+                }
+                can
+            });
+            if !matches!(pressed, Ok(false)) {
+                return;
+            }
+        }
+    })
+    .detach();
 }
 
 /// A dialog over the window, on its scrim. Render it as the window's last

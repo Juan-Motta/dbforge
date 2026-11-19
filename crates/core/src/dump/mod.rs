@@ -13,6 +13,7 @@ mod extensions;
 mod tool_paths;
 mod tools;
 
+pub use exports::ExportFiles;
 pub use tool_paths::ToolPaths;
 
 use std::collections::BTreeSet;
@@ -398,6 +399,23 @@ pub struct ToolInfo {
     version: String,
     /// Chosen by the user rather than found.
     custom: bool,
+}
+
+impl ToolInfo {
+    /// Where the program is.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// `major.minor`.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// Chosen by the user rather than found.
+    pub fn custom(&self) -> bool {
+        self.custom
+    }
 }
 
 impl From<Tool> for ToolInfo {

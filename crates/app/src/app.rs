@@ -95,6 +95,9 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::ui::select::key_bindings());
     cx.bind_keys(crate::connections::key_bindings());
     cx.bind_keys(crate::keyspace::key_bindings());
+    cx.bind_keys(crate::export::key_bindings());
+    cx.bind_keys(crate::import::key_bindings());
+    cx.bind_keys(crate::dump::key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
     // The app menu: on macOS the menu bar's DBForge menu, with Quit.
     cx.set_menus(vec![Menu { name: "DBForge".into(), items: vec![MenuItem::action("Quit DBForge", Quit)] }]);
