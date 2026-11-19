@@ -4,14 +4,18 @@
 //! then copy its URL, duplicate, edit, delete. A table's or view's start
 //! with opening its rows, its structure, then a new query, as the former web UI's
 //! do; a schema's (or a database that is its own schema) offer its ER
-//! diagram after the new query. A MongoDB collection's copies also offer its
-//! mongosh `find()` and `countDocuments()`. A connection's server objects
+//! diagram after the new query. A table's or view's copies are last, under
+//! a "Copy" heading as the former web UI's Copy submenu: its name, then a
+//! MongoDB collection's mongosh `find()` and `countDocuments()`, or a
+//! relational table's SELECT and INSERT naming every column and its CREATE
+//! statement (a view's definition). A connection's server objects
 //! it can create follow its new query under a "New" heading; a database
 //! that can be dropped offers it last. A table's or view's export, and a
 //! table's import of a file's rows, follow its new query; a PostgreSQL
 //! database's export to a .sql file and import of one come before its drop.
 
 use dbforge_core::connections::model::Engine;
+use dbforge_core::drivers::TableStructure;
 
 use super::tree::{Node, NodeKind};
 use crate::admin::NewObjectKind;
@@ -37,10 +41,8 @@ pub enum NodeCommand {
     RefreshConnection,
     /// Puts the node's name on the clipboard.
     CopyName,
-    /// Puts the mongosh that reads a collection's first documents on the clipboard.
-    CopyFind,
-    /// Puts the mongosh that counts a collection's documents on the clipboard.
-    CopyCount,
+    /// A table's or view's Copy menu: puts what it names on the clipboard.
+    Copy(CopyKind),
     /// Puts the connection's URL, without its password, on the clipboard.
     CopyConnectionUrl,
     /// Saves a copy of the connection, its secrets included.
@@ -63,6 +65,63 @@ pub enum NodeCommand {
     ImportSqlFile,
 }
 
+/// What a table's or view's Copy menu puts on the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyKind {
+    Name,
+    /// The mongosh that reads a collection's first documents.
+    Find,
+    /// The mongosh that counts a collection's documents.
+    Count,
+    /// A SELECT naming every column.
+    Select,
+    /// An INSERT naming every column, NULL in each value.
+    Insert,
+    /// A table's CREATE statement.
+    Create,
+    /// A view's definition.
+    Definition,
+}
+
+impl CopyKind {
+    /// It is written from the table's columns or DDL, read from its database first.
+    pub fn needs_structure(self) -> bool {
+        matches!(self, Self::Select | Self::Insert | Self::Create | Self::Definition)
+    }
+}
+
+/// What `kind` copies of `node` (a table or view), given its `structure`
+/// when [`CopyKind::needs_structure`]; `None` when it can't be written.
+pub fn copied_text(kind: CopyKind, node: &Node, structure: Option<&TableStructure>) -> Option<String> {
+    use crate::sql::snippets::{count_query, insert_statement, preview_query, select_statement, table_ref};
+    let table = table_ref(&node.path)?;
+    let columns = || -> Option<(crate::sql::Dialect, Vec<String>)> {
+        let names = structure?.columns.iter().map(|column| column.name.clone()).collect();
+        Some((crate::sql::Dialect::of(node.engine)?, names))
+    };
+    match kind {
+        CopyKind::Name => Some(node.name.clone()),
+        CopyKind::Find => preview_query(node.engine, &table),
+        CopyKind::Count => Some(count_query(&table)),
+        CopyKind::Select => columns().map(|(dialect, names)| select_statement(dialect, &table, &names)),
+        CopyKind::Insert => columns().map(|(dialect, names)| insert_statement(dialect, &table, &names)),
+        CopyKind::Create | CopyKind::Definition => structure.map(|structure| structure.ddl.clone()),
+    }
+}
+
+/// A table's or view's Copy menu, in the former web UI's order.
+fn copy_kinds(node: &Node) -> Vec<CopyKind> {
+    let mut kinds = vec![CopyKind::Name];
+    if node.engine == Engine::Mongodb {
+        kinds.extend([CopyKind::Find, CopyKind::Count]);
+    }
+    if is_relational(node.engine) {
+        let ddl = if node.kind == NodeKind::View { CopyKind::Definition } else { CopyKind::Create };
+        kinds.extend([CopyKind::Select, CopyKind::Insert, ddl]);
+    }
+    kinds
+}
+
 impl NodeCommand {
     pub fn label(self, m: &Messages) -> &'static str {
         match self {
@@ -73,8 +132,15 @@ impl NodeCommand {
             Self::Refresh => m.refresh,
             Self::RefreshConnection => m.refresh_connection,
             Self::CopyName => m.copy_name,
-            Self::CopyFind => m.copy_find,
-            Self::CopyCount => m.copy_count,
+            Self::Copy(kind) => match kind {
+                CopyKind::Name => m.shell.copy_name,
+                CopyKind::Find => m.shell.copy_find,
+                CopyKind::Count => m.shell.copy_count,
+                CopyKind::Select => m.shell.copy_select,
+                CopyKind::Insert => m.shell.copy_insert,
+                CopyKind::Create => m.shell.copy_create,
+                CopyKind::Definition => m.shell.copy_definition,
+            },
             Self::CopyConnectionUrl => m.copy_connection_url,
             Self::DuplicateConnection => m.duplicate_connection,
             Self::EditConnection => m.edit_connection,
@@ -88,9 +154,14 @@ impl NodeCommand {
         }
     }
 
-    /// The heading it is listed under: the server objects a connection creates are under "New".
+    /// The heading it is listed under: the server objects a connection
+    /// creates are under "New", a table's or view's copies under "Copy".
     pub fn group(self, m: &Messages) -> Option<&'static str> {
-        matches!(self, Self::NewObject(_)).then_some(m.admin.new_menu)
+        match self {
+            Self::NewObject(_) => Some(m.admin.new_menu),
+            Self::Copy(_) => Some(m.shell.copy_menu),
+            _ => None,
+        }
     }
 
     pub fn icon(self) -> &'static str {
@@ -100,7 +171,7 @@ impl NodeCommand {
             Self::ShowDiagram => "diagram",
             Self::NewQuery => "code",
             Self::Refresh | Self::RefreshConnection => "refresh",
-            Self::CopyName | Self::CopyFind | Self::CopyCount => "copy",
+            Self::CopyName | Self::Copy(_) => "copy",
             Self::CopyConnectionUrl => "external",
             Self::DuplicateConnection => "duplicate",
             Self::EditConnection => "edit",
@@ -150,10 +221,11 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
             database
         }
         NodeKind::Database | NodeKind::Schema => vec![Refresh, RefreshConnection, CopyName],
-        NodeKind::Table | NodeKind::View if node.engine == Engine::Mongodb => {
-            vec![Refresh, RefreshConnection, CopyName, CopyFind, CopyCount]
+        NodeKind::Table | NodeKind::View => {
+            let mut table = vec![Refresh, RefreshConnection];
+            table.extend(copy_kinds(node).into_iter().map(Copy));
+            table
         }
-        NodeKind::Table | NodeKind::View => vec![Refresh, RefreshConnection, CopyName],
     });
     commands
 }
@@ -243,17 +315,49 @@ mod tests {
         use NodeCommand::*;
         assert_eq!(
             commands(&sql_node(NodeKind::Table)),
-            [OpenData, ViewStructure, NewQuery, ExportTable, ImportRows, Refresh, RefreshConnection, CopyName]
+            [
+                OpenData,
+                ViewStructure,
+                NewQuery,
+                ExportTable,
+                ImportRows,
+                Refresh,
+                RefreshConnection,
+                Copy(CopyKind::Name),
+                Copy(CopyKind::Select),
+                Copy(CopyKind::Insert),
+                Copy(CopyKind::Create)
+            ]
         );
         let cosmos = Node { engine: Engine::Cosmosdb, ..sql_node(NodeKind::Table) };
         assert_eq!(
             commands(&cosmos),
-            [OpenData, ViewStructure, NewQuery, ExportTable, ImportRows, Refresh, RefreshConnection, CopyName]
+            [
+                OpenData,
+                ViewStructure,
+                NewQuery,
+                ExportTable,
+                ImportRows,
+                Refresh,
+                RefreshConnection,
+                Copy(CopyKind::Name)
+            ]
         );
-        // A view can't be imported into.
+        // A view can't be imported into, and its DDL is its definition.
         assert_eq!(
             commands(&sql_node(NodeKind::View)),
-            [OpenData, ViewStructure, NewQuery, ExportTable, Refresh, RefreshConnection, CopyName]
+            [
+                OpenData,
+                ViewStructure,
+                NewQuery,
+                ExportTable,
+                Refresh,
+                RefreshConnection,
+                Copy(CopyKind::Name),
+                Copy(CopyKind::Select),
+                Copy(CopyKind::Insert),
+                Copy(CopyKind::Definition)
+            ]
         );
         assert_eq!(OpenData.label(Language::En.messages()), "Open data");
         assert_eq!(OpenData.label(Language::Es.messages()), "Abrir datos");
@@ -310,13 +414,91 @@ mod tests {
                 ImportRows,
                 Refresh,
                 RefreshConnection,
-                CopyName,
-                CopyFind,
-                CopyCount
+                Copy(CopyKind::Name),
+                Copy(CopyKind::Find),
+                Copy(CopyKind::Count)
             ]
         );
-        assert_eq!(CopyFind.label(Language::En.messages()), "Copy find() query");
-        assert_eq!(CopyCount.label(Language::Es.messages()), "Copiar consulta countDocuments()");
+        assert_eq!(Copy(CopyKind::Find).label(Language::En.messages()), "find() query");
+        assert_eq!(Copy(CopyKind::Count).label(Language::Es.messages()), "Consulta countDocuments()");
+    }
+
+    #[test]
+    fn lists_a_table_s_copies_under_copy_named_as_the_former_web_ui() {
+        use NodeCommand::*;
+        let (en, es) = (Language::En.messages(), Language::Es.messages());
+        let labels = |node: &Node, m: &Messages| -> Vec<(Option<&str>, &str)> {
+            commands(node).into_iter().filter(|c| matches!(c, Copy(_))).map(|c| (c.group(m), c.label(m))).collect()
+        };
+        let table = at(NodeKind::Table, Engine::Postgres, &["shop", "public", "users"]);
+        assert_eq!(
+            labels(&table, en),
+            [
+                (Some("Copy"), "Name"),
+                (Some("Copy"), "SELECT statement"),
+                (Some("Copy"), "INSERT statement"),
+                (Some("Copy"), "CREATE statement")
+            ]
+        );
+        let view = at(NodeKind::View, Engine::Mysql, &["shop", "v"]);
+        assert_eq!(labels(&view, es).last(), Some(&(Some("Copiar"), "Definición")));
+        assert_eq!(labels(&view, es)[0], (Some("Copiar"), "Nombre"));
+        // A connection's, a database's and a schema's name stay a single "Copy name".
+        assert_eq!(CopyName.group(en), None);
+        assert_eq!(CopyName.label(en), "Copy name");
+    }
+
+    fn structure(columns: &[&str], ddl: &str) -> TableStructure {
+        use dbforge_core::drivers::{ColumnInfo, ObjectKind};
+        let column = |name: &&str| ColumnInfo {
+            name: (*name).into(),
+            data_type: "text".into(),
+            nullable: true,
+            default: None,
+            comment: None,
+            options: Vec::new(),
+        };
+        TableStructure {
+            kind: ObjectKind::Table,
+            row_estimate: None,
+            data_bytes: 0,
+            index_bytes: 0,
+            comment: None,
+            columns: columns.iter().map(column).collect(),
+            indexes: Vec::new(),
+            foreign_keys: Vec::new(),
+            triggers: Vec::new(),
+            ddl: ddl.into(),
+        }
+    }
+
+    #[test]
+    fn copies_a_table_s_name_select_insert_and_create_as_its_engine_writes_them() {
+        let users = at(NodeKind::Table, Engine::Postgres, &["shop", "public", "users"]);
+        let users = Node { name: "users".into(), ..users };
+        let read = structure(&["id", "name"], "CREATE TABLE users (…);");
+        assert_eq!(copied_text(CopyKind::Name, &users, None).as_deref(), Some("users"));
+        assert_eq!(
+            copied_text(CopyKind::Insert, &users, Some(&read)).as_deref(),
+            Some("INSERT INTO \"public\".\"users\" (\"id\", \"name\")\nVALUES (NULL, NULL);")
+        );
+        assert_eq!(
+            copied_text(CopyKind::Select, &users, Some(&read)).as_deref(),
+            Some("SELECT\n  \"id\",\n  \"name\"\nFROM \"public\".\"users\";")
+        );
+        assert_eq!(copied_text(CopyKind::Create, &users, Some(&read)).as_deref(), Some("CREATE TABLE users (…);"));
+        assert_eq!(copied_text(CopyKind::Select, &users, None), None, "it waits for the columns");
+        let mysql = at(NodeKind::Table, Engine::Mysql, &["shop", "orders"]);
+        assert_eq!(
+            copied_text(CopyKind::Select, &mysql, Some(&structure(&["id"], ""))).as_deref(),
+            Some("SELECT\n  `id`\nFROM `orders`;")
+        );
+        let collection = at(NodeKind::Table, Engine::Mongodb, &["shop", "orders"]);
+        assert_eq!(
+            copied_text(CopyKind::Count, &collection, None).as_deref(),
+            Some("db.getCollection(\"orders\").countDocuments({})")
+        );
+        assert!(CopyKind::Insert.needs_structure() && !CopyKind::Find.needs_structure());
     }
 
     #[test]

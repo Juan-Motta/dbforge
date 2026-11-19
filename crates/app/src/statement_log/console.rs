@@ -5,15 +5,14 @@
 //! hears each new statement while it is open; closed, nothing listens.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use dbforge_core::Event;
 use dbforge_core::connections::model::Engine;
 use dbforge_core::statement_log::{Entry, Origin, commands};
 use gpui::{
-    AnyElement, AppContext, BorrowAppContext, ClipboardItem, Context, DragMoveEvent, Empty, EventEmitter, FontWeight,
-    HighlightStyle, Hsla, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, Render,
-    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, div, list, prelude::FluentBuilder, px,
+    AnyElement, AppContext, BorrowAppContext, Context, DragMoveEvent, Empty, EventEmitter, FontWeight, HighlightStyle,
+    Hsla, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, Render, StatefulInteractiveElement,
+    Styled, StyledText, Subscription, Window, div, list, prelude::FluentBuilder, px,
 };
 
 use super::height;
@@ -26,21 +25,11 @@ use crate::theme::{ActiveTheme, MONO, Theme};
 use crate::ui::field::Tooltip;
 use crate::ui::{any, glass, group, icon, icon_button, pill, segment, shortcut};
 
-/// How long a copy button shows its check.
-const COPIED_FOR: Duration = Duration::from_millis(1500);
-
 /// What the console tells the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatementConsoleEvent {
     /// Its close button: hide it.
     Close,
-}
-
-/// What was copied last, for its button's check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Copied {
-    All,
-    One(u64),
 }
 
 /// Dragging the console's top edge.
@@ -107,8 +96,6 @@ pub struct StatementConsole {
     list: ListState,
     /// Each saved connection's name and engine, by id.
     connections: HashMap<String, (String, Engine)>,
-    copied: Option<(Copied, u64)>,
-    copies: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -135,8 +122,6 @@ impl StatementConsole {
             shown: Vec::new(),
             list: ListState::new(0, ListAlignment::Bottom, px(200.)),
             connections: HashMap::new(),
-            copied: None,
-            copies: 0,
             _subscriptions: vec![logged],
         };
         console.refresh_connections(cx);
@@ -210,27 +195,9 @@ impl StatementConsole {
         cx.notify();
     }
 
-    fn copy(&mut self, text: String, what: Copied, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.copies += 1;
-        let copy = self.copies;
-        self.copied = Some((what, copy));
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(COPIED_FOR).await;
-            let _ = this.update(cx, |this, cx| {
-                // A newer copy keeps its own check.
-                if this.copied.is_some_and(|(_, shown)| shown == copy) {
-                    this.copied = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn is_copied(&self, what: Copied) -> bool {
-        self.copied.is_some_and(|(copied, _)| copied == what)
+    /// Puts `text` on the clipboard; the window's notice says so.
+    fn copy(&mut self, text: String, cx: &mut Context<Self>) {
+        crate::ui::notice::copy_to_clipboard(text, cx);
     }
 
     /// Keeps the height the user dragged the top edge to.
@@ -268,7 +235,6 @@ impl StatementConsole {
         }
         let kind = kind_of(entry.origin);
         let (id, text) = (entry.id, runnable(entry, connection.map(|(_, engine)| *engine)));
-        let copied = self.is_copied(Copied::One(id));
         let failed = entry.error.is_some();
         div()
             .id(("statement", id))
@@ -350,19 +316,12 @@ impl StatementConsole {
                             .child(meta),
                     )
                     .child(
-                        icon_button(
-                            &theme,
-                            ("statement-copy", id),
-                            if copied { "check" } else { "duplicate" },
-                            true,
-                            false,
-                        )
-                        .size(px(24.))
-                        .when(!copied, |button| {
-                            button.opacity(0.).group_hover("statement", |button| button.opacity(1.))
-                        })
-                        .tooltip(Tooltip::text(if copied { m.copied } else { m.copy }))
-                        .on_click(cx.listener(move |this, _, _, cx| this.copy(text.clone(), Copied::One(id), cx))),
+                        icon_button(&theme, ("statement-copy", id), "duplicate", true, false)
+                            .size(px(24.))
+                            .opacity(0.)
+                            .group_hover("statement", |button| button.opacity(1.))
+                            .tooltip(Tooltip::text(m.copy))
+                            .on_click(cx.listener(move |this, _, _, cx| this.copy(text.clone(), cx))),
                     ),
             )
             .children(entry.error.clone().map(|error| {
@@ -385,7 +344,6 @@ impl StatementConsole {
             })
             .collect();
         let all = script(visible(&self.entries, self.kind), |connection_id| self.engine_of(connection_id));
-        let copied_all = self.is_copied(Copied::All);
         let quiet = |id: &'static str, icon_name: &'static str, label: &'static str, on: bool| {
             div()
                 .h(px(30.))
@@ -416,12 +374,9 @@ impl StatementConsole {
             .child(div().text_size(px(12.)).text_color(theme.text3).child((m.count)(shown)))
             .child(group(theme, kinds))
             .child(div().flex_1())
-            .child(
-                quiet("statements-copy-all", if copied_all { "check" } else { "duplicate" }, m.copy_all, shown > 0)
-                    .when(shown > 0, |button| {
-                        button.on_click(cx.listener(move |this, _, _, cx| this.copy(all.clone(), Copied::All, cx)))
-                    }),
-            )
+            .child(quiet("statements-copy-all", "duplicate", m.copy_all, shown > 0).when(shown > 0, |button| {
+                button.on_click(cx.listener(move |this, _, _, cx| this.copy(all.clone(), cx)))
+            }))
             .child(
                 quiet("statements-clear", "trash", m.clear, !self.entries.is_empty())
                     .when(!self.entries.is_empty(), |button| {
@@ -551,9 +506,12 @@ mod tests {
             assert!(console.engine_of("gone").is_none(), "no saved connection has that id");
             runnable(&console.entries[0], console.engine_of("gone"))
         });
-        console.update(cx, |console, cx| console.copy(text.clone(), Copied::One(7), cx));
-        console.read_with(cx, |console, _| assert!(console.is_copied(Copied::One(7))));
+        console.update(cx, |console, cx| console.copy(text.clone(), cx));
         assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()), Some(text));
+        let notice = cx.update(|_, cx| {
+            crate::ui::notice::Notices::global(cx).read(cx).current().map(|notice| notice.text.to_string())
+        });
+        assert_eq!(notice.as_deref(), Some("Copied to the clipboard."), "the window says it was copied");
         draw(cx);
     }
 }

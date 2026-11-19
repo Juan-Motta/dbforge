@@ -29,7 +29,7 @@ use crate::backend::Backend;
 use crate::i18n::{ConnectionMessages, Translate};
 use crate::preferences::Preferences;
 use crate::theme::ActiveTheme;
-use crate::ui::field::Tooltip;
+use crate::ui::error_line::ErrorLine;
 use crate::ui::{
     FileField, SectionTabs, Select, SelectEvent, SelectOption, Swatch, Tab, TextInput, TextInputEvent, button, enabled,
     ghost_button, glass, icon, primary_button, spinner,
@@ -87,6 +87,8 @@ pub struct ConnectionDialog {
     revision: u64,
     pub(super) saving: bool,
     pub(super) save_error: Option<String>,
+    /// The failure of a test or a save, in the footer: pressed, it opens in full.
+    error_line: Entity<ErrorLine>,
     /// What a pasted URL held that the form can't; `None` while nothing was pasted.
     pub(super) from_url: Option<Vec<String>>,
     /// Save was pressed before agent access was chosen.
@@ -196,6 +198,7 @@ impl ConnectionDialog {
             revision: 0,
             saving: false,
             save_error: None,
+            error_line: cx.new(ErrorLine::new),
             from_url: None,
             access_asked: false,
             storage: None,
@@ -254,6 +257,7 @@ impl ConnectionDialog {
         change(&mut self.form);
         self.revision += 1;
         self.test = TestState::Idle;
+        self.show_failure(cx);
         self.sync(window, cx);
         cx.notify();
     }
@@ -424,6 +428,35 @@ impl ConnectionDialog {
         if sections_of(self.form.engine).contains(&self.section) { self.section } else { Section::General }
     }
 
+    /// The failure the footer shows: a save's, else a test's.
+    pub(super) fn failure(&self) -> Option<&str> {
+        match (&self.test, &self.save_error) {
+            (_, Some(error)) | (TestState::Failed(error), None) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// `DBFORGE_OPEN=edit:<id>#failure`, in development builds: a long save
+    /// failure in the footer, opened in full.
+    #[cfg(debug_assertions)]
+    pub fn fail_for_development(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_error = Some(
+            "connection refused: is the server running on host \"db.internal\" (10.0.0.7) and accepting TCP/IP \
+             connections on port 5432? Check the host and port, that the server listens on this address, and that \
+             no firewall drops the connection."
+                .into(),
+        );
+        self.show_failure(cx);
+        self.error_line.update(cx, |line, cx| line.toggle(window, cx));
+        cx.notify();
+    }
+
+    /// Puts the failure, if any, on the footer's error line.
+    fn show_failure(&mut self, cx: &mut Context<Self>) {
+        let failure = self.failure().unwrap_or_default().to_owned();
+        self.error_line.update(cx, |line, cx| line.set_text(failure, cx));
+    }
+
     fn input(&self) -> ConnectionInput {
         to_input(&self.form, self.editing.as_ref().map(|connection| connection.id.as_str()))
     }
@@ -452,6 +485,7 @@ impl ConnectionDialog {
                     Ok(version) => TestState::Passed(connected(&version)),
                     Err(message) => TestState::Failed(message),
                 };
+                this.show_failure(cx);
                 cx.notify();
             });
         })
@@ -481,6 +515,7 @@ impl ConnectionDialog {
     fn save(&mut self, cx: &mut Context<Self>) {
         self.saving = true;
         self.save_error = None;
+        self.show_failure(cx);
         let input = self.input();
         let saving = Backend::global(cx).spawn(cx, move |core| async move {
             commands::save_connection(core.connections(), input).await.map_err(|error| error.to_string())
@@ -495,6 +530,7 @@ impl ConnectionDialog {
                 Err(message) => {
                     this.save_error = Some(message);
                     this.saving = false;
+                    this.show_failure(cx);
                     cx.notify();
                 }
             });
@@ -607,16 +643,9 @@ impl ConnectionDialog {
         let savable = !self.saving && can_submit(&self.form);
         // One line, always there, so a result never moves the buttons.
         let result: Option<AnyElement> = match (&self.test, &self.save_error) {
-            (_, Some(error)) | (TestState::Failed(error), None) => Some(
-                div()
-                    .id("result")
-                    .min_w_0()
-                    .truncate()
-                    .text_color(theme.err)
-                    .tooltip(Tooltip::text(error.clone()))
-                    .child(error.clone())
-                    .into_any_element(),
-            ),
+            (_, Some(_)) | (TestState::Failed(_), None) => {
+                Some(div().min_w_0().flex_1().child(self.error_line.clone()).into_any_element())
+            }
             (TestState::Passed(message), None) => Some(
                 div()
                     .h(px(22.))

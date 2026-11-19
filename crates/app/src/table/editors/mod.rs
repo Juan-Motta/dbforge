@@ -1,7 +1,7 @@
 //! A cell being edited, its editor over the cell so the table doesn't move:
 //! text in a field (Enter or leaving it keeps the text, Escape cancels), a
 //! list of values for a boolean or an enum (a choice keeps it, Escape or a
-//! click outside changes nothing), and date and time controls under the
+//! click outside changes nothing, typed letters jump to the value they start), and date and time controls under the
 //! cell (Enter or Apply keeps the value, Escape or Cancel doesn't).
 
 pub mod temporal;
@@ -83,7 +83,9 @@ impl TableView {
                         .checked(checked)
                     })
                     .collect();
-                let menu = cx.new(|cx| PopoverMenu::new(items, window, cx).with_width(bounds.size.width.max(px(160.))));
+                let menu = cx.new(|cx| {
+                    PopoverMenu::new(items, window, cx).with_type_ahead().with_width(bounds.size.width.max(px(160.)))
+                });
                 subscriptions.push(cx.subscribe_in(&menu, window, move |this, _, _: &DismissEvent, window, cx| {
                     if this.editor.as_ref().is_some_and(|editor| editor.cell == cell) {
                         this.cancel_editor(window, cx);

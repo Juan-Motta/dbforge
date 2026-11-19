@@ -2,20 +2,22 @@
 //! the others under it, as wide as the box. It takes the keyboard like a
 //! field (Tab reaches it; Space or ↓ opens it, ↑ ↓ Enter choose), and tells
 //! its owner of a choice with [`SelectEvent`]. Enter on a closed dropdown is
-//! left to the form, which applies.
+//! left to the form, which applies. Typed letters jump to the option they
+//! start: closed, they choose it; open, they highlight it.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
     App, AppContext, Bounds, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyBinding, MouseButton, ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window,
-    actions, div, point, prelude::FluentBuilder, px,
+    IntoElement, KeyBinding, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, SharedString, Styled,
+    Subscription, Window, actions, div, point, prelude::FluentBuilder, px,
 };
 
 use super::field::frame;
 use super::icon;
 use super::menu::{MenuItem, PopoverMenu, Swatch, popover, swatch};
+use super::type_ahead::{TypeAhead, typed_text};
 use crate::theme::ActiveTheme;
 
 actions!(select, [Open]);
@@ -67,6 +69,8 @@ pub struct Select<T: Clone + PartialEq + 'static> {
     menu: Option<(Entity<PopoverMenu>, Subscription)>,
     /// Where the box was last drawn, for the menu to drop from.
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Letters typed while it is closed.
+    type_ahead: TypeAhead,
 }
 
 impl<T: Clone + PartialEq + 'static> EventEmitter<SelectEvent<T>> for Select<T> {}
@@ -88,6 +92,7 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
             focus: cx.focus_handle().tab_stop(true),
             menu: None,
             bounds: Rc::default(),
+            type_ahead: TypeAhead::default(),
         }
     }
 
@@ -166,7 +171,7 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
             .collect();
         let width = self.bounds.get().map(|bounds| bounds.size.width);
         let menu = cx.new(|cx| {
-            let menu = PopoverMenu::new(items, window, cx);
+            let menu = PopoverMenu::new(items, window, cx).with_type_ahead();
             match width {
                 Some(width) => menu.with_width(width),
                 None => menu,
@@ -179,6 +184,23 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
         });
         self.menu = Some((menu, closing));
         cx.notify();
+    }
+
+    /// A key typed on the closed box: a letter chooses the option it starts.
+    fn type_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let Some(text) = typed_text(&event.keystroke, self.type_ahead.running(now)) else { return };
+        let labels: Vec<&str> = self.options.iter().map(|option| option.label.as_ref()).collect();
+        let current =
+            self.value.as_ref().and_then(|value| self.options.iter().position(|option| &option.value == value));
+        if let Some(index) = self.type_ahead.type_text(text, now, &labels, current) {
+            let value = self.options[index].value.clone();
+            self.choose(value, cx);
+        }
+        cx.stop_propagation();
     }
 
     fn choose(&mut self, value: T, cx: &mut Context<Self>) {
@@ -208,6 +230,7 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                     .track_focus(&self.focus)
                     .key_context(CONTEXT)
                     .on_action(cx.listener(|this, _: &Open, window, cx| this.open(window, cx)))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.type_key(event, cx)))
                     // On press, while an open menu's own click-outside is still closing it, so
                     // pressing the box again closes the menu rather than reopening it.
                     .when(!self.disabled, |frame| {
@@ -225,5 +248,73 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                     .child(icon("down", theme.text3, 13.)),
             )
             .children(self.menu.as_ref().zip(position).map(|((menu, _), position)| popover(menu.clone(), position)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+    use crate::theme::{Appearance, Theme};
+
+    struct Host {
+        select: Entity<Select<u8>>,
+        chosen: Vec<u8>,
+        _chosen: Subscription,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(self.select.clone())
+        }
+    }
+
+    fn engines(cx: &mut TestAppContext) -> (Entity<Host>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            cx.set_global(Theme::new(Appearance::Dark));
+            cx.bind_keys(key_bindings());
+            cx.bind_keys(crate::ui::menu::key_bindings());
+        });
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            let options = ["PostgreSQL", "MySQL", "MariaDB", "MongoDB"]
+                .into_iter()
+                .enumerate()
+                .map(|(value, label)| SelectOption::new(value as u8, label))
+                .collect();
+            let select = cx.new(|cx| Select::new(options, Some(0), cx));
+            select.read(cx).focus(window);
+            let chosen = cx.subscribe(&select, |host: &mut Host, _, SelectEvent(value), _| host.chosen.push(*value));
+            Host { select, chosen: Vec::new(), _chosen: chosen }
+        });
+        cx.run_until_parked();
+        (host, cx)
+    }
+
+    #[gpui::test]
+    fn a_letter_on_the_closed_dropdown_chooses_the_option_it_starts(cx: &mut TestAppContext) {
+        let (host, cx) = engines(cx);
+        cx.simulate_keystrokes("m");
+        assert_eq!(host.read_with(cx, |host, cx| host.select.read(cx).value().copied()), Some(1));
+        cx.simulate_keystrokes("o");
+        assert_eq!(host.read_with(cx, |host, cx| host.select.read(cx).value().copied()), Some(3), "\"mo\" is MongoDB");
+        assert_eq!(host.read_with(cx, |host, _| host.chosen.clone()), [1, 3], "each choice is told");
+        assert!(!host.read_with(cx, |host, cx| host.select.read(cx).is_open()), "it stays closed");
+        // ⌘ and Ctrl shortcuts are not typed.
+        cx.simulate_keystrokes("cmd-p ctrl-p");
+        assert_eq!(host.read_with(cx, |host, cx| host.select.read(cx).value().copied()), Some(3));
+    }
+
+    #[gpui::test]
+    fn letters_on_the_open_list_highlight_the_option_and_enter_chooses_it(cx: &mut TestAppContext) {
+        let (host, cx) = engines(cx);
+        host.update_in(cx, |host, window, cx| host.select.update(cx, |select, cx| select.open(window, cx)));
+        cx.run_until_parked();
+        crate::test_support::draw(cx);
+        cx.simulate_keystrokes("m o");
+        assert_eq!(host.read_with(cx, |host, cx| host.select.read(cx).value().copied()), Some(0), "only highlighted");
+        cx.simulate_keystrokes("enter");
+        assert_eq!(host.read_with(cx, |host, cx| host.select.read(cx).value().copied()), Some(3));
+        assert!(!host.read_with(cx, |host, cx| host.select.read(cx).is_open()));
     }
 }

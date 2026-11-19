@@ -12,7 +12,6 @@ pub struct StatementMessages {
     pub metadata: &'static str,
     pub copy: &'static str,
     pub copy_all: &'static str,
-    pub copied: &'static str,
     pub clear: &'static str,
     /// Its close button, with the shortcut that toggles it.
     pub close: fn(&str) -> String,

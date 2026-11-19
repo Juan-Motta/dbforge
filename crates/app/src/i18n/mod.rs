@@ -12,6 +12,7 @@ mod mcp;
 mod palette;
 mod query;
 mod settings;
+mod shell;
 mod statements;
 mod structure;
 mod table;
@@ -28,6 +29,7 @@ pub use self::mcp::McpMessages;
 pub use self::palette::PaletteMessages;
 pub use self::query::{HistoryMessages, PlanMessages, QueryMessages, thousands};
 pub use self::settings::{SettingsMessages, TagsMessages};
+pub use self::shell::{AppMenuMessages, ShellMessages};
 pub use self::statements::StatementMessages;
 pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
@@ -109,10 +111,6 @@ pub struct Messages {
     pub tables: &'static str,
     pub views: &'static str,
     pub copy_name: &'static str,
-    /// A MongoDB collection's menu: copy the mongosh that reads its first documents.
-    pub copy_find: &'static str,
-    /// A MongoDB collection's menu: copy the mongosh that counts its documents.
-    pub copy_count: &'static str,
     /// A table's or view's menu: open its rows.
     pub open_data: &'static str,
     /// A table's or view's menu: open its structure.
@@ -185,6 +183,8 @@ pub struct Messages {
     pub mcp: McpMessages,
     /// The update dialog.
     pub updates: UpdateMessages,
+    /// The toolbar's connection details, the explorer's Copy menu, notices, error lines and the menu bar.
+    pub shell: ShellMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

@@ -5,11 +5,14 @@
 //! importing rows, a database's dump and restore, the notice of unreadable
 //! settings); over those, while a check found something to say, the update
 //! dialog; and over everything, while an agent waits for the user, the
-//! dialog approving its change. Each part is its own view, which its
-//! feature grows.
+//! dialog approving its change; and at the bottom, over all of it, the
+//! notice of what just happened (a copy, a failure), for a moment. Each
+//! part is its own view, which its feature grows.
 //! ⌘K / Ctrl+K toggles the palette, ⌘B / Ctrl+B the explorer and ⌘J /
 //! Ctrl+J the statement console, from anywhere in the window.
 
+pub mod connection_details;
+pub mod connection_facts;
 pub mod explorer;
 pub mod set_aside;
 mod toolbar;
@@ -39,6 +42,7 @@ use crate::preferences::{Preferences, keys};
 use crate::settings::{Section, SettingsDialog, SettingsEvent};
 use crate::statement_log::{StatementConsole, StatementConsoleEvent};
 use crate::theme::{ActiveTheme, Theme};
+use crate::ui::notice::{Notices, notice_layer};
 use crate::updates::{Phase, UpdateDialog, Updates};
 use crate::workspace::WorkspaceEvent;
 
@@ -102,6 +106,8 @@ pub struct Shell {
     dialog: Option<OpenDialog>,
     approval: Option<OpenApproval>,
     update: Option<OpenUpdate>,
+    /// The notice at the bottom of the window.
+    notices: Entity<Notices>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -159,6 +165,9 @@ impl Shell {
         subscriptions.push(cx.observe_in(&Updates::global(cx), window, |this, _, window, cx| {
             this.sync_update(window, cx);
         }));
+        // A notice came or went.
+        let notices = Notices::global(cx);
+        subscriptions.push(cx.observe(&notices, |_, _, cx| cx.notify()));
         let mut shell = Self {
             explorer,
             explorer_open: true,
@@ -168,6 +177,7 @@ impl Shell {
             dialog: None,
             approval: None,
             update: None,
+            notices,
             _subscriptions: subscriptions,
         };
         // Requests that came while the window opened.
@@ -296,6 +306,9 @@ impl Shell {
             ToolbarEvent::ToggleExplorer => self.toggle_explorer(window, cx),
             ToolbarEvent::ToggleStatements => self.toggle_statements(cx),
             ToolbarEvent::OpenSettings => self.open_settings(Section::Appearance, window, cx),
+            ToolbarEvent::EditConnection(connection) => {
+                self.open_connection_dialog(Some((**connection).clone()), window, cx)
+            }
         }
     }
 
@@ -685,6 +698,35 @@ impl Shell {
                 return self.open_settings(section, window, cx);
             }
             ("approval", _) => return self.show_approval_for_development(seed.as_deref(), cx),
+            ("notice", _) => {
+                let (text, tone) = match seed.as_deref() {
+                    Some("error") => (
+                        "connection refused: is the server running on host \"db.internal\" (10.0.0.7) and \
+                         accepting TCP/IP connections on port 5432?",
+                        crate::ui::notice::Tone::Error,
+                    ),
+                    _ => (cx.messages().shell.copied, crate::ui::notice::Tone::Info),
+                };
+                return crate::ui::notice::notify(text, tone, cx);
+            }
+            (_, Some(("connection-details", id))) => {
+                let found = self.explorer.read(cx).connection(id).map(|(c, tag)| (c.clone(), tag.cloned()));
+                let Some(found) = found else { return eprintln!("DBFORGE_OPEN: no connection {id}") };
+                self.toolbar.update(cx, |toolbar, cx| {
+                    toolbar.show(Some(found), cx);
+                    toolbar.toggle_details(window, cx);
+                });
+                return;
+            }
+            (_, Some((kind @ ("table-menu" | "view-menu"), target))) => {
+                let mut parts = target.split('/').map(str::to_owned);
+                let id = parts.next().unwrap_or_default();
+                let path: Vec<String> = parts.collect();
+                self.explorer.update(cx, |explorer, cx| {
+                    explorer.open_table_menu_for_development(&id, path, kind == "view-menu", window, cx)
+                });
+                return;
+            }
             ("update", _) => return show_update_for_development(seed.as_deref(), cx),
             ("statement-log", _) => {
                 if self.statements.is_none() {
@@ -763,6 +805,9 @@ impl Shell {
             dialog.update(cx, |dialog, cx| dialog.show_section(section, cx));
             if wanted_menu {
                 dialog.update(cx, |dialog, cx| dialog.open_engines(window, cx));
+            }
+            if seed.as_deref() == Some("failure") {
+                dialog.update(cx, |dialog, cx| dialog.fail_for_development(window, cx));
             }
         }
     }
@@ -1083,7 +1128,7 @@ fn dialog_layer(id: &'static str, theme: &Theme, view: AnyView, placement: Place
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        div()
+        crate::menu_bar::handle_window_commands(div())
             .size_full()
             .relative()
             .flex()
@@ -1097,6 +1142,9 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &TogglePalette, window, cx| this.toggle_palette(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleExplorer, window, cx| this.toggle_explorer(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleStatements, _, cx| this.toggle_statements(cx)))
+            .on_action(cx.listener(|this, _: &crate::menu_bar::About, window, cx| {
+                this.open_settings(Section::About, window, cx)
+            }))
             .when(self.explorer_open, |shell| shell.child(self.explorer.clone()))
             .child(
                 div()
@@ -1125,6 +1173,8 @@ impl Render for Shell {
                     .as_ref()
                     .map(|open| dialog_layer("approval-scrim", theme, open.dialog.clone().into(), Placement::Center)),
             )
+            // Over everything, taking no clicks.
+            .children(self.notices.read(cx).current().map(|notice| notice_layer(theme, notice)))
     }
 }
 

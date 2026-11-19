@@ -20,6 +20,7 @@ pub mod i18n;
 pub mod import;
 pub mod keyspace;
 pub mod mcp;
+pub mod menu_bar;
 pub mod palette;
 pub mod preferences;
 pub mod query;

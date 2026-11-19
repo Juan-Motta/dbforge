@@ -3,15 +3,18 @@
 //! everything, takes the keyboard (↑ ↓ Enter), and closes on Escape, a click
 //! outside it or a choice, telling its owner with a [`DismissEvent`]. Items
 //! may sit under group headings, carry a colour swatch and show a check.
+//! A list of choices (a dropdown's, a cell's) also jumps to the item its
+//! typed letters start ([`PopoverMenu::with_type_ahead`]).
 
 use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement, Styled,
-    Window, actions, anchored, deferred, div, prelude::FluentBuilder, px,
+    IntoElement, KeyBinding, KeyDownEvent, ParentElement, Pixels, Point, Render, SharedString,
+    StatefulInteractiveElement, Styled, Window, actions, anchored, deferred, div, prelude::FluentBuilder, px,
 };
 
+use super::type_ahead::{TypeAhead, typed_text};
 use super::{dot, glass, icon};
 use crate::theme::ActiveTheme;
 
@@ -120,6 +123,8 @@ pub struct PopoverMenu {
     highlighted: Option<usize>,
     /// As wide as the control it drops from, when it does.
     width: Option<Pixels>,
+    /// Letters typed jump to the item they start; `None` for a menu of commands.
+    type_ahead: Option<TypeAhead>,
     focus: FocusHandle,
 }
 
@@ -139,7 +144,33 @@ impl PopoverMenu {
         window.focus(&focus);
         let highlighted =
             items.iter().position(|item| item.checked).or_else(|| items.iter().position(|item| !item.disabled));
-        Self { highlighted, items, width: None, focus }
+        Self { highlighted, items, width: None, type_ahead: None, focus }
+    }
+
+    /// Typed letters move the highlight to the item they start, as a list of choices does.
+    pub fn with_type_ahead(mut self) -> Self {
+        self.type_ahead = Some(TypeAhead::default());
+        self
+    }
+
+    /// The item the keyboard is on.
+    pub fn highlighted(&self) -> Option<usize> {
+        self.highlighted
+    }
+
+    /// A key typed on the menu: with type-ahead, a letter highlights the item it starts.
+    fn type_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let Some(type_ahead) = self.type_ahead.as_mut() else { return };
+        let now = std::time::Instant::now();
+        let Some(text) = typed_text(&event.keystroke, type_ahead.running(now)) else { return };
+        // A disabled item can't be chosen, so it is never jumped to.
+        let labels: Vec<&str> =
+            self.items.iter().map(|item| if item.disabled { "\0" } else { item.label.as_ref() }).collect();
+        if let Some(index) = type_ahead.type_text(text, now, &labels, self.highlighted) {
+            self.highlighted = Some(index);
+        }
+        cx.stop_propagation();
+        cx.notify();
     }
 
     /// Draws the menu `width` wide, as the dropdown it opens from.
@@ -287,6 +318,7 @@ impl Render for PopoverMenu {
                 }
             }))
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.type_key(event, cx)))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
             .min_w(px(180.))
             .when_some(self.width, |menu, width| menu.w(width))

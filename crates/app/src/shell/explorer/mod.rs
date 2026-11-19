@@ -15,11 +15,11 @@ use dbforge_core::drivers::TableRef;
 use dbforge_core::explorer;
 use dbforge_core::query::QueryScope;
 use gpui::{
-    App, AppContext, BorrowAppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    KeyBinding, Pixels, Point, ScrollStrategy, Subscription, UniformListScrollHandle, Window, actions,
+    App, AppContext, BorrowAppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyBinding, Pixels,
+    Point, ScrollStrategy, Subscription, UniformListScrollHandle, Window, actions,
 };
 
-use self::menu::{NodeCommand, commands, diagram_target};
+use self::menu::{CopyKind, NodeCommand, commands, copied_text, diagram_target};
 use self::tree::{ChildState, Node, NodeKind, TreeNode, TreeRow};
 use crate::admin::NewObjectKind;
 use crate::backend::Backend;
@@ -29,6 +29,7 @@ use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
 use crate::structure::sections::Section;
 use crate::table::TableTabView;
+use crate::ui::notice::{Tone, copy_to_clipboard, notify};
 use crate::ui::{MenuItem, PopoverMenu, TextInput, TextInputEvent};
 
 actions!(explorer, [SelectPrevious, SelectNext, Expand, Collapse, Activate]);
@@ -386,8 +387,8 @@ impl Explorer {
                     this.reload_connections(None, Some(&copy.id), cx);
                     cx.emit(ExplorerEvent::ConnectionsChanged);
                 }
-                // Until the app has notifications, the reason goes to the log.
-                Err(message) => eprintln!("DBForge could not duplicate the connection: {message}"),
+                // Why, at the bottom of the window, as the former web UI said it.
+                Err(message) => notify(message, Tone::Error, cx),
             });
         })
         .detach();
@@ -550,22 +551,12 @@ impl Explorer {
                     NodeCommand::RefreshConnection => {
                         let _ = this.update(cx, |this, cx| this.refresh(Some(&node.connection_id), cx));
                     }
-                    NodeCommand::CopyName => cx.write_to_clipboard(ClipboardItem::new_string(node.name.clone())),
-                    NodeCommand::CopyFind | NodeCommand::CopyCount => {
-                        let Some(table) = crate::sql::snippets::table_ref(&node.path) else { return };
-                        let text = if command == NodeCommand::CopyFind {
-                            crate::sql::snippets::preview_query(node.engine, &table)
-                        } else {
-                            Some(crate::sql::snippets::count_query(&table))
-                        };
-                        if let Some(text) = text {
-                            cx.write_to_clipboard(ClipboardItem::new_string(text));
-                        }
-                    }
+                    NodeCommand::CopyName => copy_to_clipboard(node.name.clone(), cx),
+                    NodeCommand::Copy(kind) => copy_from_table(kind, &node, cx),
                     NodeCommand::CopyConnectionUrl => {
                         let _ = this.update(cx, |this, cx| {
                             if let Some((connection, _)) = this.connection(&node.connection_id) {
-                                cx.write_to_clipboard(ClipboardItem::new_string(connection_url(connection)));
+                                copy_to_clipboard(connection_url(connection), cx);
                             }
                         });
                     }
@@ -699,6 +690,35 @@ impl Explorer {
         eprintln!("explorer:\n{}\n", lines.join("\n"));
     }
 
+    /// `DBFORGE_OPEN=table-menu:<id>/<path>`, in development builds: the
+    /// menu of the table or view at `path` (as its node's), as a right-click opens it.
+    #[cfg(debug_assertions)]
+    pub fn open_table_menu_for_development(
+        &mut self,
+        connection_id: &str,
+        path: Vec<String>,
+        view: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((connection, _)) = self.connection(connection_id) else {
+            return eprintln!("DBFORGE_OPEN: no connection {connection_id}");
+        };
+        let node = Node {
+            id: format!("{connection_id}/{}", path.join("/")),
+            name: path.last().cloned().unwrap_or_default(),
+            kind: if view { NodeKind::View } else { NodeKind::Table },
+            meta: None,
+            connection_id: connection_id.to_owned(),
+            engine: connection.engine,
+            path,
+            expandable: false,
+            loading: false,
+            error: None,
+        };
+        self.open_menu(&node, gpui::point(gpui::px(160.), gpui::px(120.)), window, cx);
+    }
+
     /// `DBFORGE_EXPAND`, in development builds: a comma-separated list of
     /// connection ids (or `all`) whose whole tree opens at start, the first
     /// one selected, so a screenshot shows a listed tree without clicking.
@@ -721,6 +741,38 @@ impl Explorer {
         }
         self.load(roots, cx);
     }
+}
+
+/// Puts what a table's or view's Copy item names on the clipboard and says
+/// so; a statement written from its columns or DDL reads them first, and a
+/// failure to read them is said instead.
+fn copy_from_table(kind: CopyKind, node: &Node, cx: &mut App) {
+    if !kind.needs_structure() {
+        if let Some(text) = copied_text(kind, node, None) {
+            copy_to_clipboard(text, cx);
+        }
+        return;
+    }
+    let Some(table) = crate::sql::snippets::table_ref(&node.path) else { return };
+    let connection_id = node.connection_id.clone();
+    let reading = Backend::global(cx).spawn(cx, move |core| async move {
+        explorer::table_structure(core.connections(), core.statement_log(), connection_id, table)
+            .await
+            .map_err(|error| error.to_string())
+    });
+    let node = node.clone();
+    cx.spawn(async move |cx| {
+        let read = reading.await;
+        let _ = cx.update(|cx| match read {
+            Ok(structure) => {
+                if let Some(text) = copied_text(kind, &node, Some(&structure)) {
+                    copy_to_clipboard(text, cx);
+                }
+            }
+            Err(message) => notify(message, Tone::Error, cx),
+        });
+    })
+    .detach();
 }
 
 #[cfg(test)]

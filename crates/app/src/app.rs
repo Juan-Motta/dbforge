@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use dbforge_core::{Core, Dirs};
 use gpui::{
-    App, AppContext, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowOptions,
-    actions, point, px, size,
+    App, AppContext, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions, point, px,
+    size,
 };
 
 use crate::assets::Assets;
@@ -18,7 +18,7 @@ use crate::mcp::Approvals;
 use crate::preferences::{PreferenceFile, Preferences};
 use crate::shell::{self, Shell};
 use crate::theme::Theme;
-use crate::updates::{CheckForUpdates, Updates};
+use crate::updates::Updates;
 
 actions!(dbforge, [Quit]);
 
@@ -89,10 +89,12 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new(quit, Quit, None)]);
     cx.bind_keys(shell::key_bindings());
     cx.bind_keys(shell::set_aside::key_bindings());
+    cx.bind_keys(shell::connection_details::key_bindings());
     cx.bind_keys(crate::palette::key_bindings());
     cx.bind_keys(crate::settings::key_bindings());
     cx.bind_keys(shell::explorer::key_bindings());
     cx.bind_keys(crate::ui::text_input::key_bindings());
+    cx.bind_keys(crate::ui::error_line::key_bindings());
     cx.bind_keys(crate::ui::code_editor::key_bindings());
     cx.bind_keys(crate::grid::key_bindings());
     cx.bind_keys(crate::query::key_bindings());
@@ -106,7 +108,9 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::dump::key_bindings());
     cx.bind_keys(crate::mcp::key_bindings());
     cx.bind_keys(crate::updates::dialog_key_bindings());
+    cx.bind_keys(crate::menu_bar::key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
+    crate::menu_bar::register(cx);
     set_menus(cx);
     // Closing the window quits, as the former Tauri app did.
     cx.on_window_closed(|cx| {
@@ -123,18 +127,10 @@ fn bind_keys(cx: &mut App) {
     .detach();
 }
 
-/// The app menu (on macOS the menu bar's DBForge menu): Check for Updates…
-/// and Quit, in the language in use. Set again when the language changes.
+/// The menu bar ([`crate::menu_bar`]) in the language in use. Set again when the language changes.
 pub fn set_menus(cx: &mut App) {
-    let check = cx.messages().settings_dialog.check_now;
-    cx.set_menus(vec![Menu {
-        name: "DBForge".into(),
-        items: vec![
-            MenuItem::action(check, CheckForUpdates),
-            MenuItem::separator(),
-            MenuItem::action("Quit DBForge", Quit),
-        ],
-    }]);
+    let menus = crate::menu_bar::menus(cx.messages());
+    cx.set_menus(menus);
 }
 
 fn open_window(cx: &mut App) {
