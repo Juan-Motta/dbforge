@@ -5,6 +5,7 @@
 mod admin;
 mod connection;
 mod diagram;
+mod editor;
 mod en;
 mod es;
 mod keyspace;
@@ -23,6 +24,7 @@ use gpui::{App, BorrowAppContext, Global};
 pub use self::admin::AdminMessages;
 pub use self::connection::ConnectionMessages;
 pub use self::diagram::DiagramMessages;
+pub use self::editor::EditorMessages;
 pub use self::keyspace::KeyspaceMessages;
 pub use self::mcp::McpMessages;
 pub use self::palette::PaletteMessages;
@@ -185,6 +187,8 @@ pub struct Messages {
     pub mcp: McpMessages,
     /// The update dialog.
     pub updates: UpdateMessages,
+    /// The code editor: its find and replace bar.
+    pub editor: EditorMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).
