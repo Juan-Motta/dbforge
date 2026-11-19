@@ -2,21 +2,29 @@
 //! missing from one fails to compile rather than showing a key at runtime.
 //! The language is the user's choice, or the OS's when DBForge speaks it.
 
+mod admin;
 mod connection;
 mod diagram;
 mod en;
 mod es;
 mod keyspace;
+mod palette;
 mod query;
+mod settings;
+mod statements;
 mod structure;
 mod table;
 
-use gpui::{App, Global};
+use gpui::{App, BorrowAppContext, Global};
 
+pub use self::admin::AdminMessages;
 pub use self::connection::ConnectionMessages;
 pub use self::diagram::DiagramMessages;
 pub use self::keyspace::KeyspaceMessages;
+pub use self::palette::PaletteMessages;
 pub use self::query::{HistoryMessages, PlanMessages, QueryMessages, thousands};
+pub use self::settings::{SettingsMessages, TagsMessages};
+pub use self::statements::StatementMessages;
 pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
 use crate::preferences::{Preferences, keys};
@@ -60,6 +68,14 @@ impl Language {
     /// The saved choice; the OS's language when nothing (or something unknown) was saved.
     pub fn choose(saved: Option<&str>, locales: &[String]) -> Self {
         saved.and_then(Self::parse).unwrap_or_else(|| Self::system(locales))
+    }
+
+    /// Saves it as the user's choice; the window, observing the
+    /// preferences, speaks it at once.
+    pub fn save(self, cx: &mut App) {
+        cx.update_global::<Preferences, _>(|preferences, _| {
+            preferences.set(keys::LANGUAGE, Some(self.as_str().into()))
+        });
     }
 
     pub fn messages(self) -> &'static Messages {
@@ -109,6 +125,11 @@ pub struct Messages {
     pub no_connection: &'static str,
     pub search_everywhere: &'static str,
     pub settings: &'static str,
+    /// The toolbar's toggles, each with the shortcut that does the same.
+    pub hide_explorer: fn(&str) -> String,
+    pub show_explorer: fn(&str) -> String,
+    pub show_statements: fn(&str) -> String,
+    pub hide_statements: fn(&str) -> String,
     // Main area with no tab open: before, the shortcut's name, after.
     pub new_query: &'static str,
     pub empty_before: &'static str,
@@ -129,6 +150,16 @@ pub struct Messages {
     pub diagram: DiagramMessages,
     /// The Redis key browser.
     pub keyspace: KeyspaceMessages,
+    /// The command palette and its commands.
+    pub palette: PaletteMessages,
+    /// The statement console.
+    pub statements: StatementMessages,
+    /// The settings dialog.
+    pub settings_dialog: SettingsMessages,
+    /// The settings' list of tags.
+    pub tags: TagsMessages,
+    /// Creating databases, roles and users, and dropping databases.
+    pub admin: AdminMessages,
 }
 
 /// The language in use, a GPUI global ([`Translate`]).

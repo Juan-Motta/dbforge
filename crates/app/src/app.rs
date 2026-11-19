@@ -81,7 +81,10 @@ fn dirs() -> Option<Dirs> {
 fn bind_keys(cx: &mut App) {
     let quit = if cfg!(target_os = "macos") { "cmd-q" } else { "ctrl-q" };
     cx.bind_keys([KeyBinding::new(quit, Quit, None)]);
+    cx.bind_keys(shell::key_bindings());
     cx.bind_keys(shell::set_aside::key_bindings());
+    cx.bind_keys(crate::palette::key_bindings());
+    cx.bind_keys(crate::settings::key_bindings());
     cx.bind_keys(shell::explorer::key_bindings());
     cx.bind_keys(crate::ui::text_input::key_bindings());
     cx.bind_keys(crate::ui::code_editor::key_bindings());

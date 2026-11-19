@@ -51,6 +51,15 @@ pub fn target_scope(connection: &Connection, path: &[String]) -> QueryScope {
     }
 }
 
+/// The Redis database "New query" opens in the key browser: the one
+/// selected, else the connection's own (`db0` when it has none).
+pub fn keyspace_target(connection: &Connection, path: &[String]) -> String {
+    path.first().cloned().unwrap_or_else(|| {
+        let own = if connection.database.is_empty() { "0" } else { connection.database.as_str() };
+        format!("db{own}")
+    })
+}
+
 /// An open console and what the workspace hears from it.
 struct OpenConsole {
     console: Entity<QueryConsole>,
@@ -105,16 +114,21 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Whether "New query" can open now: a connection with a console is selected.
+    /// Whether "New query" can open now: a connection is selected.
     pub fn can_query(&self) -> bool {
-        self.target.as_ref().is_some_and(|(connection, _)| has_query_console(connection.engine))
+        self.target.is_some()
     }
 
-    /// "New query" from the strip's +: a console on the selected connection
-    /// and database (and Cosmos DB container).
+    /// "New query" (the strip's +, the palette): a console on the selected
+    /// connection and database (and Cosmos DB container); on Redis, which
+    /// has no console, the selected database's key browser, which holds the CLI.
     pub fn new_query_on_target(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((connection, path)) = self.target.clone() else { return };
-        self.new_query(&connection.id, target_scope(&connection, &path), None, window, cx);
+        if has_query_console(connection.engine) {
+            self.new_query(&connection.id, target_scope(&connection, &path), None, window, cx);
+        } else {
+            self.open_keyspace(&connection.id, &keyspace_target(&connection, &path), window, cx);
+        }
     }
 
     /// Opens a console on `connection_id` and `scope`, its editor starting
@@ -281,6 +295,17 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Closes the tabs showing a database that was dropped; consoles stay.
+    pub fn close_database(&mut self, connection_id: &str, database: &str, window: &mut Window, cx: &mut Context<Self>) {
+        for tab in self.tabs.close_database(connection_id, database) {
+            self.forget(&tab.id, cx);
+        }
+        if let Some(next) = self.tabs.active_id().map(str::to_owned) {
+            self.activate(&next, window, cx);
+        }
+        cx.notify();
+    }
+
     /// Closes every tab of a connection that was deleted.
     pub fn close_connection(&mut self, connection_id: &str, cx: &mut Context<Self>) {
         for tab in self.tabs.close_connection(connection_id) {
@@ -374,6 +399,13 @@ mod tests {
 
     fn path(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn opens_a_redis_new_query_in_the_selected_database_s_key_browser() {
+        assert_eq!(keyspace_target(&connection(Engine::Redis, "3"), &path(&["db5"])), "db5");
+        assert_eq!(keyspace_target(&connection(Engine::Redis, "3"), &[]), "db3");
+        assert_eq!(keyspace_target(&connection(Engine::Redis, ""), &[]), "db0");
     }
 
     #[test]

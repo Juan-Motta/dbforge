@@ -5,11 +5,15 @@
 //! with opening its rows, its structure, then a new query, as the web UI's
 //! do; a schema's (or a database that is its own schema) offer its ER
 //! diagram after the new query. A MongoDB collection's copies also offer its
-//! mongosh `find()` and `countDocuments()`.
+//! mongosh `find()` and `countDocuments()`. A connection's server objects
+//! it can create follow its new query under a "New" heading; a database
+//! that can be dropped offers it last.
 
 use dbforge_core::connections::model::Engine;
 
 use super::tree::{Node, NodeKind};
+use crate::admin::NewObjectKind;
+use crate::admin::new_object::{drops_databases, menu_icon_of, menu_label_of, new_objects};
 use crate::connections::engine::is_relational;
 use crate::i18n::Messages;
 use crate::workspace::has_query_console;
@@ -42,6 +46,10 @@ pub enum NodeCommand {
     EditConnection,
     /// Asks before deleting it.
     DeleteConnection,
+    /// Creates a database, role or user on the connection's server.
+    NewObject(NewObjectKind),
+    /// Drops the database from its server, once its name is typed again.
+    DropDatabase,
 }
 
 impl NodeCommand {
@@ -60,7 +68,14 @@ impl NodeCommand {
             Self::DuplicateConnection => m.duplicate_connection,
             Self::EditConnection => m.edit_connection,
             Self::DeleteConnection => m.delete_connection,
+            Self::NewObject(kind) => menu_label_of(kind, &m.admin),
+            Self::DropDatabase => m.admin.drop_menu,
         }
+    }
+
+    /// The heading it is listed under: the server objects a connection creates are under "New".
+    pub fn group(self, m: &Messages) -> Option<&'static str> {
+        matches!(self, Self::NewObject(_)).then_some(m.admin.new_menu)
     }
 
     pub fn icon(self) -> &'static str {
@@ -74,7 +89,8 @@ impl NodeCommand {
             Self::CopyConnectionUrl => "external",
             Self::DuplicateConnection => "duplicate",
             Self::EditConnection => "edit",
-            Self::DeleteConnection => "trash",
+            Self::DeleteConnection | Self::DropDatabase => "trash",
+            Self::NewObject(kind) => menu_icon_of(kind),
         }
     }
 }
@@ -92,12 +108,16 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
     if diagram_target(node).is_some() {
         commands.push(ShowDiagram);
     }
+    if node.kind == NodeKind::Connection {
+        commands.extend(new_objects(node.engine).iter().map(|kind| NewObject(*kind)));
+    }
     commands.extend(match node.kind {
         // A connection's own refresh is its whole connection already.
         NodeKind::Connection => {
             vec![Refresh, CopyName, CopyConnectionUrl, DuplicateConnection, EditConnection, DeleteConnection]
         }
         NodeKind::Folder => vec![Refresh, RefreshConnection],
+        NodeKind::Database if drops_databases(node.engine) => vec![Refresh, RefreshConnection, CopyName, DropDatabase],
         NodeKind::Database | NodeKind::Schema => vec![Refresh, RefreshConnection, CopyName],
         NodeKind::Table | NodeKind::View if node.engine == Engine::Mongodb => {
             vec![Refresh, RefreshConnection, CopyName, CopyFind, CopyCount]
@@ -153,7 +173,15 @@ mod tests {
         use NodeCommand::*;
         assert_eq!(
             commands(&node(NodeKind::Connection)),
-            [Refresh, CopyName, CopyConnectionUrl, DuplicateConnection, EditConnection, DeleteConnection]
+            [
+                NewObject(NewObjectKind::User),
+                Refresh,
+                CopyName,
+                CopyConnectionUrl,
+                DuplicateConnection,
+                EditConnection,
+                DeleteConnection
+            ]
         );
         assert_eq!(commands(&node(NodeKind::Folder)), [Refresh, RefreshConnection]);
         for kind in [NodeKind::Database, NodeKind::Schema] {
@@ -164,10 +192,12 @@ mod tests {
     #[test]
     fn offers_a_new_query_first_where_the_engine_has_a_sql_console() {
         use NodeCommand::*;
-        assert_eq!(commands(&sql_node(NodeKind::Connection))[..2], [NewQuery, Refresh]);
-        for kind in [NodeKind::Database, NodeKind::Schema] {
-            assert_eq!(commands(&sql_node(kind)), [NewQuery, Refresh, RefreshConnection, CopyName], "{kind:?}");
-        }
+        assert_eq!(commands(&sql_node(NodeKind::Connection))[..2], [NewQuery, NewObject(NewObjectKind::Database)]);
+        assert_eq!(commands(&sql_node(NodeKind::Schema)), [NewQuery, Refresh, RefreshConnection, CopyName]);
+        assert_eq!(
+            commands(&sql_node(NodeKind::Database)),
+            [NewQuery, Refresh, RefreshConnection, CopyName, DropDatabase]
+        );
         assert_eq!(commands(&sql_node(NodeKind::Folder)), [Refresh, RefreshConnection]);
         for engine in [Engine::Mongodb, Engine::Cosmosdb] {
             let database = Node { engine, ..sql_node(NodeKind::Database) };
@@ -212,6 +242,7 @@ mod tests {
         // A MySQL database is its own schema; a PostgreSQL one has schemas inside.
         let mysql = at(NodeKind::Database, Engine::Mysql, &["app"]);
         assert_eq!(commands(&mysql)[..2], [NewQuery, ShowDiagram]);
+        assert_eq!(commands(&mysql).last(), Some(&DropDatabase));
         assert_eq!(diagram_target(&mysql), Some(("app".into(), "app".into())));
         assert_eq!(diagram_target(&at(NodeKind::Database, Engine::Postgres, &["shop"])), None);
         assert_eq!(
@@ -243,5 +274,36 @@ mod tests {
         );
         assert_eq!(CopyFind.label(Language::En.messages()), "Copy find() query");
         assert_eq!(CopyCount.label(Language::Es.messages()), "Copiar consulta countDocuments()");
+    }
+
+    #[test]
+    fn offers_the_server_objects_a_connection_creates_under_new_and_drops_where_the_engine_can() {
+        use NodeCommand::*;
+        let m = Language::En.messages();
+        let pg = sql_node(NodeKind::Connection);
+        assert_eq!(
+            commands(&pg),
+            [
+                NewQuery,
+                NewObject(NewObjectKind::Database),
+                NewObject(NewObjectKind::Role),
+                NewObject(NewObjectKind::User),
+                Refresh,
+                CopyName,
+                CopyConnectionUrl,
+                DuplicateConnection,
+                EditConnection,
+                DeleteConnection
+            ]
+        );
+        assert_eq!(commands(&node(NodeKind::Connection))[0], NewObject(NewObjectKind::User), "Redis creates ACL users");
+        let sqlite = Node { engine: Engine::Sqlite, ..sql_node(NodeKind::Connection) };
+        assert!(!commands(&sqlite).iter().any(|command| matches!(command, NewObject(_))), "a file has no server");
+        assert!(!commands(&node(NodeKind::Database)).contains(&DropDatabase), "Redis databases can't be dropped");
+        assert_eq!(NewObject(NewObjectKind::Role).label(m), "Role");
+        assert_eq!(NewObject(NewObjectKind::Role).group(m), Some("New"));
+        assert_eq!(DropDatabase.label(m), "Drop database…");
+        assert_eq!(DropDatabase.label(Language::Es.messages()), "Eliminar base de datos…");
+        assert_eq!(Refresh.group(m), None);
     }
 }

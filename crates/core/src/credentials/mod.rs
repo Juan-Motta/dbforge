@@ -47,6 +47,18 @@ pub struct StorageInfo {
     file_path: String,
 }
 
+impl StorageInfo {
+    /// Where passwords are saved now.
+    pub fn storage(&self) -> Storage {
+        self.storage
+    }
+
+    /// Where the encrypted file is, or would be.
+    pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+}
+
 /// Where a switch is, reported before each password it touches: the
 /// keychain may stop to ask the user for each one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

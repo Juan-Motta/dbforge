@@ -151,6 +151,23 @@ impl Tabs {
         Some(closed)
     }
 
+    /// Closes the tabs showing `database` of a connection (it was dropped):
+    /// its tables, diagrams and key browser; consoles keep their text. The tabs closed.
+    pub fn close_database(&mut self, connection_id: &str, database: &str) -> Vec<Tab> {
+        let shows = |tab: &Tab| match &tab.kind {
+            TabKind::Table { table, .. } => table.database == database,
+            TabKind::Diagram { database: shown, .. } | TabKind::Keyspace { database: shown } => shown == database,
+            TabKind::Query { .. } => false,
+        };
+        let ids: Vec<String> = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.connection_id == connection_id && shows(tab))
+            .map(|tab| tab.id.clone())
+            .collect();
+        ids.iter().filter_map(|id| self.close(id)).collect()
+    }
+
     /// Closes every tab of a connection (it was deleted); the tabs closed.
     pub fn close_connection(&mut self, connection_id: &str) -> Vec<Tab> {
         let ids: Vec<String> =
@@ -299,5 +316,21 @@ mod tests {
         assert_eq!(closed.len(), 2);
         assert_eq!(titles(&tabs), ["Query 2"]);
         assert_eq!(tabs.active_id(), Some("query:2"));
+    }
+
+    #[test]
+    fn closes_the_tabs_showing_a_dropped_database_and_keeps_its_consoles() {
+        let mut tabs = Tabs::default();
+        tabs.new_query(Language::En.messages().query.query_tab, "pg", on("shop"), None);
+        tabs.open_table("pg", orders(), None);
+        tabs.open_diagram(Language::En.messages().diagram.tab, "pg", "shop", "public");
+        tabs.open_diagram(Language::En.messages().diagram.tab, "pg", "other", "public");
+        tabs.open_table("mysql", orders(), None);
+        let closed: Vec<String> = tabs.close_database("pg", "shop").into_iter().map(|tab| tab.id).collect();
+        assert_eq!(closed, ["table:pg:shop.public.orders", "diagram:pg:shop.public"]);
+        assert_eq!(tabs.tabs().len(), 3, "the console, the other database's diagram and the other connection's table");
+        let mut redis = Tabs::default();
+        redis.open_keyspace("r", "cache", "db0");
+        assert_eq!(redis.close_database("r", "db0").len(), 1);
     }
 }

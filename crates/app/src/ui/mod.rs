@@ -163,6 +163,12 @@ pub fn primary_button(theme: &Theme, label: &str) -> Div {
         .child(label.to_owned())
 }
 
+/// A `secondary-<key>` shortcut as each OS writes it: `⌘K` on macOS, `Ctrl+K` elsewhere.
+pub fn shortcut(key: &str) -> String {
+    let key = key.to_uppercase();
+    if cfg!(target_os = "macos") { format!("⌘{key}") } else { format!("Ctrl+{key}") }
+}
+
 /// Keeps `element` as an [`AnyElement`], for [`group`]'s segments.
 pub fn any(element: impl IntoElement) -> AnyElement {
     element.into_any_element()

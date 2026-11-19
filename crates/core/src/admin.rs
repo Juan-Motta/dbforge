@@ -12,6 +12,13 @@ pub struct CreateRequest {
     object: NewObject,
 }
 
+impl CreateRequest {
+    /// A request to create `object` on the server of connection `connection_id`.
+    pub fn new(connection_id: impl Into<String>, object: NewObject) -> Self {
+        Self { connection_id: connection_id.into(), object }
+    }
+}
+
 /// Creates a database, role or user on a saved connection's server (see `drivers::create_object`).
 pub async fn create_object(store: &ConnectionStore, log: &StatementLog, request: CreateRequest) -> Result<()> {
     store
@@ -27,6 +34,13 @@ pub async fn create_object(store: &ConnectionStore, log: &StatementLog, request:
 pub struct DropRequest {
     connection_id: String,
     database: String,
+}
+
+impl DropRequest {
+    /// A request to drop `database` from the server of connection `connection_id`.
+    pub fn new(connection_id: impl Into<String>, database: impl Into<String>) -> Self {
+        Self { connection_id: connection_id.into(), database: database.into() }
+    }
 }
 
 /// Drops a database from a saved connection's server (see `drivers::drop_database`).

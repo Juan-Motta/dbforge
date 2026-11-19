@@ -4,7 +4,7 @@
 
 use dbforge_core::connections::model::Engine;
 use dbforge_core::connections::tags::TagColor;
-use gpui::{App, Global, Hsla, WindowAppearance, rgba};
+use gpui::{App, BorrowAppContext, Global, Hsla, WindowAppearance, rgba};
 
 use crate::preferences::{Preferences, keys};
 
@@ -38,6 +38,12 @@ impl ThemePreference {
     /// The preference saved in `preferences`.
     pub fn saved(preferences: &Preferences) -> Self {
         Self::parse(preferences.get(keys::THEME))
+    }
+
+    /// Saves it as the user's choice; the window, observing the
+    /// preferences, shows it at once.
+    pub fn save(self, cx: &mut App) {
+        cx.update_global::<Preferences, _>(|preferences, _| preferences.set(keys::THEME, Some(self.as_str().into())));
     }
 }
 

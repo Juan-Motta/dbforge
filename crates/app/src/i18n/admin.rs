@@ -1,0 +1,37 @@
+//! The texts of creating a database, role or user, and of dropping a database.
+
+/// The admin dialogs' texts in one language.
+pub struct AdminMessages {
+    pub new_menu: &'static str,
+    pub menu_database: &'static str,
+    pub menu_role: &'static str,
+    pub menu_user: &'static str,
+    pub title_database: fn(&str) -> String,
+    pub title_role: fn(&str) -> String,
+    pub title_user: fn(&str) -> String,
+    pub create_database: &'static str,
+    pub create_role: &'static str,
+    pub create_user: &'static str,
+    pub creating: &'static str,
+    pub cancel: &'static str,
+    pub name: &'static str,
+    pub password: &'static str,
+    pub host: &'static str,
+    pub first_collection: &'static str,
+    pub database: &'static str,
+    pub note_mongo_database: &'static str,
+    pub note_database: &'static str,
+    pub note_server_role: &'static str,
+    pub note_role: &'static str,
+    pub note_postgres_user: &'static str,
+    pub note_sql_server_user: &'static str,
+    pub note_redis_user: &'static str,
+    pub note_user: &'static str,
+    /// A database's menu item.
+    pub drop_menu: &'static str,
+    pub drop_title: fn(&str) -> String,
+    pub drop_note: fn(&str, &str) -> String,
+    pub drop_confirm: fn(&str) -> String,
+    pub drop_database: &'static str,
+    pub dropping: &'static str,
+}

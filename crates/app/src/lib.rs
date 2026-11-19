@@ -4,6 +4,7 @@
 //! [`events::EventHub`], and share the theme, language and preferences as
 //! GPUI globals.
 
+pub mod admin;
 pub mod app;
 pub mod assets;
 pub mod backend;
@@ -14,13 +15,18 @@ pub mod grid;
 pub mod history;
 pub mod i18n;
 pub mod keyspace;
+pub mod palette;
 pub mod preferences;
 pub mod query;
+pub mod settings;
 pub mod shell;
 pub mod sql;
+pub mod statement_log;
 pub mod structure;
 pub mod table;
 pub mod tags;
+#[cfg(test)]
+pub mod test_support;
 pub mod theme;
 pub mod ui;
 pub mod workspace;

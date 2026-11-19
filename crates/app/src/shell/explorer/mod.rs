@@ -20,6 +20,7 @@ use gpui::{
 
 use self::menu::{NodeCommand, commands, diagram_target};
 use self::tree::{ChildState, Node, NodeKind, TreeNode, TreeRow};
+use crate::admin::NewObjectKind;
 use crate::backend::Backend;
 use crate::connections::url::connection_url;
 use crate::i18n::Translate;
@@ -60,6 +61,10 @@ pub enum ExplorerEvent {
     NewQuery { connection_id: String, scope: QueryScope, sql: Option<String> },
     /// Open the ER diagram of this schema.
     OpenDiagram { connection_id: String, database: String, schema: String },
+    /// Create a database, role or user on this connection's server.
+    NewObject { connection: Connection, kind: NewObjectKind },
+    /// Ask before dropping this database from its server.
+    DropDatabase { connection: Connection, database: String },
 }
 
 const CONTEXT: &str = "Explorer";
@@ -346,6 +351,17 @@ impl Explorer {
         }
     }
 
+    /// After `database` was dropped: what was selected in it is gone, so its
+    /// connection is selected instead, and the connection is listed again.
+    pub fn forget_database(&mut self, connection_id: &str, database: &str, cx: &mut Context<Self>) {
+        let selected_inside = self.selected_connection().is_some_and(|(connection, _)| connection.id == connection_id)
+            && self.selected_path().first().map(String::as_str) == Some(database);
+        if selected_inside && let Some(node) = self.find(connection_id).map(|tree| tree.node.clone()) {
+            self.select(&node, cx);
+        }
+        self.refresh(Some(connection_id), cx);
+    }
+
     /// Saves a copy of `connection`, its secrets included, then selects it.
     fn duplicate(&mut self, connection: &Connection, cx: &mut Context<Self>) {
         let (id, name) = (connection.id.clone(), (cx.messages().duplicate_name)(&connection.name));
@@ -491,6 +507,7 @@ impl Explorer {
             .into_iter()
             .map(|command| {
                 let (this, node) = (this.clone(), node.clone());
+                let group = command.group(m).map(Into::into);
                 MenuItem::new(command.label(m), move |window, cx| match command {
                     NodeCommand::OpenData | NodeCommand::ViewStructure => {
                         let view =
@@ -551,6 +568,19 @@ impl Explorer {
                             }
                         });
                     }
+                    NodeCommand::NewObject(kind) => {
+                        let _ = this.update(cx, |this, cx| {
+                            let Some((connection, _)) = this.connection(&node.connection_id) else { return };
+                            cx.emit(ExplorerEvent::NewObject { connection: connection.clone(), kind });
+                        });
+                    }
+                    NodeCommand::DropDatabase => {
+                        let _ = this.update(cx, |this, cx| {
+                            let Some((connection, _)) = this.connection(&node.connection_id) else { return };
+                            let (connection, database) = (connection.clone(), node.name.clone());
+                            cx.emit(ExplorerEvent::DropDatabase { connection, database });
+                        });
+                    }
                     NodeCommand::EditConnection | NodeCommand::DeleteConnection => {
                         let _ = this.update(cx, |this, cx| {
                             let Some((connection, _)) = this.connection(&node.connection_id) else { return };
@@ -564,6 +594,7 @@ impl Explorer {
                     }
                 })
                 .icon(command.icon())
+                .group(group)
             })
             .collect();
         let menu = cx.new(|cx| PopoverMenu::new(items, window, cx));
