@@ -638,6 +638,7 @@ impl Shell {
     /// `#menu` a cell's menu, `#edit`/`#date` a cell's editor (text, date);
     /// `#columns`, `#indexes`, `#foreign-keys`, `#triggers`, `#ddl` or
     /// `#diagram` open the table's tab on that view instead of its rows.
+    /// `DBFORGE_FILTER` and `DBFORGE_ORDER` open the rows filtered and ordered.
     /// On MongoDB and Cosmos DB, `#documents` shows the rows as documents,
     /// `#document-edits` with pending edits, `#document-edit` with one open
     /// in its editor, and `#document-menu` with a document's menu.
@@ -1016,9 +1017,14 @@ impl Shell {
             Some("diagram") => Some(TableTabView::Diagram),
             _ => None,
         };
+        // `DBFORGE_FILTER` and `DBFORGE_ORDER`: the rows shown filtered or ordered, as the filter bar would.
+        let filter = std::env::var("DBFORGE_FILTER").unwrap_or_default();
+        let order = std::env::var("DBFORGE_ORDER").unwrap_or_default();
+        let filter =
+            (!filter.is_empty() || !order.is_empty()).then_some(dbforge_core::drivers::RowFilter { filter, order });
         let page = self
             .workspace
-            .update(cx, |workspace, cx| workspace.open_table(&connection_id, table, None, view, window, cx));
+            .update(cx, |workspace, cx| workspace.open_table(&connection_id, table, filter, view, window, cx));
         let Some(page) = page else { return eprintln!("DBFORGE_OPEN: no connection {connection_id}") };
         if let Some(seed) = seed.filter(|_| view.is_none()) {
             let data = page.read(cx).data().clone();

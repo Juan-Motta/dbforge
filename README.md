@@ -37,9 +37,6 @@
   <img src="docs/images/workspace.png" alt="The workspace: the explorer, a SQL console and its results">
 </p>
 
-> The screenshots show the previous (web-based) version of DBForge. The native app has the same layout and
-> features with its new look; the images are due to be retaken.
-
 ## Install
 
 **macOS:** download `DBForge-x.y.z.dmg` from the [latest release](https://github.com/Juan-Motta/dbforge/releases/latest), open it and drag **DBForge** to **Applications**. It runs on Apple silicon and Intel Macs with **macOS 10.15.7** or later, signed and notarized by Apple.
@@ -201,6 +198,7 @@ These environment variables help while working on the app:
 | `DBFORGE_DIR` | Keeps the configuration and data in `$DBFORGE_DIR/config` and `$DBFORGE_DIR/data` instead of the installed app's folders, so a development run never touches your real connections |
 | `DBFORGE_OPEN` | Debug builds: opens a view or dialog at start, such as `settings#agents`, `palette`, `query:<connection id>#history` or `table:<connection id>/<path>#edits` (the full list is on `Shell::open_for_development` in `crates/app/src/shell/mod.rs`) |
 | `DBFORGE_SQL`, `DBFORGE_KEY` | Debug builds: the script a `DBFORGE_OPEN` console runs, the Redis key a key browser selects |
+| `DBFORGE_FILTER`, `DBFORGE_ORDER` | Debug builds: the `WHERE` (or MongoDB filter) and `ORDER BY` (or sort) a `DBFORGE_OPEN=table:…` opens its rows with |
 | `DBFORGE_PICK` | Debug builds: the path file dialogs answer with, instead of asking |
 | `DBFORGE_EXPAND` | Debug builds: connection ids (comma-separated, or `all`) whose whole tree opens at start |
 | `DBFORGE_UPDATE_ENDPOINT`, `DBFORGE_UPDATE_PUBKEY`, `DBFORGE_UPDATE_INSTALL_PATH` | Debug builds: try the updater against a local manifest (see [docs/RELEASING.md](docs/RELEASING.md)) |
