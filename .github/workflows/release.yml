@@ -125,7 +125,7 @@ jobs:
           # The identity installed copies are replaced by.
           [[ "$(defaults read "$MOUNT/DBForge.app/Contents/Info.plist" CFBundleIdentifier)" == dev.dbforge.app ]]
           [[ "$(defaults read "$MOUNT/DBForge.app/Contents/Info.plist" CFBundleShortVersionString)" == "$VERSION" ]]
-          lipo -verify_arch arm64 x86_64 "$MOUNT/DBForge.app/Contents/MacOS/DBForge"
+          lipo "$MOUNT/DBForge.app/Contents/MacOS/DBForge" -verify_arch arm64 x86_64
           # The update holds the same app, at the top of the archive as the updaters expect.
           tar -tzf "release/DBForge-$VERSION.app.tar.gz" | grep -qx "DBForge.app/Contents/MacOS/DBForge"
 

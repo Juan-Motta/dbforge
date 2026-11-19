@@ -1,0 +1,2 @@
+# Signed test fixtures: their bytes are what the signatures cover, so no line-ending conversion.
+crates/app/src/updates/fixtures/** -text
