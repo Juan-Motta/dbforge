@@ -16,6 +16,7 @@ use super::connection_details::{ConnectionDetails, ConnectionDetailsEvent};
 use crate::i18n::Translate;
 use crate::theme::{ActiveTheme, MONO};
 use crate::ui::field::Tooltip;
+use crate::ui::title_bar::{keeps_window, moves_window};
 use crate::ui::{any, capsule, engine_logo, group, icon, segment, shortcut, tag_badge};
 
 /// Room for the traffic lights on macOS, when the explorer that holds them is hidden.
@@ -160,28 +161,30 @@ impl Render for Toolbar {
                 .tooltip(Tooltip::text(tip))
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone()))))
         };
-        div()
+        moves_window(div())
             .h(px(42.))
             .flex()
             .items_center()
             .gap(px(8.))
             // The traffic lights sit in the explorer's corner; hidden, they need the toolbar's.
             .when(!explorer_open && cfg!(target_os = "macos"), |bar| bar.pl(px(TRAFFIC_LIGHTS)))
-            .child(self.connection(cx))
+            .child(keeps_window(div()).child(self.connection(cx)))
             .child(div().flex_1())
             .child(
-                capsule(theme)
-                    .id("toolbar-search")
-                    .w(px(300.))
-                    .text_color(theme.text3)
-                    .cursor_pointer()
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ToolbarEvent::Search)))
-                    .child(icon("search", theme.text3, 16.))
-                    .child(m.search_everywhere)
-                    .child(div().flex_1())
-                    .child(div().font_family(MONO).text_size(px(11.5)).child(shortcut("k"))),
+                keeps_window(div()).child(
+                    capsule(theme)
+                        .id("toolbar-search")
+                        .w(px(300.))
+                        .text_color(theme.text3)
+                        .cursor_pointer()
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ToolbarEvent::Search)))
+                        .child(icon("search", theme.text3, 16.))
+                        .child(m.search_everywhere)
+                        .child(div().flex_1())
+                        .child(div().font_family(MONO).text_size(px(11.5)).child(shortcut("k"))),
+                ),
             )
-            .child(group(
+            .child(keeps_window(div()).child(group(
                 theme,
                 vec![
                     toggle(
@@ -200,7 +203,7 @@ impl Render for Toolbar {
                     ),
                     toggle("toolbar-settings", "sliders", false, m.settings.to_owned(), ToolbarEvent::OpenSettings),
                 ],
-            ))
+            )))
     }
 }
 

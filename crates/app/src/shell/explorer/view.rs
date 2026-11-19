@@ -13,6 +13,7 @@ use super::{Activate, CONTEXT, Collapse, Expand, Explorer, ExplorerEvent, Select
 use crate::i18n::Translate;
 use crate::preferences::{Preferences, keys};
 use crate::theme::{ActiveTheme, MONO, Theme};
+use crate::ui::title_bar::{keeps_window, moves_window};
 use crate::ui::{any, engine_logo, glass, group, icon, popover, segment, spinner, tag_badge};
 
 /// Every row is this tall, which lets the list draw only those in view.
@@ -134,9 +135,10 @@ impl Explorer {
 
     fn render_header(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         // The top row leaves the traffic lights their corner on macOS.
-        div().h(px(52.)).flex().items_center().justify_end().px(px(12.)).child(group(
-            theme,
-            vec![
+        moves_window(div()).h(px(52.)).flex().items_center().justify_end().px(px(12.)).child(keeps_window(div()).child(
+            group(
+                theme,
+                vec![
                 any(segment(theme, Some("plus"), "", false)
                     .id("explorer-new-connection")
                     .cursor_pointer()
@@ -150,6 +152,7 @@ impl Explorer {
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, _, cx| this.collapse_all(cx)))),
             ],
+            ),
         ))
     }
 

@@ -24,6 +24,7 @@ pub mod select;
 pub mod sheet;
 pub mod tabs;
 pub mod text_input;
+pub mod title_bar;
 pub mod type_ahead;
 
 use std::time::Duration;
