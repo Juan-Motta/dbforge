@@ -144,7 +144,10 @@ fn open_window(cx: &mut App) {
         app_id: Some(dbforge_core::IDENTIFIER.into()),
         ..Default::default()
     };
-    let opened = cx.open_window(options, |window, cx| cx.new(|cx| Shell::new(window, cx)));
+    let opened = cx.open_window(options, |window, cx| {
+        crate::ui::title_bar::fit_traffic_lights(window);
+        cx.new(|cx| Shell::new(window, cx))
+    });
     if let Err(error) = opened {
         eprintln!("DBForge could not open its window: {error}");
         cx.quit();
