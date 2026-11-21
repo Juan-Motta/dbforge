@@ -4,6 +4,7 @@
 //! press asks, with the count and size; the second deletes, only files
 //! DBForge named), and which pg_dump and psql run.
 
+use crate::ui::Ellipsis;
 use dbforge_core::dump::{ExportFiles, clear_export_folder, export_folder_usage};
 use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
@@ -198,7 +199,7 @@ impl Render for ExportSettings {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
+                    .ellipsis()
                     .font_family(MONO)
                     .text_size(px(12.5))
                     .child(folder.clone().unwrap_or_else(|| m.looking_for_folder.into())),

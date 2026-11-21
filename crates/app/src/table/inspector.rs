@@ -6,6 +6,7 @@
 //! (Ctrl+S) does too, and a second one applies every change. Its left edge resizes
 //! it; the width is kept under `dbforge.inspectorWidth`, as the former web UI kept it.
 
+use crate::ui::Ellipsis;
 use dbforge_core::drivers::Column;
 use gpui::{
     AnyElement, App, AppContext, BorrowAppContext, Context, DragMoveEvent, Entity, EventEmitter, FontWeight,
@@ -348,7 +349,7 @@ impl CellInspector {
             .id("inspector-title")
             .flex_1()
             .min_w_0()
-            .truncate()
+            .ellipsis()
             .tooltip(Tooltip::text(cell.column.data_type.clone()))
             .text_size(px(12.5))
             .font_weight(FontWeight::SEMIBOLD)
@@ -509,7 +510,7 @@ impl CellInspector {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .truncate()
+                        .ellipsis()
                         .text_size(px(11.5))
                         .text_color(if error { theme.err } else { theme.text3 })
                         .child(status),

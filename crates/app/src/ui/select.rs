@@ -5,6 +5,7 @@
 //! left to the form, which applies. Typed letters jump to the option they
 //! start: closed, they choose it; open, they highlight it.
 
+use crate::ui::Ellipsis;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -244,7 +245,7 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                     })
                     .text_color(tint)
                     .children(selected.and_then(|option| option.swatch).map(|kind| swatch(kind, theme.text3)))
-                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .child(div().flex_1().min_w_0().ellipsis().child(label))
                     .child(icon("down", theme.text3, 13.)),
             )
             .children(self.menu.as_ref().zip(position).map(|((menu, _), position)| popover(menu.clone(), position)))

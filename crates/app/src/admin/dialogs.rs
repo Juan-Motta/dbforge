@@ -4,6 +4,7 @@
 //! open showing the server's reason when it refuses, and close when done.
 //! Enter submits once the form is complete; Escape closes.
 
+use crate::ui::Ellipsis;
 use dbforge_core::admin::{self, CreateRequest, DropRequest};
 use dbforge_core::connections::model::Connection;
 use gpui::{
@@ -42,7 +43,7 @@ fn frame(theme: &Theme, title: String) -> gpui::Div {
         .flex()
         .flex_col()
         .gap(px(12.))
-        .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).truncate().child(title))
+        .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).ellipsis().child(title))
 }
 
 /// Room for an error, kept, so one appearing never moves the buttons.

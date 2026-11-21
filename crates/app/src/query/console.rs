@@ -11,6 +11,7 @@
 //! instead; with Analyze it runs the statement to measure it, inside a
 //! transaction the core rolls back.
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -561,7 +562,7 @@ impl QueryConsole {
             .text_color(if self.database.is_some() { theme.text } else { theme.text2 })
             .tooltip(Tooltip::text(m.database_to_query))
             .child(icon("database", theme.text3, 14.))
-            .child(div().min_w_0().truncate().child(name))
+            .child(div().min_w_0().ellipsis().child(name))
             .when(self.engine != Engine::Sqlite, |picker| picker.child(icon("down", theme.text3, 12.)));
         if !pickable {
             return picker.into_any_element();
@@ -596,7 +597,7 @@ impl QueryConsole {
             .text_color(if none { theme.text2 } else { theme.text })
             .tooltip(Tooltip::text(m.container_to_query))
             .child(icon("table", theme.text3, 14.))
-            .child(div().min_w_0().truncate().child(name))
+            .child(div().min_w_0().ellipsis().child(name))
             .child(icon("down", theme.text3, 12.));
         if !pickable {
             return Some(picker.into_any_element());
@@ -708,7 +709,7 @@ impl QueryConsole {
                     .id("cancel-error")
                     .min_w_0()
                     .max_w(px(360.))
-                    .truncate()
+                    .ellipsis()
                     .text_size(px(12.))
                     .text_color(theme.err)
                     .tooltip(Tooltip::text(error.clone()))

@@ -5,6 +5,7 @@
 //! dialogs (TTL, rename, delete, add an element). A read keeps the value
 //! shown until it arrives; a reply to an older read is dropped.
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 
 use dbforge_core::drivers::redis::{Entry, KeyEdit, KeyValue, Text};
@@ -601,7 +602,7 @@ impl KeyDetail {
                 div()
                     .min_w_0()
                     .flex_shrink()
-                    .truncate()
+                    .ellipsis()
                     .font_family(MONO)
                     .text_size(px(14.))
                     .font_weight(FontWeight::SEMIBOLD)
@@ -649,7 +650,7 @@ impl KeyDetail {
         let theme = *cx.theme();
         let m = &cx.messages().keyspace;
         let zset = value.kind == "zset";
-        let cell = |text: String| div().min_w_0().truncate().child(text);
+        let cell = |text: String| div().min_w_0().ellipsis().child(text);
         let columns = |row: gpui::Div,
                        number: AnyElement,
                        key: Option<AnyElement>,
@@ -786,7 +787,7 @@ impl KeyDetail {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
+                    .ellipsis()
                     .text_size(px(11.5))
                     .text_color(theme.text3)
                     .font_weight(FontWeight::MEDIUM)

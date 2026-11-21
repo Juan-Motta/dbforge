@@ -11,6 +11,7 @@ pub mod choices;
 pub mod code_editor;
 pub mod edit;
 pub mod editing;
+pub mod ellipsis;
 pub mod engine_logo;
 pub mod error_line;
 pub mod field;
@@ -20,6 +21,7 @@ pub mod menu;
 pub mod modal;
 pub mod notice;
 pub mod option_list;
+pub mod segmented;
 pub mod select;
 pub mod sheet;
 pub mod tabs;
@@ -39,9 +41,11 @@ pub use button::{button, enabled, ghost_button, icon_button};
 pub use checkbox::Checkbox;
 pub use choices::{choice, choice_group};
 pub use code_editor::{CodeEditor, CodeEditorEvent};
+pub use ellipsis::Ellipsis;
 pub use engine_logo::engine_logo;
 pub use file_field::FileField;
 pub use menu::{MenuItem, PopoverMenu, Swatch, popover};
+pub use segmented::segmented;
 pub use select::{Select, SelectEvent, SelectOption};
 pub use tabs::{SectionTabs, Tab};
 pub use text_input::{TextInput, TextInputEvent};
@@ -83,6 +87,13 @@ pub fn group(theme: &Theme, segments: Vec<AnyElement>) -> Div {
 
 /// One segment of a [`group`]: an icon, a label or both; raised when `on`.
 pub fn segment(theme: &Theme, icon_name: Option<&str>, label: &str, on: bool) -> Div {
+    let face = segment_face(theme, icon_name, label, on);
+    if on { face.bg(theme.glass_hi).border_1().border_color(theme.rim) } else { face }
+}
+
+/// A segment's content and tint without its raise, for a [`segmented`]
+/// control, whose sliding thumb raises the chosen one.
+pub fn segment_face(theme: &Theme, icon_name: Option<&str>, label: &str, on: bool) -> Div {
     let tint = if on { theme.text } else { theme.text2 };
     let mut segment = div()
         .h(px(26.))
@@ -94,9 +105,6 @@ pub fn segment(theme: &Theme, icon_name: Option<&str>, label: &str, on: bool) ->
         .text_color(tint)
         .text_size(px(12.5))
         .font_weight(FontWeight::MEDIUM);
-    if on {
-        segment = segment.bg(theme.glass_hi).border_1().border_color(theme.rim);
-    }
     if let Some(name) = icon_name {
         segment = segment.child(icon(name, tint, 14.));
     }

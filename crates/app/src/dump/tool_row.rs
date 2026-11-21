@@ -3,6 +3,7 @@
 //! back to the one found. The core finds the tool and checks a chosen one
 //! before keeping it (`tools.json`).
 
+use crate::ui::Ellipsis;
 use dbforge_core::dump::{ToolInfo, dump_tool, set_dump_tool};
 use gpui::{
     Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled,
@@ -134,7 +135,7 @@ impl Render for ToolRow {
                 )
                 .child(
                     div()
-                        .truncate()
+                        .ellipsis()
                         .font_family(MONO)
                         .text_size(px(11.5))
                         .text_color(theme.text3)

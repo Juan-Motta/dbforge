@@ -4,6 +4,7 @@
 //! chose. A saved password is never read back: an empty field keeps it.
 //! The sections are drawn in `general.rs`, `ssl.rs` and `ssh.rs`.
 
+use crate::ui::Ellipsis;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -659,7 +660,7 @@ impl ConnectionDialog {
                     .text_color(theme.ok)
                     .font_weight(FontWeight::MEDIUM)
                     .min_w_0()
-                    .truncate()
+                    .ellipsis()
                     .child(message.clone())
                     .into_any_element(),
             ),

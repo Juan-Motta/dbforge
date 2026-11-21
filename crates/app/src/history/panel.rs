@@ -4,6 +4,7 @@
 //! new tab. While a new list loads the previous one stays, so typing in the
 //! search never flickers.
 
+use crate::ui::Ellipsis;
 use chrono::Local;
 use dbforge_core::history::{HistoryEntry, list_history};
 use gpui::{
@@ -182,7 +183,7 @@ impl HistoryPanel {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .truncate()
+                                    .ellipsis()
                                     .font_family(MONO)
                                     .text_size(px(12.))
                                     .text_color(theme.text)
@@ -202,7 +203,7 @@ impl HistoryPanel {
                             .flex()
                             .text_size(px(11.))
                             .text_color(theme.text3)
-                            .child(div().min_w_0().truncate().child(meta))
+                            .child(div().min_w_0().ellipsis().child(meta))
                             .child(
                                 div()
                                     .flex_none()

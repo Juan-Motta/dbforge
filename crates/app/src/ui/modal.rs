@@ -3,6 +3,7 @@
 //! buttons in a footer that stays. The dialog sits in the shell's dialog
 //! layer, which keeps it inside the window.
 
+use crate::ui::Ellipsis;
 use gpui::{Div, FontWeight, InteractiveElement, ParentElement, Stateful, StatefulInteractiveElement, Styled, div, px};
 
 use super::glass;
@@ -27,7 +28,7 @@ pub fn modal(theme: &Theme, width: f32, title: impl Into<gpui::SharedString>) ->
                 .pb(px(4.))
                 .text_size(px(16.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .truncate()
+                .ellipsis()
                 .child(title.into()),
         )
 }

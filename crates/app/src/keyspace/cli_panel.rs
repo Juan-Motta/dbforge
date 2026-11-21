@@ -3,6 +3,7 @@
 //! commands and closes with the tab), replies printed as redis-cli prints
 //! them, ↑/↓ through the commands run, and a stop for a blocking command.
 
+use crate::ui::Ellipsis;
 use dbforge_core::query::{QueryScope, cancel_query, run_query};
 use gpui::{
     AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement, KeyBinding, ParentElement, Render,
@@ -211,7 +212,7 @@ impl Render for CliPanel {
                     .border_color(theme.line)
                     .text_size(px(11.5))
                     .child(div().text_color(theme.text2).font_weight(gpui::FontWeight::SEMIBOLD).child("CLI"))
-                    .child(div().min_w_0().truncate().text_color(theme.text3).child(self.address.clone()))
+                    .child(div().min_w_0().ellipsis().text_color(theme.text3).child(self.address.clone()))
                     .child(div().flex_1())
                     .when(self.running, |bar| {
                         bar.child(

@@ -2,6 +2,7 @@
 //! in view, so a schema with thousands of tables scrolls smoothly) and the
 //! edge that resizes it.
 
+use crate::ui::Ellipsis;
 use gpui::{
     AnyElement, AppContext, Context, DragMoveEvent, Empty, FontWeight, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
@@ -49,14 +50,14 @@ impl Explorer {
         match &self.rows[index] {
             TreeRow::Message { depth, text, tone, .. } => div()
                 .h(px(ROW))
-                .mx(px(8.))
+                .w_full()
                 .pl(px(30. + *depth as f32 * INDENT))
                 .pr(px(10.))
                 .flex()
                 .items_center()
                 .text_size(px(12.))
                 .text_color(if *tone == Tone::Error { theme.err } else { theme.text3 })
-                .child(div().truncate().child(text.clone()))
+                .child(div().ellipsis().child(text.clone()))
                 .into_any_element(),
             TreeRow::Node { node, depth, expanded } => {
                 let selected = self.selected.as_deref() == Some(node.id.as_str());
@@ -93,7 +94,7 @@ impl Explorer {
                 div()
                     .id(("row", index))
                     .h(px(ROW))
-                    .mx(px(8.))
+                    .w_full()
                     .pl(px(6. + *depth as f32 * INDENT))
                     .pr(px(10.))
                     .flex()
@@ -121,7 +122,7 @@ impl Explorer {
                     )
                     .child(chevron)
                     .child(kind)
-                    .child(div().min_w_0().truncate().child(node.name.clone()))
+                    .child(div().min_w_0().ellipsis().child(node.name.clone()))
                     .when(node.loading, |row| row.child(spinner(("spinner", index), theme.text3, 11.)))
                     .children(tag.map(|tag| tag_badge(&theme, &tag)))
                     .child(div().flex_1())
@@ -191,7 +192,8 @@ impl Explorer {
             "explorer-rows",
             self.rows.len(),
             cx.processor(|this, range: std::ops::Range<usize>, _window, cx| {
-                range.map(|index| this.render_row(index, cx)).collect::<Vec<_>>()
+                // A list item sizes to its content; the inset lane makes every row as wide as the list.
+                range.map(|index| div().w_full().px(px(8.)).child(this.render_row(index, cx))).collect::<Vec<_>>()
             }),
         )
         .track_scroll(self.scroll.clone())

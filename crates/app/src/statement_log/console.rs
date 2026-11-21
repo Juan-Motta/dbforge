@@ -4,6 +4,7 @@
 //! edge that resizes it. It reads what the core recorded when it opens and
 //! hears each new statement while it is open; closed, nothing listens.
 
+use crate::ui::Ellipsis;
 use std::collections::HashMap;
 
 use dbforge_core::Event;
@@ -23,7 +24,7 @@ use crate::i18n::{StatementMessages, Translate};
 use crate::preferences::{Preferences, keys};
 use crate::theme::{ActiveTheme, MONO, Theme};
 use crate::ui::field::Tooltip;
-use crate::ui::{any, glass, group, icon, icon_button, pill, segment, shortcut};
+use crate::ui::{any, glass, icon, icon_button, pill, segment_face, segmented, shortcut};
 
 /// What the console tells the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,9 +268,11 @@ impl StatementConsole {
                             .child(clock_time(entry.at, &chrono::Local)),
                     )
                     .child(
+                        // A flex column, so the pill keeps its label's width instead of the column's.
                         div()
                             .w(px(70.))
                             .flex_none()
+                            .flex()
                             .pt(px(2.))
                             .child(pill(origin_label(entry.origin, m), kind_tint(&theme, kind))),
                     )
@@ -281,7 +284,7 @@ impl StatementConsole {
                             .w(px(150.))
                             .flex_none()
                             .pt(px(3.))
-                            .truncate()
+                            .ellipsis()
                             .text_color(theme.text2)
                             .child(StyledText::new(where_.clone()).with_highlights([database]))
                     })
@@ -299,29 +302,39 @@ impl StatementConsole {
                                 if open {
                                     text.child(entry.text.clone())
                                 } else {
-                                    text.truncate().child(on_one_line(&entry.text))
+                                    text.ellipsis().child(on_one_line(&entry.text))
                                 }
                             }),
                     )
                     .child(
+                        // The time and rows, and over them on hover the copy button, so the
+                        // row keeps no empty space at its end for it.
                         div()
                             .w(px(116.))
                             .flex_none()
-                            .pt(px(3.))
-                            .flex()
-                            .justify_end()
-                            .font_family(MONO)
-                            .text_size(px(11.5))
-                            .text_color(theme.text3)
-                            .child(meta),
-                    )
-                    .child(
-                        icon_button(&theme, ("statement-copy", id), "duplicate", true, false)
-                            .size(px(24.))
-                            .opacity(0.)
-                            .group_hover("statement", |button| button.opacity(1.))
-                            .tooltip(Tooltip::text(m.copy))
-                            .on_click(cx.listener(move |this, _, _, cx| this.copy(text.clone(), cx))),
+                            .relative()
+                            .child(
+                                div()
+                                    .pt(px(3.))
+                                    .flex()
+                                    .justify_end()
+                                    .font_family(MONO)
+                                    .text_size(px(11.5))
+                                    .text_color(theme.text3)
+                                    .group_hover("statement", |meta| meta.opacity(0.))
+                                    .child(meta),
+                            )
+                            .child(
+                                icon_button(&theme, ("statement-copy", id), "duplicate", true, false)
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .size(px(24.))
+                                    .opacity(0.)
+                                    .group_hover("statement", |button| button.opacity(1.))
+                                    .tooltip(Tooltip::text(m.copy))
+                                    .on_click(cx.listener(move |this, _, _, cx| this.copy(text.clone(), cx))),
+                            ),
                     ),
             )
             .children(entry.error.clone().map(|error| {
@@ -337,7 +350,7 @@ impl StatementConsole {
         let kinds = Kind::ALL
             .into_iter()
             .map(|kind| {
-                any(segment(theme, None, kind_label(kind, m), self.kind == kind)
+                any(segment_face(theme, None, kind_label(kind, m), self.kind == kind)
                     .id(("statement-kind", kind as usize))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.set_kind(kind, cx))))
@@ -372,7 +385,7 @@ impl StatementConsole {
             .border_color(theme.line)
             .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(m.title))
             .child(div().text_size(px(12.)).text_color(theme.text3).child((m.count)(shown)))
-            .child(group(theme, kinds))
+            .child(segmented(theme, "statement-kinds", Kind::ALL.iter().position(|kind| *kind == self.kind), kinds))
             .child(div().flex_1())
             .child(quiet("statements-copy-all", "duplicate", m.copy_all, shown > 0).when(shown > 0, |button| {
                 button.on_click(cx.listener(move |this, _, _, cx| this.copy(all.clone(), cx)))

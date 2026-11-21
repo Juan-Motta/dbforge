@@ -21,7 +21,7 @@ use crate::grid::DataGrid;
 use crate::history::format::format_duration;
 use crate::i18n::{QueryMessages, Translate};
 use crate::theme::{ActiveTheme, MONO};
-use crate::ui::{any, ghost_button, group, icon, pill, segment, spinner};
+use crate::ui::{any, ghost_button, icon, pill, segment_face, segmented, spinner};
 
 /// The results bar's height.
 const BAR_HEIGHT: f32 = 44.;
@@ -144,7 +144,7 @@ impl ResultsPanel {
             if tabs > 1 {
                 let mut segments: Vec<AnyElement> = (0..outcome.results.len())
                     .map(|index| {
-                        any(segment(&theme, None, &(m.result)(index + 1), index == self.selected)
+                        any(segment_face(&theme, None, &(m.result)(index + 1), index == self.selected)
                             .id(("result-tab", index))
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _, _, cx| this.select(index, cx))))
@@ -152,13 +152,18 @@ impl ResultsPanel {
                     .collect();
                 if outcome.error.is_some() {
                     let index = outcome.results.len();
-                    segments.push(any(segment(&theme, None, m.stopped_tab, index == self.selected)
+                    segments.push(any(segment_face(&theme, None, m.stopped_tab, index == self.selected)
                         .id("result-error-tab")
                         .text_color(theme.err)
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| this.select(index, cx)))));
                 }
-                bar = bar.child(group(&theme, segments).flex_shrink().min_w_0().overflow_hidden());
+                bar = bar.child(
+                    segmented(&theme, "result-tabs", Some(self.selected), segments)
+                        .flex_shrink()
+                        .min_w_0()
+                        .overflow_hidden(),
+                );
             }
             if let Some(result) = outcome.results.get(self.selected) {
                 bar = bar.child(pill(&summary(result, m), theme.ok).flex_none());

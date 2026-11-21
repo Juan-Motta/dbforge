@@ -5,6 +5,7 @@
 //! and a CLI command reads the key shown again. Dialogs go to the window as
 //! a [`KeyBrowserEvent`].
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 
 use dbforge_core::drivers::redis::{Overview, Text, database_number};
@@ -291,13 +292,13 @@ impl KeyBrowser {
                         .text_size(px(18.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(if ok { theme.ok } else { theme.text })
-                        .child(div().truncate().child(value))
+                        .child(div().ellipsis().child(value))
                         .children(detail.map(|detail| {
                             div()
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::NORMAL)
                                 .text_color(theme.text3)
-                                .truncate()
+                                .ellipsis()
                                 .child(detail)
                         })),
                 )

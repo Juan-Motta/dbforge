@@ -2,6 +2,7 @@
 //! selected connection (read once, when it opens) and the commands, each
 //! with its match highlighted, and the keys that work it.
 
+use crate::ui::Ellipsis;
 use dbforge_core::drivers::{ObjectKind, Relation, RelationList, TableRef};
 use dbforge_core::explorer;
 use gpui::{
@@ -312,10 +313,10 @@ impl CommandPalette {
             }))
             .on_click(cx.listener(move |this, _, _, cx| this.run(run.clone(), cx)))
             .child(icon(entry.icon, theme.text3, 15.))
-            .child(div().min_w_0().truncate().child(label))
+            .child(div().min_w_0().ellipsis().child(label))
             .child(div().flex_1())
             .children(entry.detail.clone().map(|detail| {
-                div().flex_none().max_w(px(280.)).truncate().text_size(px(12.)).text_color(theme.text3).child(detail)
+                div().flex_none().max_w(px(280.)).ellipsis().text_size(px(12.)).text_color(theme.text3).child(detail)
             }))
     }
 }

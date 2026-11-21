@@ -3,6 +3,7 @@
 //! highlighted editor that can be selected and copied. While the structure
 //! is read again, the one shown stays.
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 
 use dbforge_core::connections::model::Engine;
@@ -364,7 +365,7 @@ fn draw_cell(cell: Cell, theme: &Theme) -> gpui::Div {
                 let folded = text.split_whitespace().collect::<Vec<_>>().join(" ");
                 cell_div.py(px(7.)).child(div().w_full().line_height(px(17.)).child(folded))
             } else {
-                cell_div.truncate().child(one_line(&text))
+                cell_div.ellipsis().child(one_line(&text))
             }
         }
         Cell::Check(checked) => cell_div.when(checked, |cell| cell.child(icon("check", theme.text, 13.))),

@@ -4,6 +4,7 @@
 //! beside them. It starts on the costliest node. The plan is kept as the
 //! server's JSON and read in the interface language each time it is drawn.
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 
 use gpui::{
@@ -126,7 +127,7 @@ impl PlanView {
                     .child(
                         div()
                             .min_w_0()
-                            .truncate()
+                            .ellipsis()
                             .font_family(MONO)
                             .text_size(px(12.))
                             .text_color(theme.text2)

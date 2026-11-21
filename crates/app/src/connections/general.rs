@@ -3,6 +3,7 @@
 //! the security options of MongoDB and Cosmos DB, the connection URL, and
 //! what agents may do.
 
+use crate::ui::Ellipsis;
 use dbforge_core::connections::model::Engine;
 use dbforge_core::connections::transport::SslMode;
 use dbforge_core::credentials::Storage;
@@ -289,7 +290,7 @@ impl ConnectionDialog {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .truncate()
+                        .ellipsis()
                         .font_family(MONO)
                         .text_size(px(12.))
                         .text_color(theme.text2)

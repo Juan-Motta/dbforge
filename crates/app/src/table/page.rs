@@ -21,7 +21,7 @@ use crate::structure::sections::Section;
 use crate::structure::{StructureSource, StructureView};
 use crate::theme::ActiveTheme;
 use crate::ui::field::Tooltip;
-use crate::ui::{any, card, group, icon_button, segment};
+use crate::ui::{any, card, icon_button, segment_face, segmented};
 
 /// What a table's tab shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,7 +171,7 @@ impl TablePage {
             TableTabView::Diagram => "view-diagram".into(),
             TableTabView::Section(section) => format!("view-{section:?}"),
         };
-        any(segment(&theme, None, label, self.view == view)
+        any(segment_face(&theme, None, label, self.view == view)
             .id(gpui::SharedString::from(id))
             .cursor_pointer()
             .when_some(count, |tab, count| tab.child(div().text_color(theme.text3).child(count.to_string())))
@@ -215,14 +215,16 @@ impl TablePage {
             own.push(import.into_any_element());
         }
         actions.splice(insert_at..insert_at, own);
-        let mut tabs = vec![self.view_tab(TableTabView::Data, messages.table.data, None, cx)];
+        let mut views = vec![(TableTabView::Data, messages.table.data, None)];
         for section in Section::ALL {
             let count = structure.as_ref().and_then(|structure| section.count(structure));
-            tabs.push(self.view_tab(TableTabView::Section(section), section.label(&messages.structure), count, cx));
+            views.push((TableTabView::Section(section), section.label(&messages.structure), count));
         }
         if self.has_diagram() {
-            tabs.push(self.view_tab(TableTabView::Diagram, messages.structure.diagram, None, cx));
+            views.push((TableTabView::Diagram, messages.structure.diagram, None));
         }
+        let shown = views.iter().position(|(view, _, _)| *view == self.view);
+        let tabs = views.into_iter().map(|(view, label, count)| self.view_tab(view, label, count, cx)).collect();
         div()
             .h(px(34.))
             .flex_none()
@@ -231,7 +233,7 @@ impl TablePage {
             .gap(px(4.))
             .children(actions)
             .child(div().flex_1())
-            .child(group(&theme, tabs))
+            .child(segmented(&theme, "table-views", shown, tabs))
             .into_any_element()
     }
 }

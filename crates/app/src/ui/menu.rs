@@ -6,6 +6,7 @@
 //! A list of choices (a dropdown's, a cell's) also jumps to the item its
 //! typed letters start ([`PopoverMenu::with_type_ahead`]).
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 
 use gpui::{
@@ -231,7 +232,7 @@ impl PopoverMenu {
                 .text_color(theme.text3)
                 .opacity(0.6)
                 .when(item.icon.is_some(), |row| row.child(div().w(px(14.)).flex_none()))
-                .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
+                .child(div().flex_1().min_w_0().ellipsis().child(item.label.clone()))
                 .into_any_element();
         }
         div()
@@ -267,7 +268,7 @@ impl PopoverMenu {
                         .children(item.swatch.map(|kind| swatch(kind, theme.text3))),
                 )
             })
-            .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
+            .child(div().flex_1().min_w_0().ellipsis().child(item.label.clone()))
             .children(item.detail.clone().map(|detail| {
                 div()
                     .flex_none()

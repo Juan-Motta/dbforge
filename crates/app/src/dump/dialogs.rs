@@ -14,6 +14,7 @@
 //! stopped, and say how they ended. Enter presses the main button; Escape
 //! stops a run and closes.
 
+use crate::ui::Ellipsis;
 use std::path::Path;
 
 use chrono::Local;
@@ -64,7 +65,7 @@ fn source(theme: &Theme, database: &str, connection: &str) -> AnyElement {
         .gap(px(8.))
         .text_size(px(13.))
         .child(icon("database", theme.text3, 15.))
-        .child(div().font_weight(FontWeight::SEMIBOLD).truncate().child(database.to_owned()))
+        .child(div().font_weight(FontWeight::SEMIBOLD).ellipsis().child(database.to_owned()))
         .child(div().flex_none().text_color(theme.text3).child(format!("· {connection}")))
         .into_any_element()
 }
@@ -74,7 +75,7 @@ fn path_line(theme: &Theme, text: String, muted: bool) -> gpui::Div {
     div()
         .flex_1()
         .min_w_0()
-        .truncate()
+        .ellipsis()
         .font_family(MONO)
         .text_size(px(12.5))
         .text_color(if muted { theme.text3 } else { theme.text })

@@ -4,6 +4,7 @@
 //! with a title and an optional detail. Its room is kept while there is
 //! nothing to say ([`callout_space`]), so the form never jumps.
 
+use crate::ui::Ellipsis;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -105,7 +106,7 @@ impl RenderOnce for Callout {
                 .when(self.mono, |detail| detail.font_family(MONO).text_size(px(12.)))
                 .map(|text| {
                     if self.one_line {
-                        text.truncate().child(detail)
+                        text.ellipsis().child(detail)
                     } else {
                         text.max_h(px(120.)).overflow_y_scroll().child(detail)
                     }

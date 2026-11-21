@@ -5,6 +5,7 @@
 //! move it, the wheel to zoom around the pointer, a click to pin a table's
 //! highlight, a double click to bring it close.
 
+use crate::ui::Ellipsis;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -27,7 +28,7 @@ use crate::grid::columns::short_type_name;
 use crate::i18n::Translate;
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::field::Tooltip;
-use crate::ui::{Checkbox, TextInput, TextInputEvent, any, button, glass, group, icon, icon_button, segment};
+use crate::ui::{Checkbox, TextInput, TextInputEvent, any, button, glass, icon, icon_button, segment_face, segmented};
 
 /// How far the pointer moves before a press becomes a drag.
 const DRAG_THRESHOLD: f32 = 3.;
@@ -558,7 +559,7 @@ impl DiagramView {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
+                            .ellipsis()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme.text2)
                             .child(format!("{}.{}", self.database, self.schema)),
@@ -614,25 +615,30 @@ impl DiagramView {
                         Some(_) => m.two_steps,
                         None => m.whole_schema,
                     };
-                    any(segment(&theme, None, label, shown.reach == steps)
+                    any(segment_face(&theme, None, label, shown.reach == steps)
                         .id(("reach", index))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| this.set_reach(steps, cx))))
                 })
                 .collect();
-            bar = bar.child(group(&theme, reaches));
+            bar = bar.child(segmented(
+                &theme,
+                "diagram-reach",
+                REACH.iter().position(|steps| *steps == shown.reach),
+                reaches,
+            ));
         }
         let modes = [(ColumnMode::All, m.columns), (ColumnMode::Keys, m.keys_only)]
             .into_iter()
             .map(|(mode, label)| {
-                any(segment(&theme, None, label, shown.mode == mode)
+                any(segment_face(&theme, None, label, shown.mode == mode)
                     .id(if mode == ColumnMode::All { "mode-all" } else { "mode-keys" })
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.set_mode(mode, cx))))
             })
             .collect();
         bar = bar
-            .child(group(&theme, modes))
+            .child(segmented(&theme, "diagram-columns", Some(usize::from(shown.mode == ColumnMode::Keys)), modes))
             .child(
                 button(&theme, None, m.auto_layout)
                     .id("auto-layout")

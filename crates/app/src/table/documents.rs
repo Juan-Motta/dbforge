@@ -9,6 +9,7 @@
 //! the rest. Only the cards in view are drawn, so a page of a thousand
 //! documents costs no more than a few.
 
+use crate::ui::Ellipsis;
 use std::collections::BTreeSet;
 use std::ops::Range;
 use std::rc::Rc;
@@ -823,7 +824,7 @@ fn editor_body(editing: &Editing, context: &CardContext) -> AnyElement {
                         .id("document-problem")
                         .flex_1()
                         .min_w_0()
-                        .truncate()
+                        .ellipsis()
                         .text_size(px(12.))
                         .text_color(theme.err)
                         .when(!problem.is_empty(), |line| line.tooltip(Tooltip::text(problem.clone())))

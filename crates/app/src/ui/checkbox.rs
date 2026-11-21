@@ -1,5 +1,6 @@
 //! A checkbox with what it does under its label: the whole row toggles it.
 
+use crate::ui::Ellipsis;
 use std::rc::Rc;
 
 use gpui::{
@@ -94,7 +95,7 @@ impl RenderOnce for Checkbox {
                     .map(|text| {
                         // A row with an icon is a list's: one line, cut short.
                         if self.icon.is_some() {
-                            text.child(div().truncate().child(self.label))
+                            text.child(div().ellipsis().child(self.label))
                         } else {
                             text.child(self.label)
                         }

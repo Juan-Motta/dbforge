@@ -5,6 +5,7 @@
 //! answer, and a button that edits the connection. It closes on Escape, a
 //! click outside it or Edit.
 
+use crate::ui::Ellipsis;
 use dbforge_core::connections::commands;
 use dbforge_core::connections::model::{Connection, ConnectionInput};
 use dbforge_core::connections::tags::Tag;
@@ -167,7 +168,7 @@ impl Render for ConnectionDetails {
                             .gap(px(2.))
                             .child(
                                 div()
-                                    .truncate()
+                                    .ellipsis()
                                     .text_size(px(13.5))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(self.connection.name.clone()),

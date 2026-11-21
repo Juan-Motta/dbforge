@@ -7,6 +7,7 @@
 //! the form says how it goes and how it ended, its room kept so nothing
 //! jumps. Enter presses Import; Escape stops and closes.
 
+use crate::ui::Ellipsis;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -492,7 +493,7 @@ impl ImportDialog {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
+                            .ellipsis()
                             .text_size(px(12.5))
                             .font_family(MONO)
                             .text_color(if self.path.is_some() { theme.text } else { theme.text3 })
@@ -547,7 +548,7 @@ impl ImportDialog {
                             .flex_col()
                             .gap(px(2.))
                             .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(*name))
-                            .child(div().text_size(px(12.)).text_color(theme.text3).truncate().child(text)),
+                            .child(div().text_size(px(12.)).text_color(theme.text3).ellipsis().child(text)),
                     ),
                 !working,
             )
@@ -587,7 +588,7 @@ impl ImportDialog {
                         .w(px(PREVIEW_COLUMN))
                         .flex_none()
                         .px(px(10.))
-                        .truncate()
+                        .ellipsis()
                         .text_color(tint)
                         .child(text.map_or_else(|| "NULL".to_owned(), crate::ui::sheet::one_line))
                 };
@@ -647,7 +648,7 @@ impl ImportDialog {
                 .items_center()
                 .gap(px(10.))
                 .child(
-                    div().w(px(200.)).flex_none().truncate().font_family(MONO).text_size(px(12.5)).child(field.clone()),
+                    div().w(px(200.)).flex_none().ellipsis().font_family(MONO).text_size(px(12.5)).child(field.clone()),
                 )
                 .child(icon("right", theme.text3, 13.))
                 .child(div().flex_1().min_w_0().child(picker.clone()))
@@ -746,7 +747,7 @@ impl Render for ImportDialog {
             .gap(px(8.))
             .text_size(px(13.))
             .child(icon("table", theme.text3, 15.))
-            .child(div().font_weight(FontWeight::SEMIBOLD).truncate().child(self.relation()));
+            .child(div().font_weight(FontWeight::SEMIBOLD).ellipsis().child(self.relation()));
         let body = modal_body("import-body")
             .child(source)
             .child(self.render_file(&theme, m, cx))

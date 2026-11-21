@@ -7,6 +7,7 @@
 //! it ended, its room kept so nothing jumps. Enter exports; Escape stops
 //! and closes.
 
+use crate::ui::Ellipsis;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -422,7 +423,7 @@ impl ExportDialog {
             .gap(px(8.))
             .text_size(px(13.))
             .child(icon(icon_name, theme.text3, 15.))
-            .child(div().font_weight(FontWeight::SEMIBOLD).truncate().child(strong))
+            .child(div().font_weight(FontWeight::SEMIBOLD).ellipsis().child(strong))
             .children(muted.map(|muted| div().flex_none().text_color(theme.text3).child(muted)))
             .into_any_element()
     }
@@ -501,7 +502,7 @@ impl ExportDialog {
                                             .child(format!(".{}", info.extension)),
                                     ),
                             )
-                            .child(div().text_size(px(12.)).text_color(theme.text3).truncate().child(description(
+                            .child(div().text_size(px(12.)).text_color(theme.text3).ellipsis().child(description(
                                 format,
                                 self.choice.options.json_style,
                                 m,

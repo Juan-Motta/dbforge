@@ -1,6 +1,7 @@
 //! Asks before removing a saved connection; its databases on the server are
 //! untouched. The core forgets the connection and its saved secrets.
 
+use crate::ui::Ellipsis;
 use dbforge_core::connections::commands;
 use dbforge_core::connections::model::Connection;
 use gpui::{
@@ -109,7 +110,7 @@ impl Render for DeleteConnectionDialog {
                 div()
                     .text_size(px(16.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .truncate()
+                    .ellipsis()
                     .child((m.delete_title)(&self.connection.name)),
             )
             .child(div().text_size(px(13.)).text_color(theme.text2).child(m.delete_note))

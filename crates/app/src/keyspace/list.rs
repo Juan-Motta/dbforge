@@ -4,6 +4,7 @@
 //! menu. A new scan keeps the keys shown until its page arrives, and a page
 //! of a scan that was replaced is dropped.
 
+use crate::ui::Ellipsis;
 use std::collections::HashSet;
 use std::ops::Range;
 
@@ -329,7 +330,7 @@ impl KeyList {
                         }),
                     )
                     .child(icon(if *expanded { "down" } else { "right" }, theme.text3, 12.))
-                    .child(div().flex_1().min_w_0().truncate().font_family(MONO).child(label.to_owned()))
+                    .child(div().flex_1().min_w_0().ellipsis().font_family(MONO).child(label.to_owned()))
                     .child(div().flex_none().text_size(px(11.)).text_color(theme.text3).child(thousands(*count as u64)))
                     .into_any_element()
             }
@@ -351,7 +352,7 @@ impl KeyList {
                         }),
                     )
                     .child(div().w(px(52.)).flex_none().child(kind_badge(&theme, &key.kind, &kind_label(&key.kind))))
-                    .child(div().flex_1().min_w_0().truncate().font_family(MONO).child(label.to_owned()))
+                    .child(div().flex_1().min_w_0().ellipsis().font_family(MONO).child(label.to_owned()))
                     .child(
                         div()
                             .w(px(70.))
@@ -462,7 +463,7 @@ impl Render for KeyList {
                     .pb(px(6.))
                     .text_size(px(11.5))
                     .text_color(theme.text3)
-                    .child(div().flex_1().min_w_0().truncate().child(format!("{scanned} · {matched}")))
+                    .child(div().flex_1().min_w_0().ellipsis().child(format!("{scanned} · {matched}")))
                     .child(
                         group(
                             &theme,

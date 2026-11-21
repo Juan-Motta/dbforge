@@ -7,6 +7,7 @@
 //! document database's rows also show as whole documents (see
 //! [`super::documents`]), switched from the bar while nothing is pending.
 
+use crate::ui::Ellipsis;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
@@ -891,7 +892,7 @@ impl TableView {
         let pending = self.edits.has_edits();
         let counts = self.edits.counts();
         let lock_paging = self.loading || pending;
-        let text = |text: String, tint| div().min_w_0().truncate().text_size(px(12.)).text_color(tint).child(text);
+        let text = |text: String, tint| div().min_w_0().ellipsis().text_size(px(12.)).text_color(tint).child(text);
         let mut footer = div()
             .h(px(46.))
             .flex_none()
@@ -932,7 +933,7 @@ impl TableView {
                         .id("apply-error")
                         .min_w_0()
                         .flex_shrink()
-                        .truncate()
+                        .ellipsis()
                         .text_size(px(12.))
                         .text_color(theme.err)
                         .tooltip(Tooltip::text(error.clone()))

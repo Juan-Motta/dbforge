@@ -2,6 +2,7 @@
 //! picked one marked, each with what it is and a detail (a column's type).
 //! ↑ ↓ pick, Enter or Tab insert, Escape closes; a click inserts.
 
+use crate::ui::Ellipsis;
 use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, anchored,
     deferred, div, point, prelude::FluentBuilder, px,
@@ -57,7 +58,7 @@ impl CodeEditor {
                         .text_color(tint)
                         .child(mark),
                 )
-                .child(div().flex_1().min_w_0().truncate().text_color(theme.text).child(item.label.clone()))
+                .child(div().flex_1().min_w_0().ellipsis().text_color(theme.text).child(item.label.clone()))
                 .child(div().flex_none().text_size(px(11.)).text_color(theme.text3).child(item.detail.clone()))
         });
         let list = glass(&theme)

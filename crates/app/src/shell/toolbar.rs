@@ -4,6 +4,7 @@
 //! explorer and the statement console, and the settings. Each says its
 //! shortcut in its tooltip.
 
+use crate::ui::Ellipsis;
 use dbforge_core::connections::model::Connection;
 use dbforge_core::connections::tags::Tag;
 use gpui::{
@@ -125,7 +126,7 @@ impl Toolbar {
                             cx.listener(|this, _, window, cx| this.toggle_details(window, cx)),
                         )
                         .child(engine_logo(connection.engine, 16.))
-                        .child(div().min_w_0().truncate().child(connection.name.clone()))
+                        .child(div().min_w_0().ellipsis().child(connection.name.clone()))
                         .children(tag.as_ref().map(|tag| tag_badge(theme, tag)))
                         .child(icon("down", theme.text3, 12.)),
                 )
