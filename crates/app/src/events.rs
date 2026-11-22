@@ -50,4 +50,9 @@ impl EventHub {
     pub fn global(cx: &App) -> Entity<EventHub> {
         cx.global::<GlobalHub>().0.clone()
     }
+
+    /// The hub, once started: views made before it hear nothing from the core.
+    pub fn try_global(cx: &App) -> Option<Entity<EventHub>> {
+        cx.try_global::<GlobalHub>().map(|hub| hub.0.clone())
+    }
 }

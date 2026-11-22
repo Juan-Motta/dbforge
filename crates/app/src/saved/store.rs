@@ -3,6 +3,9 @@
 //! core off the UI thread and read again after each change, so all of them
 //! follow at once. Observe it to hear of a change.
 //!
+//! An agent's change through the MCP server reaches it as the core's
+//! [`Event::SavedQueriesChanged`], and the list is read again.
+//!
 //! Changes run on the core's threads, so they may finish in any order: each
 //! one changes and reads the list in turn, numbered, and only a list newer
 //! than the one shown replaces it.
@@ -10,14 +13,16 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+use dbforge_core::Event;
 use dbforge_core::error::AppError;
 use dbforge_core::saved_queries::commands::{
     delete_saved_query, duplicate_saved_query, list_saved_queries, mark_saved_query_run, save_query,
 };
 use dbforge_core::saved_queries::{ParamValue, SavedQuery, SavedQueryInput};
-use gpui::{App, AppContext, Entity, Global, Task};
+use gpui::{App, AppContext, Entity, Global, Subscription, Task};
 
 use crate::backend::Backend;
+use crate::events::EventHub;
 use crate::i18n::Translate;
 
 /// Numbers each change and the list read after it, one change at a time.
@@ -32,7 +37,11 @@ pub struct SavedStore {
     shown: u64,
 }
 
-struct GlobalSaved(Entity<SavedStore>);
+struct GlobalSaved {
+    store: Entity<SavedStore>,
+    /// Reads the list again when an agent changes it.
+    _agents: Option<Subscription>,
+}
 
 impl Global for GlobalSaved {}
 
@@ -40,10 +49,17 @@ impl SavedStore {
     /// The window's saved queries, read the first time they are asked for.
     pub fn global(cx: &mut App) -> Entity<SavedStore> {
         if let Some(global) = cx.try_global::<GlobalSaved>() {
-            return global.0.clone();
+            return global.store.clone();
         }
         let store = cx.new(|_| SavedStore::default());
-        cx.set_global(GlobalSaved(store.clone()));
+        let agents_changes = EventHub::try_global(cx).map(|hub| {
+            cx.subscribe(&hub, |_, event: &Event, cx| {
+                if matches!(event, Event::SavedQueriesChanged) {
+                    reload(cx);
+                }
+            })
+        });
+        cx.set_global(GlobalSaved { store: store.clone(), _agents: agents_changes });
         reload(cx);
         store
     }
@@ -51,7 +67,7 @@ impl SavedStore {
     /// The window's saved queries when they were asked for already, from a
     /// context that can't create them.
     pub fn global_read(cx: &App) -> Option<&SavedStore> {
-        cx.try_global::<GlobalSaved>().map(|global| global.0.read(cx))
+        cx.try_global::<GlobalSaved>().map(|global| global.store.read(cx))
     }
 
     /// Every saved query, by folder and then by name.
@@ -159,5 +175,36 @@ mod tests {
         assert!(store.is_loaded());
         assert!(store.show(3, Vec::new()));
         assert!(store.queries().is_empty());
+    }
+
+    #[gpui::test]
+    fn reads_the_list_again_when_an_agent_changes_it(cx: &mut gpui::TestAppContext) {
+        use dbforge_core::connections::model::Engine;
+        use dbforge_core::saved_queries::SavedScope;
+
+        let _dir = crate::test_support::setup(cx);
+        let store = cx.update(SavedStore::global);
+        let loaded = |cx: &mut gpui::TestAppContext, count: usize| {
+            let start = std::time::Instant::now();
+            while cx.update(|cx| (store.read(cx).is_loaded(), store.read(cx).queries().len())) != (true, count) {
+                assert!(start.elapsed() < std::time::Duration::from_secs(15), "timed out waiting for {count} queries");
+                cx.run_until_parked();
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+        loaded(cx, 0);
+        // An agent saves one through the MCP server: the core, not this window, changes it.
+        let core = cx.update(|cx| Backend::global(cx).core().clone());
+        let input = SavedQueryInput {
+            name: "Orders".into(),
+            sql: "select 1".into(),
+            description: None,
+            folder: None,
+            scope: SavedScope::Engine,
+            engine: Engine::Postgres,
+        };
+        core.saved_queries().save(None, input).unwrap();
+        cx.update(|cx| EventHub::global(cx).update(cx, |_, cx| cx.emit(Event::SavedQueriesChanged)));
+        loaded(cx, 1);
     }
 }

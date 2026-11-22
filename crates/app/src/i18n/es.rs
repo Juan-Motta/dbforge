@@ -1087,6 +1087,17 @@ pub(super) const MESSAGES: Messages = Messages {
         approval_note: "No se ejecuta nada hasta que lo apruebes. Si lo rechazas, el agente sabrá que no se \
                         ejecutó.",
         approve: "Aprobar y ejecutar",
+        saved_approval_title: "¿Aprobar el cambio de un agente en tus consultas guardadas?",
+        saved_create_who: |agent, name| format!("{agent} quiere crear la consulta guardada “{name}”:"),
+        saved_update_who: |agent, name| format!("{agent} quiere editar la consulta guardada “{name}”:"),
+        saved_delete_who: |agent, name| format!("{agent} quiere eliminar la consulta guardada “{name}”:"),
+        sql_before: "SQL antes",
+        sql_after: "SQL después",
+        sql_unchanged: "El SQL no cambia.",
+        no_description: "Sin descripción",
+        saved_approval_note: "No cambia nada hasta que lo apruebes. Si lo rechazas, el agente sabrá que no se \
+                              cambió nada.",
+        approve_change: "Aprobar",
         decline: "Rechazar",
         close: "Cerrar",
         enable: "Permitir que agentes de IA usen DBForge",

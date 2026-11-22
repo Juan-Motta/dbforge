@@ -588,7 +588,7 @@ impl Shell {
                     .connections()
                     .list()
                     .into_iter()
-                    .find(|connection| connection.id == request.connection_id)
+                    .find(|connection| Some(connection.id.as_str()) == request.connection_id())
                     .map(|connection| connection.engine);
                 let dialog = cx.new(|cx| ApprovalDialog::new(request, engine, cx));
                 dialog.read(cx).focus(window);
@@ -825,7 +825,7 @@ impl Shell {
     /// `DBFORGE_OPEN=approval`: sample requests, as if agents had asked.
     #[cfg(debug_assertions)]
     fn show_approval_for_development(&mut self, seed: Option<&str>, cx: &mut Context<Self>) {
-        use dbforge_core::mcp::ApprovalRequest;
+        use dbforge_core::mcp::{ApprovalRequest, ApprovalSubject};
         let connection = Backend::global(cx).core().connections().list().into_iter().next();
         let (connection_id, connection_name) =
             connection.map_or(("sample".to_owned(), "Shop".to_owned()), |connection| (connection.id, connection.name));
@@ -833,11 +833,13 @@ impl Shell {
         let sample = |id: &str, statement: &str| ApprovalRequest {
             id: format!("development-{id}"),
             agent: (!plain).then(|| "claude-code".to_owned()),
-            connection_id: connection_id.clone(),
-            connection_name: connection_name.clone(),
-            tag: (!plain).then(|| "PROD".to_owned()),
-            database: (!plain).then(|| "shop".to_owned()),
-            statement: statement.to_owned(),
+            subject: ApprovalSubject::Statement {
+                connection_id: connection_id.clone(),
+                connection_name: connection_name.clone(),
+                tag: (!plain).then(|| "PROD".to_owned()),
+                database: (!plain).then(|| "shop".to_owned()),
+                statement: statement.to_owned(),
+            },
         };
         let mut requests =
             vec![sample("1", "UPDATE orders\nSET status = 'shipped', shipped_at = CURRENT_TIMESTAMP\nWHERE id = 42;")];
@@ -1222,11 +1224,13 @@ mod tests {
         dbforge_core::mcp::ApprovalRequest {
             id: id.into(),
             agent: Some("codex".into()),
-            connection_id: "gone".into(),
-            connection_name: "Shop".into(),
-            tag: Some("PROD".into()),
-            database: None,
-            statement: "DELETE FROM orders".into(),
+            subject: dbforge_core::mcp::ApprovalSubject::Statement {
+                connection_id: "gone".into(),
+                connection_name: "Shop".into(),
+                tag: Some("PROD".into()),
+                database: None,
+                statement: "DELETE FROM orders".into(),
+            },
         }
     }
 

@@ -1,7 +1,8 @@
-//! Changes an agent asks to make on a connection whose tag asks before
-//! changes: the app shows the statement and waits for the user to approve or
-//! decline it. Nothing runs until the user says yes; no answer within the
-//! wait is a no.
+//! Changes an agent asks to make that wait for the user: a statement on a
+//! connection whose tag asks before changes, and every change to the saved
+//! queries. The app shows what the change does and waits for the user to
+//! approve or decline it. Nothing happens until the user says yes; no answer
+//! within the wait is a no.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -10,6 +11,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+use crate::connections::model::Engine;
 use crate::events::{Event, Events};
 
 /// How long a request waits for the user before it counts as declined.
@@ -22,11 +24,132 @@ pub struct ApprovalRequest {
     pub id: String,
     /// The agent's own name for itself (e.g. `claude-code`), when it gave one.
     pub agent: Option<String>,
-    pub connection_id: String,
-    pub connection_name: String,
-    pub tag: Option<String>,
-    pub database: Option<String>,
-    pub statement: String,
+    /// What the agent wants to do.
+    pub subject: ApprovalSubject,
+}
+
+impl ApprovalRequest {
+    /// The connection a statement would run on; none for a saved query's change.
+    pub fn connection_id(&self) -> Option<&str> {
+        match &self.subject {
+            ApprovalSubject::Statement { connection_id, .. } => Some(connection_id),
+            ApprovalSubject::SavedQuery(_) => None,
+        }
+    }
+}
+
+/// What an agent asks the user to approve.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ApprovalSubject {
+    /// A statement that changes data, on a connection whose tag asks first.
+    #[serde(rename_all = "camelCase")]
+    Statement {
+        connection_id: String,
+        connection_name: String,
+        tag: Option<String>,
+        database: Option<String>,
+        statement: String,
+    },
+    /// Creating, changing or deleting a saved query. Boxed: an update holds
+    /// the query twice, and every event would be that large.
+    SavedQuery(Box<SavedQueryChange>),
+}
+
+/// A change an agent wants to make to the saved queries.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum SavedQueryChange {
+    Create {
+        query: SavedQueryDraft,
+    },
+    /// Saved query `before` becoming `after`.
+    Update {
+        before: SavedQueryDraft,
+        after: SavedQueryDraft,
+    },
+    Delete {
+        query: SavedQueryDraft,
+    },
+}
+
+impl SavedQueryChange {
+    /// The name the dialog calls the query by: its current one.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Create { query } | Self::Delete { query } => &query.name,
+            Self::Update { before, .. } => &before.name,
+        }
+    }
+
+    /// The engine its SQL is written for, the new one on an update.
+    pub fn engine(&self) -> Engine {
+        match self {
+            Self::Create { query } | Self::Delete { query } => query.engine,
+            Self::Update { after, .. } => after.engine,
+        }
+    }
+
+    /// The fields an update changes, besides the SQL, in the order the dialog lists them.
+    pub fn changed_fields(&self) -> Vec<SavedQueryField> {
+        let Self::Update { before, after } = self else {
+            return Vec::new();
+        };
+        SavedQueryField::ALL.into_iter().filter(|field| field.differs(before, after)).collect()
+    }
+
+    /// Whether an update changes the SQL.
+    pub fn changes_sql(&self) -> bool {
+        matches!(self, Self::Update { before, after } if before.sql != after.sql)
+    }
+}
+
+/// A saved query as the approval dialog shows it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedQueryDraft {
+    pub name: String,
+    pub sql: String,
+    pub description: Option<String>,
+    pub folder: Option<String>,
+    pub scope: DraftScope,
+    pub engine: Engine,
+}
+
+/// Which connections a saved query is offered for, named for the dialog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DraftScope {
+    /// One connection, by its name (its id when it no longer exists).
+    #[serde(rename_all = "camelCase")]
+    Connection { connection_id: String, connection_name: String },
+    /// Any connection of the query's engine.
+    Engine,
+}
+
+/// A field of a saved query an update can change, besides its SQL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SavedQueryField {
+    Name,
+    Folder,
+    Scope,
+    Description,
+}
+
+impl SavedQueryField {
+    pub const ALL: [SavedQueryField; 4] = [Self::Name, Self::Folder, Self::Scope, Self::Description];
+
+    /// Whether `before` and `after` differ in this field. The scope covers
+    /// the engine too: "any PostgreSQL connection" isn't "any MySQL connection".
+    fn differs(self, before: &SavedQueryDraft, after: &SavedQueryDraft) -> bool {
+        match self {
+            Self::Name => before.name != after.name,
+            Self::Folder => before.folder != after.folder,
+            Self::Description => before.description != after.description,
+            Self::Scope => (&before.scope, before.engine) != (&after.scope, after.engine),
+        }
+    }
 }
 
 /// Requests waiting for an answer, by id.
@@ -104,12 +227,66 @@ mod tests {
         ApprovalRequest {
             id: id.into(),
             agent: None,
-            connection_id: "c".into(),
-            connection_name: "Shop".into(),
-            tag: None,
-            database: None,
-            statement: "DELETE FROM orders".into(),
+            subject: ApprovalSubject::Statement {
+                connection_id: "c".into(),
+                connection_name: "Shop".into(),
+                tag: None,
+                database: None,
+                statement: "DELETE FROM orders".into(),
+            },
         }
+    }
+
+    fn draft(name: &str) -> SavedQueryDraft {
+        SavedQueryDraft {
+            name: name.into(),
+            sql: "select 1".into(),
+            description: None,
+            folder: None,
+            scope: DraftScope::Engine,
+            engine: Engine::Postgres,
+        }
+    }
+
+    #[test]
+    fn an_update_lists_only_the_fields_it_changes() {
+        let before = draft("Orders");
+        let same = SavedQueryChange::Update { before: before.clone(), after: before.clone() };
+        assert!(same.changed_fields().is_empty());
+        assert!(!same.changes_sql());
+
+        let after = SavedQueryDraft {
+            name: "Paid orders".into(),
+            sql: "select 2".into(),
+            folder: Some("Ops".into()),
+            scope: DraftScope::Connection { connection_id: "c".into(), connection_name: "Shop".into() },
+            ..before.clone()
+        };
+        let change = SavedQueryChange::Update { before, after };
+        assert_eq!(change.changed_fields(), [SavedQueryField::Name, SavedQueryField::Folder, SavedQueryField::Scope]);
+        assert!(change.changes_sql());
+        assert_eq!(change.name(), "Orders", "called by the name the user knows");
+    }
+
+    #[test]
+    fn moving_to_another_engine_changes_the_scope() {
+        let before = draft("Orders");
+        let after = SavedQueryDraft { engine: Engine::Mysql, ..before.clone() };
+        let change = SavedQueryChange::Update { before, after };
+        assert_eq!(change.changed_fields(), [SavedQueryField::Scope]);
+        assert_eq!(change.engine(), Engine::Mysql);
+    }
+
+    #[test]
+    fn only_a_statement_names_a_connection() {
+        assert_eq!(request("a").connection_id(), Some("c"));
+        let saved = ApprovalRequest {
+            id: "b".into(),
+            agent: None,
+            subject: ApprovalSubject::SavedQuery(Box::new(SavedQueryChange::Delete { query: draft("Orders") })),
+        };
+        assert_eq!(saved.connection_id(), None);
+        assert!(SavedQueryChange::Create { query: draft("x") }.changed_fields().is_empty());
     }
 
     #[tokio::test]

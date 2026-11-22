@@ -229,7 +229,7 @@ fn created(input: SavedQueryInput, id: String, now: i64) -> SavedQuery {
 
 /// `input` with its name, description and folder trimmed, blank ones left
 /// out; a blank name is refused.
-fn checked(input: SavedQueryInput) -> Result<SavedQueryInput> {
+pub(crate) fn checked(input: SavedQueryInput) -> Result<SavedQueryInput> {
     let name = input.name.trim();
     if name.is_empty() {
         return Err(AppError::Invalid("Enter a name for the saved query.".into()));
