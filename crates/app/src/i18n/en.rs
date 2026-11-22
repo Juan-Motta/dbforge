@@ -636,6 +636,8 @@ pub(super) const MESSAGES: Messages = Messages {
         exports_intro: "Where database exports are saved, and the PostgreSQL tools that write and restore them.",
         agents: "Agents (MCP)",
         agents_intro: "Let AI agents such as Claude Code or Codex query and change your databases through DBForge.",
+        agent_access: "Agent access",
+        agent_access_intro: "What every agent may do with each saved connection. Hidden connections don’t exist for agents.",
         passwords: "Passwords",
         passwords_intro: "Where DBForge saves the passwords and keys of your connections.",
         backup: "Backup",

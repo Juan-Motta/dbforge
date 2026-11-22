@@ -12,7 +12,7 @@ use super::{PasswordsSection, Section};
 use crate::backup::{BackupEvent, BackupSection};
 use crate::dump::ExportSettings;
 use crate::i18n::{Language, Locale, Translate};
-use crate::mcp::{McpSection, McpSectionEvent};
+use crate::mcp::{AccessSection, McpSection, McpSectionEvent};
 use crate::preferences::Preferences;
 use crate::tags::TagsSection;
 use crate::tags::section::TagsEvent;
@@ -57,6 +57,8 @@ pub struct SettingsDialog {
     /// Agents (MCP) while it is shown, with what it tells the dialog: the
     /// token is read only when the user goes there.
     agents: Option<(Entity<McpSection>, Subscription)>,
+    /// Agent access while it is shown, read again each time.
+    access: Option<(Entity<AccessSection>, Subscription)>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -95,6 +97,7 @@ impl SettingsDialog {
             exports,
             backup,
             agents: None,
+            access: None,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
@@ -125,6 +128,16 @@ impl SettingsDialog {
                 cx.emit(SettingsEvent::ConnectionsChanged);
             });
             self.agents = Some((agents, changed));
+        }
+        if section != Section::AgentAccess {
+            self.access = None;
+        } else if self.access.is_none() {
+            let access = cx.new(AccessSection::new);
+            // An access saved there shows in the explorer too.
+            let changed = cx.subscribe(&access, |_, _, McpSectionEvent::ConnectionsChanged, cx| {
+                cx.emit(SettingsEvent::ConnectionsChanged);
+            });
+            self.access = Some((access, changed));
         }
         self.section = section;
         cx.notify();
@@ -185,6 +198,13 @@ impl SettingsDialog {
                 self.agents
                     .as_ref()
                     .map_or_else(|| div().into_any_element(), |(agents, _)| agents.clone().into_any_element()),
+            ),
+            Section::AgentAccess => (
+                m.agent_access,
+                Some(m.agent_access_intro),
+                self.access
+                    .as_ref()
+                    .map_or_else(|| div().into_any_element(), |(access, _)| access.clone().into_any_element()),
             ),
         };
         div()

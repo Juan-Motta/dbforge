@@ -21,6 +21,8 @@ pub struct SettingsMessages {
     pub exports_intro: &'static str,
     pub agents: &'static str,
     pub agents_intro: &'static str,
+    pub agent_access: &'static str,
+    pub agent_access_intro: &'static str,
     pub passwords: &'static str,
     pub passwords_intro: &'static str,
     pub backup: &'static str,

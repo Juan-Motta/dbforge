@@ -15,6 +15,7 @@ mod queue;
 mod section;
 pub mod setup;
 
+pub use access::AccessSection;
 pub use approvals::Approvals;
 pub use dialog::{ApprovalDialog, key_bindings};
 pub use section::{McpSection, McpSectionEvent};

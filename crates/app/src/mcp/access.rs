@@ -1,20 +1,23 @@
-//! Settings › Agents › what agents can reach: each saved connection with
-//! its agent access (hidden, read only, or read and write), shared by every
-//! agent. Changing it here saves the connection's own access, the same one
-//! its settings edit.
+//! Settings › Agent access: each saved connection with what agents may do
+//! with it (hidden, read only, or read and write), shared by every agent.
+//! Changing it here saves the connection's own access, the same one its
+//! settings edit. A section of its own, so Agents (MCP) fits without
+//! scrolling.
 
 use dbforge_core::connections::commands::set_agent_access;
 use dbforge_core::connections::model::AgentAccess;
+use dbforge_core::connections::model::Connection;
+use dbforge_core::connections::tags::Tag;
 use gpui::{
-    AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
+    AnyElement, Context, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::section::{McpSection, McpSectionEvent, tile};
+use super::section::{McpSectionEvent, tile};
 use crate::backend::Backend;
 use crate::i18n::{McpMessages, Translate};
 use crate::tags::tag_of;
-use crate::theme::Theme;
+use crate::theme::{ActiveTheme, Theme};
 use crate::ui::modal::note;
 use crate::ui::{Ellipsis, any, engine_logo, segment_face, segmented, tag_badge};
 
@@ -29,9 +32,25 @@ fn access_label(access: AgentAccess, m: &McpMessages) -> &'static str {
     }
 }
 
-impl McpSection {
+/// The Agent access section: the saved connections, their tags, and the last
+/// save that failed.
+pub struct AccessSection {
+    connections: Vec<Connection>,
+    tags: Vec<Tag>,
+    error: Option<String>,
+}
+
+impl EventEmitter<McpSectionEvent> for AccessSection {}
+
+impl AccessSection {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let mut section = Self { connections: Vec::new(), tags: Vec::new(), error: None };
+        section.load_connections(cx);
+        section
+    }
+
     /// Reads the saved connections and their tags, off the UI thread.
-    pub(super) fn load_connections(&mut self, cx: &mut Context<Self>) {
+    fn load_connections(&mut self, cx: &mut Context<Self>) {
         let read = Backend::global(cx).spawn_blocking(cx, |core| (core.connections().list(), core.tags().list()));
         cx.spawn(async move |this, cx| {
             let (connections, tags) = read.await;
@@ -46,7 +65,7 @@ impl McpSection {
 
     /// Saves what agents may do with connection `id`. Shown at once, and put
     /// back with the error when the core couldn't save it.
-    pub(super) fn set_access(&mut self, id: String, access: AgentAccess, cx: &mut Context<Self>) {
+    fn set_access(&mut self, id: String, access: AgentAccess, cx: &mut Context<Self>) {
         let Some(connection) = self.connections.iter_mut().find(|connection| connection.id == id) else { return };
         if connection.agent_access == access {
             return;
@@ -83,12 +102,13 @@ impl McpSection {
         .detach();
     }
 
-    pub(super) fn render_access(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_access(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let m = &cx.messages().mcp;
         let rows: Vec<AnyElement> = self
             .connections
             .iter()
-            .map(|connection| {
+            .enumerate()
+            .map(|(index, connection)| {
                 let tag = tag_of(&self.tags, connection.environment.as_deref());
                 let segments = ACCESSES
                     .iter()
@@ -100,6 +120,7 @@ impl McpSection {
                             .on_click(cx.listener(move |this, _, _, cx| this.set_access(id.clone(), access, cx))))
                     })
                     .collect();
+                let first = index == 0;
                 div()
                     .min_h(px(48.))
                     .px(px(14.))
@@ -107,8 +128,7 @@ impl McpSection {
                     .flex()
                     .items_center()
                     .gap(px(12.))
-                    .border_t_1()
-                    .border_color(theme.line)
+                    .when(!first, |row| row.border_t_1().border_color(theme.line))
                     .child(
                         div()
                             .flex_1()
@@ -134,32 +154,28 @@ impl McpSection {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .px(px(14.))
-                    .pt(px(12.))
-                    .pb(px(10.))
-                    .flex()
-                    .items_baseline()
-                    .gap(px(10.))
-                    .child(div().flex_none().text_size(px(13.5)).font_weight(FontWeight::SEMIBOLD).child(m.reach_title))
-                    .child(div().min_w_0().ellipsis().text_size(px(12.)).text_color(theme.text3).child(m.reach_hint)),
-            )
             .children(rows)
             .when(empty, |tile| {
                 tile.child(
-                    div()
-                        .px(px(14.))
-                        .py(px(12.))
-                        .border_t_1()
-                        .border_color(theme.line)
-                        .text_size(px(12.5))
-                        .text_color(theme.text3)
-                        .child(m.no_connections),
+                    div().px(px(14.)).py(px(12.)).text_size(px(12.5)).text_color(theme.text3).child(m.no_connections),
                 )
             })
             .child(
                 div().px(px(14.)).py(px(12.)).border_t_1().border_color(theme.line).child(note(theme, m.access_note)),
             )
+    }
+}
+
+impl Render for AccessSection {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = *cx.theme();
+        div()
+            .pt(px(6.))
+            .pb(px(14.))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .children(self.error.clone().map(|error| div().text_size(px(12.5)).text_color(theme.err).child(error)))
+            .child(self.render_access(&theme, cx))
     }
 }

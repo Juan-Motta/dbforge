@@ -668,6 +668,8 @@ pub(super) const MESSAGES: Messages = Messages {
         agents: "Agentes (MCP)",
         agents_intro: "Permite que agentes de IA como Claude Code o Codex consulten y cambien tus bases de datos a \
                        través de DBForge.",
+        agent_access: "Acceso de agentes",
+        agent_access_intro: "Qué puede hacer cada agente con cada conexión guardada. Las conexiones ocultas no existen para los agentes.",
         passwords: "Contraseñas",
         passwords_intro: "Dónde guarda DBForge las contraseñas y claves de tus conexiones.",
         backup: "Copia de seguridad",

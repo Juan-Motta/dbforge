@@ -3,9 +3,9 @@
 //! off, its state and address, the agents connected, their statements today
 //! and the changes waiting), with the port and the token agents send behind
 //! "Port and token"; the agents that used DBForge and the ones to add, each
-//! with the setup that adds DBForge to it ([`super::agent_setup`]); and what
-//! agents may reach on each saved connection ([`super::access`]). The core
-//! saves the settings and starts, restarts or stops the server to match.
+//! with the setup that adds DBForge to it ([`super::agent_setup`]). What
+//! agents may reach on each saved connection is its own section,
+//! Agent access ([`super::access`]). The core saves the settings and starts, restarts or stops the server to match.
 //!
 //! The token: read from the core when the section opens and kept only in
 //! this view while it is open; shown as bullets until the eye shows it, put
@@ -15,8 +15,6 @@
 use std::time::Duration;
 
 use dbforge_core::Event;
-use dbforge_core::connections::model::Connection;
-use dbforge_core::connections::tags::Tag;
 use dbforge_core::mcp::commands::{mcp_agents, mcp_state, mcp_token, regenerate_mcp_token, set_mcp_settings};
 use dbforge_core::mcp::{McpSettings, Status};
 use dbforge_core::statement_log::commands::list_statements;
@@ -96,9 +94,6 @@ pub struct McpSection {
     pub(super) transport: Transport,
     /// Each statement agents ran (its id, and when it started), as the statement log keeps them.
     agent_statements: Vec<(u64, u64)>,
-    /// The saved connections and the tags they carry, for what agents can reach.
-    pub(super) connections: Vec<Connection>,
-    pub(super) tags: Vec<Tag>,
     /// The settings a running save writes; the latest asked meanwhile wait for it.
     saving: Option<McpSettings>,
     queued: Option<McpSettings>,
@@ -144,8 +139,6 @@ impl McpSection {
             mode: SetupMode::default(),
             transport: Transport::Stdio,
             agent_statements: Vec::new(),
-            connections: Vec::new(),
-            tags: Vec::new(),
             saving: None,
             queued: None,
             _refresh: refresh,
@@ -154,7 +147,6 @@ impl McpSection {
         section.load(cx);
         section.load_agents(cx);
         section.load_statements(cx);
-        section.load_connections(cx);
         section
     }
 
@@ -621,7 +613,6 @@ impl Render for McpSection {
             .gap(px(14.))
             .child(self.render_status(&theme, window, cx))
             .child(self.render_agents(&theme, cx))
-            .child(self.render_access(&theme, cx))
     }
 }
 
