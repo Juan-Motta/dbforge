@@ -1,5 +1,6 @@
-//! Settings › Agents › the agents: on the left, the agents that used DBForge
-//! ("Your agents") and the known ones to add ("Add one"); on the right, the
+//! Settings › Agents › the agents: on the left, the known agents, each with
+//! how it has used DBForge (DBForge adds or removes none: the setup on the
+//! right is what the user runs in the agent); on the right, the
 //! agent picked and the setup that adds DBForge to it, as the former web
 //! UI's `AgentSetup.tsx`: by default a prompt to paste into the agent, which
 //! has it add DBForge itself, or else the steps to run, with how it reaches
@@ -13,7 +14,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
 };
 
-use super::agents::{Ago, Pick, ago, is_connected, shown_pick, to_add};
+use super::agents::{Ago, Usage, shown_agent, usage};
 use super::section::{McpSection, SetupMode, tile, value_row};
 use super::setup::{AgentId, Endpoint, Step, StepKind, TRANSPORTS, Transport, agent_prompt, server_url, setup_steps};
 use crate::i18n::{McpMessages, Translate};
@@ -47,46 +48,33 @@ fn agent_label(agent: AgentId, m: &McpMessages) -> &'static str {
     }
 }
 
-/// The agent's name as the list shows it: its own for one DBForge has no setup for.
-fn pick_label(pick: &Pick, m: &McpMessages) -> String {
-    pick.name.clone().unwrap_or_else(|| agent_label(pick.agent, m).to_owned())
-}
-
 /// A stable id for the agent's row and blocks.
-fn pick_key(pick: &Pick) -> String {
-    match &pick.name {
-        Some(name) => format!("seen-{name}"),
-        None => format!("{:?}", pick.agent).to_lowercase(),
+fn agent_key(agent: AgentId) -> String {
+    format!("{agent:?}").to_lowercase()
+}
+
+/// How the agent has used DBForge, as its row says it.
+fn usage_text(usage: Usage, m: &McpMessages) -> String {
+    match usage {
+        Usage::Connected => m.connected.to_owned(),
+        Usage::UsedAgo(Ago::Minutes(minutes)) => (m.used_minutes_ago)(minutes),
+        Usage::UsedAgo(Ago::Hours(hours)) => (m.used_hours_ago)(hours),
+        Usage::UsedAgo(Ago::Days(days)) => (m.used_days_ago)(days),
+        Usage::UsedBefore => m.used_before.to_owned(),
+        Usage::NotUsed => m.not_used.to_owned(),
     }
 }
 
-/// "Connected", or when it was last seen.
-fn activity(last_active_ms: Option<i64>, now_ms: i64, m: &McpMessages) -> String {
-    match last_active_ms {
-        Some(at) if is_connected(Some(at), now_ms) => m.connected.to_owned(),
-        Some(at) => match ago(at, now_ms) {
-            Ago::Minutes(minutes) => (m.seen_minutes_ago)(minutes),
-            Ago::Hours(hours) => (m.seen_hours_ago)(hours),
-            Ago::Days(days) => (m.seen_days_ago)(days),
-        },
-        None => m.not_seen.to_owned(),
-    }
-}
-
-/// The agent's mark: its initials on its colour, or a generic one for an agent DBForge doesn't know.
-fn mark(theme: &Theme, pick: &Pick, size: f32) -> impl IntoElement {
-    let (initials, fill) = match (pick.agent, &pick.name) {
-        (AgentId::Claude, _) => (Some("CC".to_owned()), color(0xC8643BFF)),
-        (AgentId::Codex, _) => (Some("CX".to_owned()), color(0x3A3D46FF)),
-        (AgentId::Opencode, _) => (Some("OC".to_owned()), color(0x2F6F8FFF)),
-        (AgentId::Pi, _) => (Some("Pi".to_owned()), color(0x5B4BB0FF)),
-        (AgentId::Other, Some(name)) => {
-            let initials: String = name.chars().filter(|c| c.is_alphanumeric()).take(2).collect();
-            (Some(initials.to_uppercase()), theme.glass_hi)
-        }
-        (AgentId::Other, None) => (None, theme.glass_hi),
+/// The agent's mark: its initials on its colour, or a generic one for "Other agent".
+fn mark(theme: &Theme, agent: AgentId, size: f32) -> impl IntoElement {
+    let (initials, fill) = match agent {
+        AgentId::Claude => (Some("CC"), color(0xC8643BFF)),
+        AgentId::Codex => (Some("CX"), color(0x3A3D46FF)),
+        AgentId::Opencode => (Some("OC"), color(0x2F6F8FFF)),
+        AgentId::Pi => (Some("Pi"), color(0x5B4BB0FF)),
+        AgentId::Other => (None, theme.glass_hi),
     };
-    let known = pick.agent != AgentId::Other;
+    let known = agent != AgentId::Other;
     div()
         .size(px(size))
         .flex_none()
@@ -148,15 +136,13 @@ impl McpSection {
         }
     }
 
-    /// The agent shown: the one picked while it is listed, else the first of
-    /// the user's, else Claude Code.
-    pub(super) fn shown_pick(&self) -> Pick {
-        shown_pick(self.picked.as_ref(), &self.agents, &to_add(&self.agents))
+    /// The agent shown: the one picked, else the most recently used, else Claude Code.
+    pub(super) fn shown_agent(&self) -> AgentId {
+        shown_agent(self.picked, &self.agents)
     }
 
     pub(super) fn setup(&self, m: &McpMessages) -> Setup {
-        let pick = self.shown_pick();
-        let agent = pick.agent;
+        let agent = self.shown_agent();
         let port = self.loaded.as_ref().map_or(McpSettings::default().port, |loaded| loaded.settings.port);
         let url = server_url(port);
         let executable = self.loaded.as_ref().and_then(|loaded| loaded.executable.as_deref());
@@ -168,7 +154,7 @@ impl McpSection {
         };
         let shown = endpoint(transport, executable, &url, shown_secret);
         let copied = endpoint(transport, executable, &url, token.unwrap_or_default());
-        let key = pick_key(&pick);
+        let key = agent_key(agent);
         let steps = setup_steps(agent, shown)
             .iter()
             .zip(setup_steps(agent, copied))
@@ -193,8 +179,8 @@ impl McpSection {
         }
     }
 
-    fn pick(&mut self, pick: Pick, cx: &mut Context<Self>) {
-        self.picked = Some(pick);
+    fn pick(&mut self, agent: AgentId, cx: &mut Context<Self>) {
+        self.picked = Some(agent);
         cx.notify();
     }
 
@@ -241,50 +227,37 @@ impl McpSection {
 
     fn render_list(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let m = &cx.messages().mcp;
-        let shown = self.shown_pick();
+        let shown = self.shown_agent();
         let now = chrono::Local::now().timestamp_millis();
-        let heading = |text: &str, top: f32| {
-            div()
-                .pt(px(top))
-                .pb(px(8.))
-                .px(px(10.))
-                .text_size(px(11.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.text3)
-                .child(text.to_uppercase())
-        };
-        let yours: Vec<AnyElement> = self
+        let rows: Vec<AnyElement> = self
             .agents
             .iter()
-            .map(|seen| {
-                let pick = seen.pick.clone();
-                let connected = is_connected(seen.last_active_ms, now);
+            .map(|row| {
+                let agent = row.agent;
+                let usage = usage(row, now);
+                let tint = match usage {
+                    Usage::Connected => theme.ok,
+                    Usage::NotUsed => theme.text3.opacity(0.5),
+                    _ => theme.text3,
+                };
+                let status = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(11.5))
+                    .text_color(theme.text3)
+                    .child(dot(tint).size(px(7.)).flex_none())
+                    .child(div().min_w_0().ellipsis().child(usage_text(usage, m)));
                 let text = div()
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(div().ellipsis().child(pick_label(&pick, m)))
-                    .child(div().ellipsis().text_size(px(11.5)).text_color(theme.text3).child(activity(
-                        seen.last_active_ms,
-                        now,
-                        m,
-                    )));
-                list_row(theme, &pick, pick == shown, 46.)
+                    .child(div().ellipsis().child(agent_label(agent, m)))
+                    .child(status);
+                list_row(theme, agent, agent == shown, 46.)
                     .child(text)
-                    .child(dot(if connected { theme.ok } else { theme.text3 }).size(px(7.)))
-                    .on_click(cx.listener(move |this, _, _, cx| this.pick(pick.clone(), cx)))
-                    .into_any_element()
-            })
-            .collect();
-        let add: Vec<AnyElement> = to_add(&self.agents)
-            .into_iter()
-            .map(|agent| {
-                let pick = Pick::known(agent);
-                list_row(theme, &pick, pick == shown, 36.)
-                    .child(div().flex_1().min_w_0().ellipsis().child(agent_label(agent, m)))
-                    .child(icon("plus", theme.text3, 14.))
-                    .on_click(cx.listener(move |this, _, _, cx| this.pick(Pick::known(agent), cx)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.pick(agent, cx)))
                     .into_any_element()
             })
             .collect();
@@ -298,28 +271,33 @@ impl McpSection {
             .gap(px(2.))
             .border_r_1()
             .border_color(theme.line)
-            .child(heading(m.your_agents, 2.))
-            .when(yours.is_empty(), |list| {
-                list.child(div().px(px(10.)).text_size(px(12.)).text_color(theme.text3).child(m.no_agents))
-            })
-            .children(yours)
-            .child(heading(m.add_one, 14.))
-            .children(add)
+            .child(
+                div()
+                    .pt(px(2.))
+                    .pb(px(8.))
+                    .px(px(10.))
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.text3)
+                    .child(m.agents_heading.to_uppercase()),
+            )
+            .children(rows)
+            .child(div().pt(px(10.)).px(px(10.)).text_size(px(11.5)).text_color(theme.text3).child(m.connected_help))
     }
 
     fn render_detail(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let m = &cx.messages().mcp;
-        let pick = self.shown_pick();
-        let name = pick_label(&pick, m);
+        let agent = self.shown_agent();
+        let name = agent_label(agent, m);
         let transport = self.effective_transport();
-        let header = div().flex().items_center().gap(px(12.)).child(mark(theme, &pick, 36.)).child(
+        let header = div().flex().items_center().gap(px(12.)).child(mark(theme, agent, 36.)).child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(div().ellipsis().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(name.clone()))
+                .child(div().ellipsis().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(name))
                 .child(
                     div()
                         .ellipsis()
@@ -343,8 +321,8 @@ impl McpSection {
             })
             .collect();
         let hint = match self.mode {
-            SetupMode::Prompt => (m.prompt_hint)(&name),
-            SetupMode::Command => (m.command_hint)(&name),
+            SetupMode::Prompt => (m.prompt_hint)(name),
+            SetupMode::Command => (m.command_hint)(name),
         };
         let choice = div()
             .flex()
@@ -476,10 +454,10 @@ impl McpSection {
 }
 
 /// A row of the agents' list: the agent's mark, then what the caller adds.
-fn list_row(theme: &Theme, pick: &Pick, selected: bool, height: f32) -> gpui::Stateful<gpui::Div> {
+fn list_row(theme: &Theme, agent: AgentId, selected: bool, height: f32) -> gpui::Stateful<gpui::Div> {
     let tint: Hsla = if selected { theme.text } else { theme.text2 };
     div()
-        .id(SharedString::from(format!("mcp-agent-{}", pick_key(pick))))
+        .id(SharedString::from(format!("mcp-agent-{}", agent_key(agent))))
         .h(px(height))
         .flex_none()
         .px(px(10.))
@@ -493,5 +471,5 @@ fn list_row(theme: &Theme, pick: &Pick, selected: bool, height: f32) -> gpui::St
         .cursor_pointer()
         .when(selected, |row| row.bg(theme.accent.opacity(0.2)))
         .when(!selected, |row| row.hover(|row| row.bg(theme.sel)))
-        .child(mark(theme, pick, 26.))
+        .child(mark(theme, agent, 26.))
 }

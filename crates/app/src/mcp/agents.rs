@@ -1,8 +1,8 @@
-//! Who uses DBForge's MCP server, as Settings › Agents shows it: the agents
-//! the core has seen ([`AgentSeen`]) named as DBForge knows them, which of
-//! them count as connected, the known agents left to add, the agent picked
-//! when none was, and the agent statements run today. Pure, so they are
-//! tested without a window.
+//! Who uses DBForge's MCP server, as Settings › Agents shows it: the known
+//! agents, each with what the core has seen of it ([`AgentSeen`]), how it was
+//! used, which of them count as connected, the agent shown when none was
+//! picked, and the agent statements run today. Pure, so they are tested
+//! without a window.
 
 use chrono::TimeZone;
 use dbforge_core::mcp::AgentSeen;
@@ -12,30 +12,29 @@ use super::setup::{AGENTS, AgentId};
 /// How long after its last call an agent still counts as connected.
 pub const CONNECTED_WITHIN_MS: i64 = 10 * 60 * 1000;
 
-/// An agent in the list: a known one by its setup, or one DBForge has no
-/// setup for by its own name (its setup is then [`AgentId::Other`]'s).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Pick {
+/// One row of the agents' list: a known agent and what DBForge has seen of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Listed {
     pub agent: AgentId,
-    /// The agent's own name, for one DBForge has no setup for; `None` for a known one and for "Other agent".
-    pub name: Option<String>,
-}
-
-impl Pick {
-    pub fn known(agent: AgentId) -> Self {
-        Self { agent, name: None }
-    }
-}
-
-/// One of "Your agents": an agent that has used DBForge.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Seen {
-    pub pick: Pick,
-    /// Milliseconds since the epoch of its last call in this run; `None` when only a saved session knows it.
+    /// Whether it has used DBForge, in this run or in a saved session.
+    pub used: bool,
+    /// Milliseconds since the epoch of its last call in this run; `None` when it made none.
     pub last_active_ms: Option<i64>,
 }
 
-/// How long ago an agent was last seen, rounded down to the unit it is said in.
+/// How an agent has used DBForge, as its row says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Usage {
+    /// It made a call within [`CONNECTED_WITHIN_MS`].
+    Connected,
+    /// It made a call this run, this long ago.
+    UsedAgo(Ago),
+    /// Only a saved session knows it.
+    UsedBefore,
+    NotUsed,
+}
+
+/// How long ago an agent was last active, rounded down to the unit it is said in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ago {
     Minutes(i64),
@@ -59,41 +58,46 @@ pub fn agent_of(name: &str) -> AgentId {
     }
 }
 
-/// "Your agents", from the core's list (most recently active first): one
-/// entry per known agent, keeping its most recent activity, and one per name
-/// for the agents DBForge has no setup for.
-pub fn your_agents(seen: &[AgentSeen]) -> Vec<Seen> {
-    let mut agents: Vec<Seen> = Vec::new();
-    for agent in seen {
-        let known = agent_of(&agent.name);
-        let pick = match known {
-            AgentId::Other => Pick { agent: known, name: Some(agent.name.clone()) },
-            _ => Pick::known(known),
-        };
-        match agents.iter_mut().find(|listed| listed.pick == pick) {
-            Some(listed) => listed.last_active_ms = listed.last_active_ms.max(agent.last_active_ms),
-            None => agents.push(Seen { pick, last_active_ms: agent.last_active_ms }),
-        }
-    }
-    agents
+/// The agents' list: every known agent in the order DBForge offers them, each
+/// with the most recent activity of the agents the core has seen under it
+/// (the ones DBForge doesn't know count as "Other agent").
+pub fn listed(seen: &[AgentSeen]) -> Vec<Listed> {
+    AGENTS
+        .into_iter()
+        .map(|agent| {
+            let mut row = Listed { agent, used: false, last_active_ms: None };
+            for seen in seen.iter().filter(|seen| agent_of(&seen.name) == agent) {
+                row.used = true;
+                row.last_active_ms = row.last_active_ms.max(seen.last_active_ms);
+            }
+            row
+        })
+        .collect()
 }
 
-/// "Add one": the known agents not among `yours`, in the order DBForge offers
-/// them. "Other agent" always stays: the agents it stands for are listed by
-/// their own names, so it sets up any agent DBForge doesn't know.
-pub fn to_add(yours: &[Seen]) -> Vec<AgentId> {
-    AGENTS.into_iter().filter(|&agent| !yours.iter().any(|seen| seen.pick == Pick::known(agent))).collect()
+/// How `row`'s agent has used DBForge, at `now_ms`.
+pub fn usage(row: &Listed, now_ms: i64) -> Usage {
+    match row.last_active_ms {
+        Some(at) if is_connected(Some(at), now_ms) => Usage::Connected,
+        Some(at) => Usage::UsedAgo(ago(at, now_ms)),
+        None if row.used => Usage::UsedBefore,
+        None => Usage::NotUsed,
+    }
 }
 
-/// The agent shown: `picked` while it is still listed, else the first of
-/// `yours`, else Claude Code.
-pub fn shown_pick(picked: Option<&Pick>, yours: &[Seen], add: &[AgentId]) -> Pick {
-    let listed =
-        |pick: &Pick| yours.iter().any(|seen| &seen.pick == pick) || (pick.name.is_none() && add.contains(&pick.agent));
-    match picked {
-        Some(pick) if listed(pick) => pick.clone(),
-        _ => yours.first().map_or_else(|| Pick::known(AgentId::Claude), |seen| seen.pick.clone()),
-    }
+/// The agent shown: `picked`, else the most recently active, else the first
+/// used before, else Claude Code.
+pub fn shown_agent(picked: Option<AgentId>, listed: &[Listed]) -> AgentId {
+    picked
+        .or_else(|| {
+            listed
+                .iter()
+                .filter(|row| row.last_active_ms.is_some())
+                .max_by_key(|row| row.last_active_ms)
+                .map(|row| row.agent)
+        })
+        .or_else(|| listed.iter().find(|row| row.used).map(|row| row.agent))
+        .unwrap_or(AgentId::Claude)
 }
 
 /// Whether an agent last active at `last_active_ms` still counts as connected at `now_ms`.
@@ -101,9 +105,9 @@ pub fn is_connected(last_active_ms: Option<i64>, now_ms: i64) -> bool {
     last_active_ms.is_some_and(|at| now_ms - at < CONNECTED_WITHIN_MS)
 }
 
-/// How many of `yours` count as connected at `now_ms`.
-pub fn connected(yours: &[Seen], now_ms: i64) -> usize {
-    yours.iter().filter(|seen| is_connected(seen.last_active_ms, now_ms)).count()
+/// How many of `listed` count as connected at `now_ms`.
+pub fn connected(listed: &[Listed], now_ms: i64) -> usize {
+    listed.iter().filter(|row| is_connected(row.last_active_ms, now_ms)).count()
 }
 
 /// How long before `now_ms` an agent was last active at `at_ms`.
@@ -134,12 +138,12 @@ mod tests {
         AgentSeen { name: name.into(), version: None, last_active_ms }
     }
 
-    fn named(name: &str, last_active_ms: Option<i64>) -> Seen {
-        Seen { pick: Pick { agent: AgentId::Other, name: Some(name.into()) }, last_active_ms }
+    fn row(agent: AgentId, used: bool, last_active_ms: Option<i64>) -> Listed {
+        Listed { agent, used, last_active_ms }
     }
 
-    fn known(agent: AgentId, last_active_ms: Option<i64>) -> Seen {
-        Seen { pick: Pick::known(agent), last_active_ms }
+    fn unused() -> Vec<Listed> {
+        AGENTS.into_iter().map(|agent| row(agent, false, None)).collect()
     }
 
     #[test]
@@ -162,51 +166,62 @@ mod tests {
     }
 
     #[test]
-    fn lists_each_known_agent_once_and_unknown_ones_by_name() {
-        let listed = your_agents(&[
+    fn always_lists_the_five_known_agents_in_order() {
+        assert_eq!(listed(&[]), unused());
+        let agents: Vec<AgentId> =
+            listed(&[seen("pi", Some(1)), seen("aider", None)]).iter().map(|row| row.agent).collect();
+        assert_eq!(agents, AGENTS);
+    }
+
+    #[test]
+    fn folds_unknown_names_into_other_agent_keeping_the_most_recent_activity() {
+        let rows = listed(&[
             seen("claude-code", Some(9_000)),
             seen("aider", Some(5_000)),
             seen("claude-desktop", Some(1_000)),
             seen("codex", None),
-            seen("agent", None),
+            seen("agent", Some(7_000)),
         ]);
         assert_eq!(
-            listed,
+            rows,
             [
-                known(AgentId::Claude, Some(9_000)),
-                named("aider", Some(5_000)),
-                known(AgentId::Codex, None),
-                named("agent", None),
+                row(AgentId::Claude, true, Some(9_000)),
+                row(AgentId::Codex, true, None),
+                row(AgentId::Opencode, false, None),
+                row(AgentId::Pi, false, None),
+                row(AgentId::Other, true, Some(7_000)),
             ]
         );
         // The most recent activity wins, whichever comes first.
-        assert_eq!(
-            your_agents(&[seen("claude-desktop", None), seen("claude-code", Some(3))]),
-            [known(AgentId::Claude, Some(3))]
-        );
+        assert_eq!(listed(&[seen("agent", None), seen("aider", Some(3))])[4], row(AgentId::Other, true, Some(3)));
     }
 
     #[test]
-    fn offers_the_known_agents_not_yet_seen_and_always_other() {
-        assert_eq!(to_add(&[]), AGENTS);
+    fn says_how_each_agent_was_used() {
+        let now = 100 * 60_000;
+        assert_eq!(usage(&row(AgentId::Claude, true, Some(now - 1_000)), now), Usage::Connected);
         assert_eq!(
-            to_add(&[known(AgentId::Codex, None), named("aider", None), known(AgentId::Claude, Some(1))]),
-            [AgentId::Opencode, AgentId::Pi, AgentId::Other]
+            usage(&row(AgentId::Claude, true, Some(now - CONNECTED_WITHIN_MS)), now),
+            Usage::UsedAgo(Ago::Minutes(10))
         );
+        assert_eq!(usage(&row(AgentId::Codex, true, None), now), Usage::UsedBefore);
+        assert_eq!(usage(&row(AgentId::Pi, false, None), now), Usage::NotUsed);
     }
 
     #[test]
-    fn shows_the_picked_agent_while_listed_else_the_first_seen_else_claude_code() {
-        let yours = [named("aider", Some(5)), known(AgentId::Codex, None)];
-        let add = to_add(&yours);
-        assert_eq!(shown_pick(None, &[], &to_add(&[])), Pick::known(AgentId::Claude));
-        assert_eq!(shown_pick(None, &yours, &add), yours[0].pick);
-        let pi = Pick::known(AgentId::Pi);
-        assert_eq!(shown_pick(Some(&pi), &yours, &add), pi);
-        assert_eq!(shown_pick(Some(&Pick::known(AgentId::Codex)), &yours, &add), Pick::known(AgentId::Codex));
-        assert_eq!(shown_pick(Some(&Pick::known(AgentId::Other)), &yours, &add), Pick::known(AgentId::Other));
-        let gone = Pick { agent: AgentId::Other, name: Some("gone".into()) };
-        assert_eq!(shown_pick(Some(&gone), &yours, &add), yours[0].pick, "no longer listed");
+    fn shows_the_picked_agent_else_the_most_recent_else_the_first_used_else_claude_code() {
+        assert_eq!(shown_agent(None, &unused()), AgentId::Claude);
+        let rows = [
+            row(AgentId::Claude, false, None),
+            row(AgentId::Codex, true, None),
+            row(AgentId::Opencode, true, Some(5)),
+            row(AgentId::Pi, false, None),
+            row(AgentId::Other, true, Some(9)),
+        ];
+        assert_eq!(shown_agent(Some(AgentId::Pi), &rows), AgentId::Pi);
+        assert_eq!(shown_agent(None, &rows), AgentId::Other, "the most recently active");
+        let before = [row(AgentId::Claude, false, None), row(AgentId::Pi, true, None), row(AgentId::Other, true, None)];
+        assert_eq!(shown_agent(None, &before), AgentId::Pi, "the first used before");
     }
 
     #[test]
@@ -216,8 +231,12 @@ mod tests {
         assert!(is_connected(Some(now - CONNECTED_WITHIN_MS + 1), now));
         assert!(!is_connected(Some(now - CONNECTED_WITHIN_MS), now));
         assert!(!is_connected(None, now));
-        let yours = [known(AgentId::Claude, Some(now - 1_000)), named("aider", Some(0)), known(AgentId::Pi, None)];
-        assert_eq!(connected(&yours, now), 1);
+        let rows = [
+            row(AgentId::Claude, true, Some(now - 1_000)),
+            row(AgentId::Other, true, Some(0)),
+            row(AgentId::Pi, true, None),
+        ];
+        assert_eq!(connected(&rows, now), 1);
     }
 
     #[test]

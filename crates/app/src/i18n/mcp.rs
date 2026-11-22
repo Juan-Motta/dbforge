@@ -62,14 +62,16 @@ pub struct McpMessages {
     pub changes_waiting: fn(usize) -> String,
     pub port_and_token: &'static str,
     // The agents
-    pub your_agents: &'static str,
-    pub add_one: &'static str,
-    pub no_agents: &'static str,
+    pub agents_heading: &'static str,
     pub connected: &'static str,
-    pub seen_minutes_ago: fn(i64) -> String,
-    pub seen_hours_ago: fn(i64) -> String,
-    pub seen_days_ago: fn(i64) -> String,
-    pub not_seen: &'static str,
+    pub used_minutes_ago: fn(i64) -> String,
+    pub used_hours_ago: fn(i64) -> String,
+    pub used_days_ago: fn(i64) -> String,
+    /// Only a saved session knows the agent.
+    pub used_before: &'static str,
+    pub not_used: &'static str,
+    /// Under the list: what "Connected" means.
+    pub connected_help: &'static str,
     /// How the agent shown reaches DBForge, under its name.
     pub reaches_stdio: &'static str,
     pub reaches_http: &'static str,

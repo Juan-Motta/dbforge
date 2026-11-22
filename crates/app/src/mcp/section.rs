@@ -2,8 +2,8 @@
 //! `McpSettings.tsx` and its agents list: a status card (the server on or
 //! off, its state and address, the agents connected, their statements today
 //! and the changes waiting), with the port and the token agents send behind
-//! "Port and token"; the agents that used DBForge and the ones to add, each
-//! with the setup that adds DBForge to it ([`super::agent_setup`]). What
+//! "Port and token"; the known agents, each with how it has used DBForge
+//! and the setup that adds DBForge to it ([`super::agent_setup`]). What
 //! agents may reach on each saved connection is its own section,
 //! Agent access ([`super::access`]). The core saves the settings and starts, restarts or stops the server to match.
 //!
@@ -25,8 +25,8 @@ use gpui::{
 };
 
 use super::Approvals;
-use super::agents::{Pick, Seen, connected, statements_today, your_agents};
-use super::setup::{Transport, parse_port};
+use super::agents::{Listed, connected, listed, statements_today};
+use super::setup::{AgentId, Transport, parse_port};
 use crate::backend::Backend;
 use crate::events::EventHub;
 use crate::i18n::{McpMessages, Translate};
@@ -85,10 +85,10 @@ pub struct McpSection {
     pub(super) error: Option<String>,
     /// The copy button last pressed, which shows a check.
     pub(super) copied: Option<SharedString>,
-    /// "Your agents", as last read.
-    pub(super) agents: Vec<Seen>,
-    /// The agent the user picked; the first of theirs, else Claude Code, until they pick one.
-    pub(super) picked: Option<Pick>,
+    /// The agents' list, with what was last read of each.
+    pub(super) agents: Vec<Listed>,
+    /// The agent the user picked; until they pick one, the most recently used, else Claude Code.
+    pub(super) picked: Option<AgentId>,
     pub(super) mode: SetupMode,
     /// The transport picked; HTTP whatever is picked while there is no executable.
     pub(super) transport: Transport,
@@ -134,7 +134,7 @@ impl McpSection {
             secrets_open: false,
             error: None,
             copied: None,
-            agents: Vec::new(),
+            agents: listed(&[]),
             picked: None,
             mode: SetupMode::default(),
             transport: Transport::Stdio,
@@ -198,7 +198,7 @@ impl McpSection {
         cx.spawn(async move |this, cx| {
             let seen = seen.await;
             let _ = this.update(cx, |this, cx| {
-                this.agents = your_agents(&seen);
+                this.agents = listed(&seen);
                 cx.notify();
             });
         })
@@ -728,7 +728,7 @@ mod tests {
         let (section, cx) = opened(free_port(), cx);
         section.read_with(cx, |section, _| {
             assert_eq!(section.mode, SetupMode::Prompt);
-            assert_eq!(section.shown_pick(), Pick::known(super::super::setup::AgentId::Claude), "no agent seen yet");
+            assert_eq!(section.shown_agent(), AgentId::Claude, "no agent used yet");
         });
         assert!(cx.debug_bounds("mcp-prompt").is_some(), "the prompt shows");
         assert!(cx.debug_bounds("mcp-command").is_none());
@@ -761,15 +761,18 @@ mod tests {
     fn lists_the_agents_seen_and_hears_when_they_change(cx: &mut TestAppContext) {
         let _dir = setup(cx);
         let (section, cx) = opened(free_port(), cx);
-        section.read_with(cx, |section, _| assert!(section.agents.is_empty()));
+        section.read_with(cx, |section, _| assert!(section.agents.iter().all(|row| !row.used)));
         cx.update(|_, cx| {
             let core = Backend::global(cx).core();
             core.mcp_agents().record(&dbforge_core::events::NoEvents, "codex-mcp-client", Some("1.0"));
             EventHub::global(cx).update(cx, |_, cx| cx.emit(Event::McpAgentsChanged));
         });
-        wait_until(cx, "the agent listed", |cx| section.read_with(cx, |section, _| !section.agents.is_empty()));
+        wait_until(cx, "the agent listed", |cx| {
+            section.read_with(cx, |section, _| section.agents.iter().any(|row| row.used))
+        });
         section.read_with(cx, |section, _| {
-            assert_eq!(section.shown_pick(), Pick::known(super::super::setup::AgentId::Codex), "the first seen");
+            assert_eq!(section.agents.len(), 5, "the known agents, always");
+            assert_eq!(section.shown_agent(), AgentId::Codex, "the most recently active");
             let now = chrono::Local::now().timestamp_millis();
             assert_eq!(connected(&section.agents, now), 1);
         });
