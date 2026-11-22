@@ -1,19 +1,23 @@
 //! An agent wants to change data on a connection whose tag asks first, as
-//! the former web UI's `ApprovalDialog.tsx`: what it will run, where, and who asks.
+//! the former web UI's `ApprovalDialog.tsx`: what it will run, where, and who
+//! asks. Or it wants to create, update or delete a saved query: what the
+//! query is, or what changes (each field before and after, and the SQL).
 //! Decline has the focus, so Enter or Space pressed by mistake can't
 //! approve; Tab moves between the two buttons, and Enter or Space presses
 //! the one focused. Escape and the close button decline. Approve and run is
 //! the only way an agent's change runs from here.
 
 use dbforge_core::connections::model::Engine;
-use dbforge_core::mcp::ApprovalRequest;
+use dbforge_core::mcp::{
+    ApprovalRequest, ApprovalSubject, DraftScope, SavedQueryChange, SavedQueryDraft, SavedQueryField,
+};
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding,
     ParentElement, Render, StatefulInteractiveElement, Styled, Window, actions, div, px,
 };
 
 use super::Approvals;
-use crate::i18n::Translate;
+use crate::i18n::{Messages, Translate};
 use crate::sql::Syntax;
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::code_editor::LINE_HEIGHT;
@@ -40,7 +44,10 @@ pub fn key_bindings() -> Vec<KeyBinding> {
 
 pub struct ApprovalDialog {
     request: ApprovalRequest,
+    /// The statement; for a saved query, its SQL (the new SQL of an update).
     statement: Entity<CodeEditor>,
+    /// An update's SQL as it is now, when the update changes it.
+    statement_before: Option<Entity<CodeEditor>>,
     decline: FocusHandle,
     approve: FocusHandle,
 }
@@ -53,16 +60,23 @@ impl Focusable for ApprovalDialog {
 
 impl ApprovalDialog {
     /// `request` on a connection of `engine` (its statement highlighted in
-    /// that engine's language; PostgreSQL's when the connection is gone).
+    /// that engine's language; PostgreSQL's when the connection is gone). A
+    /// saved query's SQL is highlighted in the language it was written for.
     pub fn new(request: ApprovalRequest, engine: Option<Engine>, cx: &mut Context<Self>) -> Self {
-        let syntax = Syntax::console(engine.unwrap_or(Engine::Postgres));
-        let statement = cx.new(|cx| {
-            let mut editor = CodeEditor::new("", syntax, cx);
-            editor.show_text(&request.statement, cx);
-            editor.set_read_only(true, cx);
-            editor
-        });
-        Self { request, statement, decline: cx.focus_handle(), approve: cx.focus_handle() }
+        let (engine, text, before) = match &request.subject {
+            ApprovalSubject::Statement { statement, .. } => (engine.unwrap_or(Engine::Postgres), statement, None),
+            ApprovalSubject::SavedQuery(change) => match change.as_ref() {
+                SavedQueryChange::Create { query } | SavedQueryChange::Delete { query } => {
+                    (query.engine, &query.sql, None)
+                }
+                SavedQueryChange::Update { before, after } => {
+                    (after.engine, &after.sql, change.changes_sql().then_some(before))
+                }
+            },
+        };
+        let statement = read_only_editor(text, engine, cx);
+        let statement_before = before.map(|before| read_only_editor(&before.sql, before.engine, cx));
+        Self { request, statement, statement_before, decline: cx.focus_handle(), approve: cx.focus_handle() }
     }
 
     pub fn id(&self) -> &str {
@@ -104,14 +118,164 @@ impl ApprovalDialog {
     fn render_who(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let m = &cx.messages().mcp;
         let agent = self.request.agent.as_deref().unwrap_or(m.an_agent);
+        let (who, tag) = match &self.request.subject {
+            ApprovalSubject::Statement { connection_name, tag, .. } => {
+                ((m.approval_who)(agent, connection_name), tag.as_deref())
+            }
+            ApprovalSubject::SavedQuery(change) => {
+                let who = match change.as_ref() {
+                    SavedQueryChange::Create { .. } => m.saved_create_who,
+                    SavedQueryChange::Update { .. } => m.saved_update_who,
+                    SavedQueryChange::Delete { .. } => m.saved_delete_who,
+                };
+                (who(agent, change.name()), None)
+            }
+        };
         div()
             .flex()
             .items_center()
             .gap(px(8.))
             .text_size(px(13.))
             .child(icon("warning", theme.warn, 15.))
-            .child(div().min_w_0().child((m.approval_who)(agent, &self.request.connection_name)))
-            .children(self.request.tag.as_deref().map(|tag| pill(tag, theme.err).flex_none()))
+            .child(div().min_w_0().child(who))
+            .children(tag.map(|tag| pill(tag, theme.err).flex_none()))
+    }
+
+    /// Where a statement runs, or what a saved query is or what changes in it.
+    fn render_details(&self, theme: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let messages = cx.messages();
+        let small = || div().text_size(px(12.)).text_color(theme.text3);
+        match &self.request.subject {
+            ApprovalSubject::Statement { database, .. } => div()
+                .flex()
+                .flex_col()
+                .gap(px(10.))
+                .children(database.as_deref().map(|database| small().child((messages.mcp.in_database)(database))))
+                .child(sql_box(&self.statement, theme, cx)),
+            ApprovalSubject::SavedQuery(change) => {
+                let rows = detail_rows(change, messages).into_iter().map(|row| {
+                    let value = match row.before {
+                        Some(before) => format!("{before}  →  {}", row.value),
+                        None => row.value,
+                    };
+                    div()
+                        .debug_selector(move || row.selector.to_owned())
+                        .flex()
+                        .gap(px(8.))
+                        .text_size(px(12.))
+                        .child(div().w(px(110.)).flex_none().text_color(theme.text3).child(row.label))
+                        .child(div().min_w_0().flex_1().child(value))
+                });
+                let sql = match (change.as_ref(), &self.statement_before) {
+                    (SavedQueryChange::Update { .. }, Some(before)) => div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(small().child(messages.mcp.sql_before))
+                        .child(sql_box(before, theme, cx).debug_selector(|| "approval-sql-before".into()))
+                        .child(small().child(messages.mcp.sql_after))
+                        .child(sql_box(&self.statement, theme, cx).debug_selector(|| "approval-sql-after".into())),
+                    (SavedQueryChange::Update { .. }, None) => small().child(messages.mcp.sql_unchanged),
+                    _ => div().child(sql_box(&self.statement, theme, cx)),
+                };
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .child(div().flex().flex_col().gap(px(4.)).children(rows))
+                    .child(sql)
+            }
+        }
+    }
+}
+
+/// A read-only editor showing `text` in `engine`'s language.
+fn read_only_editor(text: &str, engine: Engine, cx: &mut Context<ApprovalDialog>) -> Entity<CodeEditor> {
+    cx.new(|cx| {
+        let mut editor = CodeEditor::new("", Syntax::console(engine), cx);
+        editor.show_text(text, cx);
+        editor.set_read_only(true, cx);
+        editor
+    })
+}
+
+/// `editor`'s box, growing with its text up to [`STATEMENT_MAX_HEIGHT`], then scrolling.
+fn sql_box(editor: &Entity<CodeEditor>, theme: &Theme, cx: &App) -> gpui::Div {
+    div()
+        .h(px(sql_height(editor.read(cx).text())))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(theme.line)
+        .overflow_hidden()
+        .flex()
+        .child(editor.clone())
+}
+
+fn sql_height(text: &str) -> f32 {
+    let lines = text.lines().count().max(1) as f32;
+    (lines * LINE_HEIGHT + 2. * crate::ui::code_editor::PADDING_TOP).min(STATEMENT_MAX_HEIGHT)
+}
+
+/// A line of a saved query's details: a field, and its value (before and after, for an update).
+#[derive(Debug, PartialEq)]
+struct DetailRow {
+    /// What tests find it by.
+    selector: &'static str,
+    label: &'static str,
+    before: Option<String>,
+    value: String,
+}
+
+/// What the dialog lists about `change`: the new or deleted query's scope,
+/// folder and description; the fields an update changes, before and after.
+fn detail_rows(change: &SavedQueryChange, m: &Messages) -> Vec<DetailRow> {
+    let row = |field, draft: &SavedQueryDraft, before: Option<&SavedQueryDraft>| DetailRow {
+        selector: selector(field),
+        label: label(field, m),
+        before: before.map(|before| field_value(field, before, m)),
+        value: field_value(field, draft, m),
+    };
+    match change {
+        SavedQueryChange::Create { query } | SavedQueryChange::Delete { query } => {
+            [SavedQueryField::Scope, SavedQueryField::Folder, SavedQueryField::Description]
+                .into_iter()
+                .filter(|field| *field != SavedQueryField::Description || query.description.is_some())
+                .map(|field| row(field, query, None))
+                .collect()
+        }
+        SavedQueryChange::Update { before, after } => {
+            change.changed_fields().into_iter().map(|field| row(field, after, Some(before))).collect()
+        }
+    }
+}
+
+fn selector(field: SavedQueryField) -> &'static str {
+    match field {
+        SavedQueryField::Name => "approval-field-name",
+        SavedQueryField::Folder => "approval-field-folder",
+        SavedQueryField::Scope => "approval-field-scope",
+        SavedQueryField::Description => "approval-field-description",
+    }
+}
+
+fn label(field: SavedQueryField, m: &Messages) -> &'static str {
+    match field {
+        SavedQueryField::Name => m.saved.name,
+        SavedQueryField::Folder => m.saved.folder,
+        SavedQueryField::Scope => m.saved.available_on,
+        SavedQueryField::Description => m.saved.description,
+    }
+}
+
+fn field_value(field: SavedQueryField, draft: &SavedQueryDraft, m: &Messages) -> String {
+    match field {
+        SavedQueryField::Name => draft.name.clone(),
+        SavedQueryField::Folder => draft.folder.clone().unwrap_or_else(|| m.saved.no_folder.to_owned()),
+        SavedQueryField::Description => draft.description.clone().unwrap_or_else(|| m.mcp.no_description.to_owned()),
+        SavedQueryField::Scope => match &draft.scope {
+            DraftScope::Connection { connection_name, .. } => connection_name.clone(),
+            DraftScope::Engine => (m.saved.any_engine_connection)(draft.engine.label()),
+        },
     }
 }
 
@@ -130,9 +294,11 @@ impl Render for ApprovalDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let m = &cx.messages().mcp;
-        let lines = self.request.statement.lines().count().max(1) as f32;
-        let statement_height =
-            (lines * LINE_HEIGHT + 2. * crate::ui::code_editor::PADDING_TOP).min(STATEMENT_MAX_HEIGHT);
+        let saved = matches!(self.request.subject, ApprovalSubject::SavedQuery(_));
+        let (title, note, approve) = match saved {
+            true => (m.saved_approval_title, m.saved_approval_note, m.approve_change),
+            false => (m.approval_title, m.approval_note, m.approve),
+        };
         let decline_focused = self.decline.is_focused(window);
         let approve_focused = self.approve.is_focused(window);
         glass(&theme)
@@ -153,14 +319,7 @@ impl Render for ApprovalDialog {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(px(16.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(m.approval_title),
-                    )
+                    .child(div().flex_1().min_w_0().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(title))
                     .child(
                         icon_button(&theme, "approval-close", "close", true, false)
                             .tooltip(Tooltip::text(m.close))
@@ -176,20 +335,8 @@ impl Render for ApprovalDialog {
                     .flex_col()
                     .gap(px(10.))
                     .child(self.render_who(&theme, cx))
-                    .children(self.request.database.as_deref().map(|database| {
-                        div().text_size(px(12.)).text_color(theme.text3).child((m.in_database)(database))
-                    }))
-                    .child(
-                        div()
-                            .h(px(statement_height))
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(theme.line)
-                            .overflow_hidden()
-                            .flex()
-                            .child(self.statement.clone()),
-                    )
-                    .child(div().text_size(px(12.)).text_color(theme.text3).child(m.approval_note)),
+                    .child(self.render_details(&theme, cx))
+                    .child(div().text_size(px(12.)).text_color(theme.text3).child(note)),
             )
             .child(
                 div()
@@ -209,7 +356,7 @@ impl Render for ApprovalDialog {
                         decline_focused,
                     ))
                     .child(focus_ring(
-                        primary_button(&theme, m.approve)
+                        primary_button(&theme, approve)
                             .id("approval-approve")
                             .track_focus(&self.approve)
                             .cursor_pointer()
@@ -237,11 +384,13 @@ mod tests {
         ApprovalRequest {
             id: id.into(),
             agent: None,
-            connection_id: "gone".into(),
-            connection_name: "Shop".into(),
-            tag: Some("PROD".into()),
-            database: Some("shop".into()),
-            statement: "DELETE FROM orders\nWHERE id = 1".into(),
+            subject: ApprovalSubject::Statement {
+                connection_id: "gone".into(),
+                connection_name: "Shop".into(),
+                tag: Some("PROD".into()),
+                database: Some("shop".into()),
+                statement: "DELETE FROM orders\nWHERE id = 1".into(),
+            },
         }
     }
 
@@ -311,5 +460,100 @@ mod tests {
         assert!(dialog.update_in(cx, |dialog, window, _| dialog.decline.is_focused(window)), "back to Decline");
         cx.simulate_keystrokes("shift-tab enter");
         assert!(answer(asking, cx));
+    }
+
+    fn draft(name: &str, sql: &str) -> SavedQueryDraft {
+        SavedQueryDraft {
+            name: name.into(),
+            sql: sql.into(),
+            description: Some("By status".into()),
+            folder: Some("Ops".into()),
+            scope: DraftScope::Connection { connection_id: "shop".into(), connection_name: "Shop".into() },
+            engine: Engine::Postgres,
+        }
+    }
+
+    fn update() -> SavedQueryChange {
+        let before = draft("Orders", "select 1");
+        let after = SavedQueryDraft {
+            name: "Paid orders".into(),
+            sql: "select *\nfrom orders\nwhere status = :status".into(),
+            folder: None,
+            scope: DraftScope::Engine,
+            ..before.clone()
+        };
+        SavedQueryChange::Update { before, after }
+    }
+
+    #[test]
+    fn an_update_lists_each_changed_field_before_and_after() {
+        let m = crate::i18n::Language::En.messages();
+        let rows = detail_rows(&update(), m);
+        let shown: Vec<(&str, Option<&str>, &str)> =
+            rows.iter().map(|row| (row.label, row.before.as_deref(), row.value.as_str())).collect();
+        assert_eq!(
+            shown,
+            [
+                ("Name", Some("Orders"), "Paid orders"),
+                ("Folder", Some("Ops"), "No folder"),
+                ("Available on", Some("Shop"), "Any PostgreSQL connection"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_or_deleted_query_lists_where_it_is_and_what_it_says() {
+        let m = crate::i18n::Language::En.messages();
+        let rows = detail_rows(&SavedQueryChange::Create { query: draft("Orders", "select 1") }, m);
+        let shown: Vec<(&str, Option<&str>, &str)> =
+            rows.iter().map(|row| (row.label, row.before.as_deref(), row.value.as_str())).collect();
+        assert_eq!(
+            shown,
+            [("Available on", None, "Shop"), ("Folder", None, "Ops"), ("Description", None, "By status")]
+        );
+        let plain = SavedQueryDraft { description: None, folder: None, ..draft("Orders", "select 1") };
+        let rows = detail_rows(&SavedQueryChange::Delete { query: plain }, m);
+        let labels: Vec<&str> = rows.iter().map(|row| row.label).collect();
+        assert_eq!(labels, ["Available on", "Folder"], "no description, no line for it");
+    }
+
+    #[gpui::test]
+    fn shows_a_saved_query_update_with_its_sql_before_and_after(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let request = ApprovalRequest {
+            id: "a".into(),
+            agent: Some("codex".into()),
+            subject: ApprovalSubject::SavedQuery(Box::new(update())),
+        };
+        let (dialog, cx) = cx.add_window_view(|_, cx| ApprovalDialog::new(request, None, cx));
+        draw(cx);
+
+        for shown in ["approval-field-name", "approval-field-folder", "approval-field-scope"] {
+            assert!(cx.debug_bounds(shown).is_some(), "{shown} shows");
+        }
+        assert!(cx.debug_bounds("approval-field-description").is_none(), "an unchanged field isn't listed");
+        assert!(cx.debug_bounds("approval-sql-before").is_some() && cx.debug_bounds("approval-sql-after").is_some());
+        dialog.update(cx, |dialog, cx| {
+            assert_eq!(dialog.statement.read(cx).text(), "select *\nfrom orders\nwhere status = :status");
+            let before = dialog.statement_before.as_ref().expect("the SQL before");
+            assert_eq!(before.read(cx).text(), "select 1");
+        });
+    }
+
+    #[gpui::test]
+    fn an_update_that_keeps_the_sql_shows_it_unchanged(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let before = draft("Orders", "select 1");
+        let after = SavedQueryDraft { name: "Renamed".into(), ..before.clone() };
+        let request = ApprovalRequest {
+            id: "a".into(),
+            agent: None,
+            subject: ApprovalSubject::SavedQuery(Box::new(SavedQueryChange::Update { before, after })),
+        };
+        let (dialog, cx) = cx.add_window_view(|_, cx| ApprovalDialog::new(request, None, cx));
+        draw(cx);
+        assert!(cx.debug_bounds("approval-field-name").is_some());
+        assert!(cx.debug_bounds("approval-sql-before").is_none() && cx.debug_bounds("approval-sql-after").is_none());
+        dialog.update(cx, |dialog, _| assert!(dialog.statement_before.is_none()));
     }
 }

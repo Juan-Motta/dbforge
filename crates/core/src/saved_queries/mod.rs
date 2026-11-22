@@ -38,7 +38,32 @@ pub struct SavedQuery {
     /// The values its parameters were last run with, by parameter name.
     #[serde(default)]
     pub last_values: BTreeMap<String, ParamValue>,
+    /// The last [`RECENT_VALUES`] distinct values each parameter ran with,
+    /// newest first, by parameter name.
+    #[serde(default)]
+    pub recent_values: BTreeMap<String, Vec<ParamValue>>,
 }
+
+impl SavedQuery {
+    /// What the user sees and edits of it: everything but its id, times and values.
+    pub fn content(&self) -> SavedQueryInput {
+        let SavedQuery { name, sql, description, folder, scope, engine, .. } = self.clone();
+        SavedQueryInput { name, sql, description, folder, scope, engine }
+    }
+}
+
+/// Why a change made on condition that a saved query is still as it was
+/// seen was not made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stale {
+    /// It was changed since.
+    Changed,
+    /// It was deleted since.
+    Deleted,
+}
+
+/// How many distinct values each parameter of a saved query remembers.
+pub const RECENT_VALUES: usize = 5;
 
 /// Which connections a saved query is offered for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +169,69 @@ impl SavedQueries {
         })
     }
 
+    /// Changes saved query `id` to `input` only while its content is still
+    /// `expected`, checked and written as one step so no other change can
+    /// come between; otherwise changes nothing and says why.
+    pub fn save_if_unchanged(
+        &self,
+        id: &str,
+        expected: &SavedQueryInput,
+        input: SavedQueryInput,
+    ) -> Result<std::result::Result<SavedQuery, Stale>> {
+        let input = checked(input)?;
+        let now = now_ms();
+        self.if_unchanged(id, expected, |queries, index| {
+            let existing = &mut queries[index];
+            *existing = SavedQuery {
+                name: input.name,
+                sql: input.sql,
+                description: input.description,
+                folder: input.folder,
+                scope: input.scope,
+                engine: input.engine,
+                updated_at: now,
+                ..existing.clone()
+            };
+            existing.clone()
+        })
+    }
+
+    /// Deletes saved query `id` only while its content is still `expected`,
+    /// as one step; otherwise deletes nothing and says why.
+    pub fn remove_if_unchanged(&self, id: &str, expected: &SavedQueryInput) -> Result<std::result::Result<(), Stale>> {
+        self.if_unchanged(id, expected, |queries, index| {
+            queries.remove(index);
+        })
+    }
+
+    /// Applies `change` to saved query `id` (by its index) inside one update
+    /// when its content is `expected`; nothing is written when it isn't.
+    fn if_unchanged<R>(
+        &self,
+        id: &str,
+        expected: &SavedQueryInput,
+        change: impl FnOnce(&mut Vec<SavedQuery>, usize) -> R,
+    ) -> Result<std::result::Result<R, Stale>> {
+        let mut stale = None;
+        let outcome = self.queries.update(|queries| {
+            let found = queries.iter().position(|query| query.id == id);
+            stale = match found {
+                None => Some(Stale::Deleted),
+                Some(index) if queries[index].content() != *expected => Some(Stale::Changed),
+                Some(_) => None,
+            };
+            match (found, stale) {
+                (Some(index), None) => Ok(change(queries, index)),
+                // Failing the update leaves the file as it was.
+                _ => Err(AppError::NotFound(id.into())),
+            }
+        });
+        match stale {
+            Some(stale) => Ok(Err(stale)),
+            None => outcome.map(Ok),
+        }
+    }
+
     /// A copy of saved query `id` named "<name> copy", with a new id and no run yet.
     pub fn duplicate(&self, id: &str) -> Result<SavedQuery> {
         let now = now_ms();
@@ -180,11 +268,22 @@ impl SavedQueries {
             let query = find_mut(queries, id)?;
             query.last_run_at = Some(now);
             if let Some(values) = values {
+                for (name, value) in &values {
+                    remember(query.recent_values.entry(name.clone()).or_default(), value.clone());
+                }
                 query.last_values = values;
             }
             Ok(query.clone())
         })
     }
+}
+
+/// Puts `value` first in `recent`, dropping an equal one (same kind and
+/// value) and keeping at most [`RECENT_VALUES`].
+fn remember(recent: &mut Vec<ParamValue>, value: ParamValue) {
+    recent.retain(|kept| *kept != value);
+    recent.insert(0, value);
+    recent.truncate(RECENT_VALUES);
 }
 
 fn find_mut<'a>(queries: &'a mut [SavedQuery], id: &str) -> Result<&'a mut SavedQuery> {
@@ -205,12 +304,13 @@ fn created(input: SavedQueryInput, id: String, now: i64) -> SavedQuery {
         updated_at: now,
         last_run_at: None,
         last_values: BTreeMap::new(),
+        recent_values: BTreeMap::new(),
     }
 }
 
 /// `input` with its name, description and folder trimmed, blank ones left
 /// out; a blank name is refused.
-fn checked(input: SavedQueryInput) -> Result<SavedQueryInput> {
+pub(crate) fn checked(input: SavedQueryInput) -> Result<SavedQueryInput> {
     let name = input.name.trim();
     if name.is_empty() {
         return Err(AppError::Invalid("Enter a name for the saved query.".into()));
@@ -234,4 +334,86 @@ fn new_id() -> String {
 
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store() -> (tempfile::TempDir, PathBuf, SavedQueries) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("saved_queries.json");
+        let store = SavedQueries::load(file.clone()).unwrap();
+        (dir, file, store)
+    }
+
+    fn input(name: &str, sql: &str) -> SavedQueryInput {
+        SavedQueryInput {
+            name: name.into(),
+            sql: sql.into(),
+            description: None,
+            folder: None,
+            scope: SavedScope::Engine,
+            engine: Engine::Postgres,
+        }
+    }
+
+    #[test]
+    fn saves_when_the_query_is_still_as_seen() {
+        let (_dir, file, store) = store();
+        let query = store.save(None, input("Orders", "select 1")).unwrap();
+        store.mark_run(&query.id, None).unwrap();
+        let seen = store.get(&query.id).unwrap();
+
+        let saved = store.save_if_unchanged(&query.id, &seen.content(), input(" Paid ", "select 2")).unwrap().unwrap();
+        assert_eq!((saved.name.as_str(), saved.sql.as_str()), ("Paid", "select 2"));
+        assert_eq!((saved.created_at, saved.last_run_at), (seen.created_at, seen.last_run_at));
+        assert_eq!(SavedQueries::load(file).unwrap().get(&query.id).unwrap(), saved, "it is written");
+    }
+
+    #[test]
+    fn a_query_changed_since_it_was_seen_is_left_as_it_is() {
+        let (_dir, file, store) = store();
+        let seen = store.save(None, input("Orders", "select 1")).unwrap();
+        let edited = store.save(Some(&seen.id), input("Renamed", "select 1")).unwrap();
+
+        let refused = store.save_if_unchanged(&seen.id, &seen.content(), input("Orders", "select 2")).unwrap();
+        assert_eq!(refused, Err(Stale::Changed));
+        assert_eq!(store.get(&seen.id).unwrap(), edited);
+        assert_eq!(store.remove_if_unchanged(&seen.id, &seen.content()).unwrap(), Err(Stale::Changed));
+        assert_eq!(SavedQueries::load(file).unwrap().list(), [edited], "nothing written");
+    }
+
+    #[test]
+    fn a_query_deleted_since_it_was_seen_stays_deleted() {
+        let (_dir, _file, store) = store();
+        let seen = store.save(None, input("Orders", "select 1")).unwrap();
+        store.remove(&seen.id).unwrap();
+
+        let refused = store.save_if_unchanged(&seen.id, &seen.content(), input("Orders", "select 2")).unwrap();
+        assert_eq!(refused, Err(Stale::Deleted));
+        assert_eq!(store.remove_if_unchanged(&seen.id, &seen.content()).unwrap(), Err(Stale::Deleted));
+        assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn removes_when_the_query_is_still_as_seen() {
+        let (_dir, _file, store) = store();
+        let seen = store.save(None, input("Orders", "select 1")).unwrap();
+        let kept = store.save(None, input("Other", "select 1")).unwrap();
+
+        store.remove_if_unchanged(&seen.id, &seen.content()).unwrap().unwrap();
+        assert_eq!(store.list(), [kept]);
+    }
+
+    #[test]
+    fn an_invalid_change_is_refused_before_anything_is_checked() {
+        let (_dir, _file, store) = store();
+        let seen = store.save(None, input("Orders", "select 1")).unwrap();
+        assert!(matches!(
+            store.save_if_unchanged(&seen.id, &seen.content(), input(" ", "x")),
+            Err(AppError::Invalid(_))
+        ));
+        assert_eq!(store.get(&seen.id).unwrap(), seen);
+    }
 }

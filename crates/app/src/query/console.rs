@@ -43,7 +43,7 @@ use crate::connections::engine::is_relational;
 use crate::i18n::Translate;
 use crate::saved::rules::{Place, is_edited, run_connection};
 use crate::saved::store::{self, SavedStore};
-use crate::saved::{Draft, LibraryEvent, LibraryPanel, SaveForm, SaveFormEvent};
+use crate::saved::{Draft, LibraryEvent, LibraryPanel, RunAction, SaveForm, SaveFormEvent};
 use crate::sql::Syntax;
 use crate::sql::completion::CompletionNames;
 use crate::sql::statements::changes_structure;
@@ -90,8 +90,8 @@ pub enum ConsoleEvent {
     /// Open this saved query in a new tab.
     OpenSaved(SavedQuery),
     /// Ask for the values of `sql`'s parameters (the console's text, of its
-    /// saved query), then run it here.
-    AskParameters { query: SavedQuery, sql: String },
+    /// saved query), then run or explain it here.
+    AskParameters { query: SavedQuery, sql: String, action: RunAction },
     /// Show this dialog over the window, or close the one shown.
     Dialog(Option<AnyView>),
 }
@@ -674,17 +674,32 @@ impl QueryConsole {
     /// `:parameters` are asked for first.
     pub fn run_requested(&mut self, cx: &mut Context<Self>) {
         let sql = self.text_to_run(cx);
-        if let Some(query) = self.saved.clone() {
-            if sql.trim().is_empty() || self.busy() {
-                return;
-            }
-            if !parameters(&sql, self.engine).is_empty() {
-                cx.emit(ConsoleEvent::AskParameters { query, sql });
-                return;
-            }
-            store::mark_run(query.id, None, cx).detach();
+        if self.asks_parameters(&sql, RunAction::Run, cx) {
+            return;
+        }
+        if let Some(query) = &self.saved {
+            store::mark_run(query.id.clone(), None, cx).detach();
         }
         self.run(sql, cx);
+    }
+
+    /// Explain: the selection, or the whole script, its `:parameters` asked for first like Run's.
+    pub fn explain_requested(&mut self, cx: &mut Context<Self>) {
+        let sql = self.text_to_run(cx);
+        if !self.asks_parameters(&sql, RunAction::Explain, cx) {
+            self.explain(sql, cx);
+        }
+    }
+
+    /// Whether `sql` waits for its saved query's parameters before `action`:
+    /// then the values are asked for and the workspace finishes it.
+    fn asks_parameters(&self, sql: &str, action: RunAction, cx: &mut Context<Self>) -> bool {
+        let Some(query) = self.saved.clone() else { return false };
+        if sql.trim().is_empty() || self.busy() || parameters(sql, self.engine).is_empty() {
+            return false;
+        }
+        cx.emit(ConsoleEvent::AskParameters { query, sql: sql.to_owned(), action });
+        true
     }
 
     /// Puts a past run's SQL in the editor, without running it.
@@ -887,12 +902,7 @@ impl QueryConsole {
             &theme,
             vec![any(enabled(segment(&theme, Some("chart"), label, false).min_w(px(112.)).justify_center(), on)
                 .id("explain")
-                .when(on, |explain| {
-                    explain.on_click(cx.listener(|this, _, _, cx| {
-                        let sql = this.text_to_run(cx);
-                        this.explain(sql, cx);
-                    }))
-                }))],
+                .when(on, |explain| explain.on_click(cx.listener(|this, _, _, cx| this.explain_requested(cx)))))],
         )
         .into_any_element()
     }

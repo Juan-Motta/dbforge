@@ -12,6 +12,21 @@ pub struct McpMessages {
     pub in_database: fn(&str) -> String,
     pub approval_note: &'static str,
     pub approve: &'static str,
+    // The approval dialog, for a change to the saved queries
+    pub saved_approval_title: &'static str,
+    /// The agent, then the saved query's name.
+    pub saved_create_who: fn(&str, &str) -> String,
+    pub saved_update_who: fn(&str, &str) -> String,
+    pub saved_delete_who: fn(&str, &str) -> String,
+    /// An update's SQL as it is now, and as it would be.
+    pub sql_before: &'static str,
+    pub sql_after: &'static str,
+    pub sql_unchanged: &'static str,
+    /// A description left empty.
+    pub no_description: &'static str,
+    pub saved_approval_note: &'static str,
+    /// Approves a change to the saved queries, which runs nothing.
+    pub approve_change: &'static str,
     pub decline: &'static str,
     /// The dialog's close button, which declines.
     pub close: &'static str,

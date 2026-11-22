@@ -15,7 +15,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::approvals::ApprovalRequest;
+use super::approvals::{ApprovalRequest, ApprovalSubject};
+use super::saved::{
+    DeleteSavedRequest, ListSavedRequest, RunSavedRequest, SaveQueryRequest, SavedQueryList, SavedQueryView,
+};
 use crate::Core;
 use crate::connections::model::{AgentAccess, Connection};
 use crate::drivers::{self, ObjectKind, QueryOutcome, TableRef};
@@ -24,7 +27,7 @@ use crate::statement_log::{self, Origin};
 /// The MCP server's handler: one per agent session, all sharing the app.
 #[derive(Clone)]
 pub struct Tools {
-    core: Arc<Core>,
+    pub(super) core: Arc<Core>,
 }
 
 impl Tools {
@@ -34,7 +37,7 @@ impl Tools {
 
     /// The connection `id` with its password, when agents may at least read it.
     /// One they may not use reads as unknown, so its existence isn't given away.
-    fn open(&self, id: &str) -> Result<(Connection, Option<String>), String> {
+    pub(super) fn open(&self, id: &str) -> Result<(Connection, Option<String>), String> {
         let store = self.core.connections();
         let connection =
             store.get(id).ok().filter(|connection| connection.agent_access != AgentAccess::None).ok_or_else(|| {
@@ -62,6 +65,67 @@ impl Tools {
         statement_log::scoped(self.core.statement_log(), &connection.id, Origin::Agent, work)
             .await
             .map_err(|error| error.to_string())
+    }
+
+    /// Runs `request`'s statement on a session the server keeps from writing.
+    pub(super) async fn read(&self, request: RunRequest) -> Result<RunResult, String> {
+        let (connection, password) = self.open(&request.connection_id)?;
+        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        // Drivers' futures are boxed here and below: kept on the stack, they
+        // overflowed a 2 MB thread's stack (a refused SQLite write, in a debug build).
+        let read = Box::pin(drivers::run_read_only(
+            &connection,
+            password.as_deref(),
+            request.database.as_deref(),
+            request.container.as_deref(),
+            &request.statement,
+            limit,
+        ));
+        // A read leaves nothing half done, so one taking too long is simply dropped.
+        let read = async {
+            tokio::time::timeout(drivers::READ_ONLY_TIME_LIMIT, read)
+                .await
+                .unwrap_or_else(|_| Err(drivers::read_only_timed_out()))
+        };
+        Ok(self.as_agent(&connection, read).await?.into())
+    }
+
+    /// Runs `request`'s statement, which may change data, for `agent`: only
+    /// on a connection agents may write to, and once the user approved it
+    /// when its tag asks before changes.
+    pub(super) async fn change(&self, agent: Option<String>, request: RunRequest) -> Result<RunResult, String> {
+        let (connection, password) = self.open(&request.connection_id)?;
+        if connection.agent_access != AgentAccess::Write {
+            return Err(format!(
+                "{} is read-only for agents. Use query, or ask the user to give agents Read and write access to it in DBForge.",
+                connection.name
+            ));
+        }
+        let tag = self.core.tags().list().into_iter().find(|tag| Some(&tag.id) == connection.environment.as_ref());
+        if tag.as_ref().is_some_and(|tag| tag.confirm) {
+            let request = ApprovalRequest {
+                id: uuid::Uuid::new_v4().to_string(),
+                agent,
+                subject: ApprovalSubject::Statement {
+                    connection_id: connection.id.clone(),
+                    connection_name: connection.name.clone(),
+                    tag: tag.map(|tag| tag.name),
+                    database: request.database.clone(),
+                    statement: request.statement.clone(),
+                },
+            };
+            if !self.core.mcp_approvals().ask(self.core.events().as_ref(), request).await {
+                return Err("The user declined this change in DBForge, or didn't answer in time. Nothing ran.".into());
+            }
+        }
+        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        let run = async {
+            let (database, container) = (request.database.as_deref(), request.container.as_deref());
+            let mut session =
+                Box::pin(drivers::open_session(&connection, password.as_deref(), database, container)).await?;
+            Box::pin(session.run(&request.statement, limit)).await
+        };
+        Ok(self.as_agent(&connection, run).await?.into())
     }
 }
 
@@ -308,23 +372,7 @@ impl Tools {
         context: RequestContext<RoleServer>,
     ) -> Result<Json<RunResult>, String> {
         self.note_agent(&context);
-        let (connection, password) = self.open(&request.connection_id)?;
-        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-        let read = drivers::run_read_only(
-            &connection,
-            password.as_deref(),
-            request.database.as_deref(),
-            request.container.as_deref(),
-            &request.statement,
-            limit,
-        );
-        // A read leaves nothing half done, so one taking too long is simply dropped.
-        let read = async {
-            tokio::time::timeout(drivers::READ_ONLY_TIME_LIMIT, read)
-                .await
-                .unwrap_or_else(|_| Err(drivers::read_only_timed_out()))
-        };
-        Ok(Json(self.as_agent(&connection, read).await?.into()))
+        Ok(Json(self.read(request).await?))
     }
 
     #[tool(
@@ -336,40 +384,60 @@ impl Tools {
         context: RequestContext<RoleServer>,
     ) -> Result<Json<RunResult>, String> {
         let agent = self.note_agent(&context);
-        let (connection, password) = self.open(&request.connection_id)?;
-        if connection.agent_access != AgentAccess::Write {
-            return Err(format!(
-                "{} is read-only for agents. Use query, or ask the user to give agents Read and write access to it in DBForge.",
-                connection.name
-            ));
-        }
-        let tag = self.core.tags().list().into_iter().find(|tag| Some(&tag.id) == connection.environment.as_ref());
-        if tag.as_ref().is_some_and(|tag| tag.confirm) {
-            let request = ApprovalRequest {
-                id: uuid::Uuid::new_v4().to_string(),
-                agent,
-                connection_id: connection.id.clone(),
-                connection_name: connection.name.clone(),
-                tag: tag.map(|tag| tag.name),
-                database: request.database.clone(),
-                statement: request.statement.clone(),
-            };
-            if !self.core.mcp_approvals().ask(self.core.events().as_ref(), request).await {
-                return Err("The user declined this change in DBForge, or didn't answer in time. Nothing ran.".into());
-            }
-        }
-        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-        let run = async {
-            let (database, container) = (request.database.as_deref(), request.container.as_deref());
-            let mut session = drivers::open_session(&connection, password.as_deref(), database, container).await?;
-            session.run(&request.statement, limit).await
-        };
-        Ok(Json(self.as_agent(&connection, run).await?.into()))
+        Ok(Json(self.change(agent, request).await?))
+    }
+
+    #[tool(
+        description = "Lists the queries the user saved in DBForge that you may run: each with its SQL, its :name parameters, and the connections it runs on (one connection, or any connection of an engine). Give connectionId to list only the ones for that connection."
+    )]
+    async fn list_saved_queries(
+        &self,
+        Parameters(request): Parameters<ListSavedRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<SavedQueryList>, String> {
+        self.note_agent(&context);
+        Ok(Json(self.list_saved(request)?))
+    }
+
+    #[tool(
+        description = "Runs a saved query by id with a value for each of its :name parameters, written into the SQL as literals of the connection's language. It only reads, as query does, unless you set allowChanges, which runs it as execute does: on a connection you may write to, approved by the user when it asks before changes."
+    )]
+    async fn run_saved_query(
+        &self,
+        Parameters(request): Parameters<RunSavedRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<RunResult>, String> {
+        let agent = self.note_agent(&context);
+        Ok(Json(self.run_saved(agent, request).await?))
+    }
+
+    #[tool(
+        description = "Saves a query in DBForge's library so the user can run it again, with :name parameters for the values that change; with id, changes that saved query instead. The user approves every change in DBForge first; a declined one changes nothing."
+    )]
+    async fn save_query(
+        &self,
+        Parameters(request): Parameters<SaveQueryRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<SavedQueryView>, String> {
+        let agent = self.note_agent(&context);
+        Ok(Json(self.save_saved(agent, request).await?))
+    }
+
+    #[tool(
+        description = "Deletes a saved query by id. The user approves it in DBForge first; a declined one deletes nothing."
+    )]
+    async fn delete_saved_query(
+        &self,
+        Parameters(request): Parameters<DeleteSavedRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<String, String> {
+        let agent = self.note_agent(&context);
+        self.delete_saved(agent, request).await
     }
 }
 
 /// What the agent is told about the server, the same from the app and from the stdio bridge.
-const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console.";
+const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. The user's saved queries are there too: list_saved_queries and run_saved_query run them with values for their :name parameters, and save_query and delete_saved_query change them once the user approves.";
 
 /// How DBForge's MCP server introduces itself, wherever the agent reaches it.
 pub(crate) fn server_info() -> ServerConfig {

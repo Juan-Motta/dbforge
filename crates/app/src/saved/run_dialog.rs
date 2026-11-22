@@ -3,26 +3,28 @@
 //! starting from the values it last ran with; the SQL that will run, the
 //! values written into it as literals of the connection's dialect and
 //! highlighted; why a value can't be used, which keeps Run off; and
-//! "Remember values". Enter or ⌘↵ runs; Escape closes.
+//! "Remember values". Each value field lists the last values its parameter
+//! ran with, newest first, to pick one again. Enter or ⌘↵ runs; Escape closes.
 
 use std::collections::BTreeMap;
 
 use dbforge_core::saved_queries::params::{ParamError, Substituted, parameters, substitute};
 use dbforge_core::saved_queries::{ParamKind, ParamValue, SavedQuery};
 use gpui::{
-    App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, HighlightStyle,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, StatefulInteractiveElement, Styled, StyledText,
-    Subscription, Window, actions, div, prelude::FluentBuilder, px,
+    App, AppContext, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    HighlightStyle, InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
+    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, actions, div, prelude::FluentBuilder, px,
 };
 
 use super::rules::{ago, default_kind, param_error, param_of};
 use crate::i18n::{SavedMessages, Translate};
 use crate::query::shortcuts;
 use crate::theme::{ActiveTheme, MONO};
-use crate::ui::field::{help, text_box};
+use crate::ui::field::{Tooltip, help, text_box};
 use crate::ui::modal::{modal, modal_body, modal_footer, note};
 use crate::ui::{
-    Checkbox, Ellipsis, Select, SelectEvent, SelectOption, TextInput, TextInputEvent, button, enabled, primary_button,
+    Checkbox, Ellipsis, MenuItem, PopoverMenu, Select, SelectEvent, SelectOption, TextInput, TextInputEvent, button,
+    enabled, icon_button, popover, primary_button,
 };
 
 actions!(run_saved_query, [Confirm, Dismiss]);
@@ -39,7 +41,15 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-/// A saved query to run, and where.
+/// What the values are asked for: to run the query, or to explain it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunAction {
+    #[default]
+    Run,
+    Explain,
+}
+
+/// A saved query to run (or explain), and where.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunRequest {
     pub query: SavedQuery,
@@ -49,6 +59,8 @@ pub struct RunRequest {
     pub connection_name: String,
     /// The tab of the console that asked, when one did.
     pub console: Option<String>,
+    /// Run it, or explain it (Explain in its console).
+    pub action: RunAction,
 }
 
 /// What the dialog tells its owner, besides closing ([`DismissEvent`]).
@@ -84,6 +96,18 @@ fn placeholder(kind: ParamKind, m: &SavedMessages) -> &'static str {
     }
 }
 
+/// How a remembered value is listed: NULL, an empty value, or the value.
+fn shown_value<'a>(value: &'a ParamValue, m: &SavedMessages) -> &'a str {
+    match value.kind {
+        ParamKind::Null => "NULL",
+        _ if value.value.is_empty() => m.empty_value,
+        _ => value.value.as_str(),
+    }
+}
+
+/// The size of the recent-values button, and of the room kept for it.
+const RECENT_BUTTON: f32 = 22.;
+
 /// One parameter's row.
 struct Row {
     name: String,
@@ -91,12 +115,16 @@ struct Row {
     value: Entity<TextInput>,
     /// "Last used …", when it ran with a value for it before.
     last_used: Option<String>,
+    /// The last values it ran with, newest first.
+    recent: Vec<ParamValue>,
 }
 
 pub struct RunDialog {
     request: RunRequest,
     rows: Vec<Row>,
     remember: bool,
+    /// A parameter's recent values, listed.
+    recent_menu: Option<(Entity<PopoverMenu>, Point<Pixels>, Subscription)>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -138,10 +166,18 @@ impl RunDialog {
                     let shown = if value.kind == ParamKind::Null { "NULL" } else { value.value.as_str() };
                     (m.last_used)(shown, &ago(then, now, m))
                 });
-                Row { name, kind: select, value, last_used }
+                let recent = request.query.recent_values.get(&name).cloned().unwrap_or_default();
+                Row { name, kind: select, value, last_used, recent }
             })
             .collect();
-        Self { request, rows, remember: true, focus: cx.focus_handle(), _subscriptions: subscriptions }
+        Self {
+            request,
+            rows,
+            remember: true,
+            recent_menu: None,
+            focus: cx.focus_handle(),
+            _subscriptions: subscriptions,
+        }
     }
 
     /// The first value takes the keyboard.
@@ -163,6 +199,86 @@ impl RunDialog {
         select.update(cx, |select, cx| select.set_value(Some(kind), cx));
         input.update(cx, |input, cx| input.set_text(value, cx));
         self.kind_changed(&select, kind, window, cx);
+    }
+
+    /// The last values parameter `name` ran with, newest first.
+    pub fn recent_values(&self, name: &str) -> &[ParamValue] {
+        self.rows.iter().find(|row| row.name == name).map_or(&[], |row| row.recent.as_slice())
+    }
+
+    /// The recent-values menu, while open.
+    pub fn recent_menu(&self) -> Option<&Entity<PopoverMenu>> {
+        self.recent_menu.as_ref().map(|(menu, _, _)| menu)
+    }
+
+    /// Lists parameter `name`'s recent values at `position`, each with its
+    /// type when it isn't the row's; picking one fills the row with it.
+    pub fn open_recent(&mut self, name: &str, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(row) = self.rows.iter().find(|row| row.name == name) else { return };
+        if row.recent.is_empty() {
+            return;
+        }
+        let m = &cx.messages().saved;
+        let current = row.kind.read(cx).value().copied().unwrap_or(ParamKind::Text);
+        let typed = row.value.read(cx).text().to_owned();
+        let this = cx.entity().downgrade();
+        let items = row
+            .recent
+            .iter()
+            .map(|value| {
+                let (this, name, picked) = (this.clone(), name.to_owned(), value.clone());
+                let same = value.kind == current && (value.kind == ParamKind::Null || value.value == typed);
+                MenuItem::new(shown_value(value, m).to_owned(), move |window, cx| {
+                    let _ = this.update(cx, |this, cx| this.pick_recent(&name, &picked, window, cx));
+                })
+                .checked(same)
+                .detail((value.kind != current).then_some(kind_label(value.kind, m)))
+            })
+            .collect();
+        let menu = cx.new(|cx| PopoverMenu::new(items, window, cx));
+        let closing = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
+            this.recent_menu = None;
+            cx.notify();
+        });
+        self.recent_menu = Some((menu, position, closing));
+        cx.notify();
+    }
+
+    /// Fills parameter `name` with a recent `value` and gives its field the keyboard back.
+    fn pick_recent(&mut self, name: &str, value: &ParamValue, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_value(name, value.kind, &value.value, window, cx);
+        if let Some(row) = self.rows.iter().find(|row| row.name == name) {
+            if row.value.read(cx).is_disabled() {
+                window.focus(&self.focus);
+            } else {
+                row.value.read(cx).focus(window);
+            }
+        }
+    }
+
+    /// The button at a value field's right edge listing its recent values;
+    /// with none, its room is kept so the field doesn't change width.
+    fn recent_button(&self, index: usize, row: &Row, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let slot = div().size(px(RECENT_BUTTON)).flex_none();
+        if row.recent.is_empty() {
+            return slot.into_any_element();
+        }
+        let theme = cx.theme();
+        let m = &cx.messages().saved;
+        let name = row.name.clone();
+        slot.child(
+            icon_button(theme, ("run-saved-recent", index), "down", true, self.recent_menu.is_some())
+                .size(px(RECENT_BUTTON))
+                .tooltip(Tooltip::text(m.recent_values))
+                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                    cx.stop_propagation();
+                    if this.recent_menu.is_none() {
+                        let at = event.position() + gpui::point(px(0.), px(12.));
+                        this.open_recent(&name, at, window, cx);
+                    }
+                })),
+        )
+        .into_any_element()
     }
 
     pub fn set_remember(&mut self, remember: bool, cx: &mut Context<Self>) {
@@ -284,6 +400,7 @@ impl Render for RunDialog {
         let outcome = self.outcome(cx);
         let invalid = outcome.as_ref().err().and_then(param_of).map(str::to_owned);
         let ready = outcome.is_ok();
+        let explain = self.request.action == RunAction::Explain;
         let query = &self.request.query;
         let mut subtitle: Vec<String> = query.folder.iter().cloned().collect();
         subtitle.push(self.request.connection_name.clone());
@@ -300,7 +417,8 @@ impl Render for RunDialog {
         let rows: Vec<gpui::AnyElement> = self
             .rows
             .iter()
-            .map(|row| {
+            .enumerate()
+            .map(|(index, row)| {
                 let bad = invalid.as_deref() == Some(row.name.as_str());
                 div()
                     .flex()
@@ -325,7 +443,11 @@ impl Render for RunDialog {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(text_box(&row.value, bad, true, window, cx))
+                            .child(
+                                text_box(&row.value, bad, true, window, cx)
+                                    .pr(px(5.))
+                                    .child(self.recent_button(index, row, cx)),
+                            )
                             .child(help(&theme, row.last_used.clone().unwrap_or_default(), None).ellipsis()),
                     )
                     .into_any_element()
@@ -369,11 +491,14 @@ impl Render for RunDialog {
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
-                        enabled(primary_button(&theme, m.run), ready)
+                        enabled(primary_button(&theme, if explain { m.explain } else { m.run }), ready)
                             .id("run-saved-run")
-                            .child(div().font_weight(FontWeight::MEDIUM).opacity(0.8).child(shortcuts::RUN))
+                            .when(!explain, |run| {
+                                run.child(div().font_weight(FontWeight::MEDIUM).opacity(0.8).child(shortcuts::RUN))
+                            })
                             .when(ready, |run| run.on_click(cx.listener(|this, _, _, cx| this.run(cx)))),
                     ),
             )
+            .children(self.recent_menu.as_ref().map(|(menu, position, _)| popover(menu.clone(), *position)))
     }
 }

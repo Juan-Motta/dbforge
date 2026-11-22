@@ -121,6 +121,8 @@ Query history, a log of every statement DBForge sends, PostgreSQL dumps and rest
 
 Turn on **Settings → Agents (MCP)**, pick your agent and copy its command. By default the agent starts DBForge's own executable with `--mcp-stdio` and keeps it for its whole session: it reconnects by itself when DBForge opens or restarts, works the same on macOS, Windows and Linux, and its settings hold no token. While DBForge is closed, a tool call answers that the app needs to be open. Agents that only take HTTP servers can use `http://127.0.0.1:7419/mcp` with the token instead.
 
+Agents also reach your saved queries on the connections they may use: they list them, run them with values for their `:name` parameters, and create, edit or delete them once you approve each change in DBForge.
+
 ## Build from source
 
 DBForge is a native Rust app: its window is drawn with [GPUI](https://www.gpui.rs). You need Rust 1.90 or later

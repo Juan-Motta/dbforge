@@ -48,11 +48,13 @@ mod tests {
         ApprovalRequest {
             id: id.into(),
             agent: Some("claude-code".into()),
-            connection_id: "shop".into(),
-            connection_name: "Shop".into(),
-            tag: Some("PROD".into()),
-            database: None,
-            statement: "DELETE FROM orders".into(),
+            subject: dbforge_core::mcp::ApprovalSubject::Statement {
+                connection_id: "shop".into(),
+                connection_name: "Shop".into(),
+                tag: Some("PROD".into()),
+                database: None,
+                statement: "DELETE FROM orders".into(),
+            },
         }
     }
 

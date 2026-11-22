@@ -1,6 +1,7 @@
 //! What the core tells the UI while it works: progress of long jobs, each
-//! statement as it is logged, and the MCP approvals waiting on the user. The
-//! UI implements [`Events`] and gets each one as it happens, from any thread.
+//! statement as it is logged, the MCP approvals waiting on the user, and the
+//! agents' changes to the saved queries. The UI implements [`Events`] and gets
+//! each one as it happens, from any thread.
 
 use crate::credentials::SwitchProgress;
 use crate::mcp::ApprovalRequest;
@@ -28,6 +29,9 @@ pub enum Event {
     /// while after it was last announced: the agents list
     /// ([`crate::mcp::commands::mcp_agents`]) has changed.
     McpAgentsChanged,
+    /// An agent created, changed, deleted or ran a saved query: the list
+    /// ([`crate::saved_queries::commands::list_saved_queries`]) has changed.
+    SavedQueriesChanged,
 }
 
 /// Where the core sends its events: the UI.
