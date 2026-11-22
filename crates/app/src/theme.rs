@@ -117,6 +117,8 @@ pub struct Theme {
     pub ok: Hsla,
     pub err: Hsla,
     pub warn: Hsla,
+    /// An open transaction: its capsule, its tab's dot. Amber, darker on light so its text reads.
+    pub txn: Hsla,
 }
 
 impl Global for Theme {}
@@ -156,6 +158,7 @@ impl Theme {
             ok: pick(0x7FD69AFF, 0x2E7D44FF),
             err: pick(0xFF8A80FF, 0xC2331FFF),
             warn: color(0xE0A33AFF),
+            txn: pick(0xE8B04BFF, 0x8A5A00FF),
         }
     }
 
@@ -230,6 +233,12 @@ mod tests {
     fn tags_read_in_both_themes_as_the_web_ui_drew_them() {
         assert_eq!(Theme::new(Appearance::Dark).tag(TagColor::Red), color(0xF06A6AFF));
         assert_eq!(Theme::new(Appearance::Light).tag(TagColor::Red), color(0xC23030FF));
+    }
+
+    #[test]
+    fn an_open_transaction_is_amber_and_darker_on_light() {
+        assert_eq!(Theme::new(Appearance::Dark).txn, color(0xE8B04BFF));
+        assert_eq!(Theme::new(Appearance::Light).txn, color(0x8A5A00FF));
     }
 
     #[test]

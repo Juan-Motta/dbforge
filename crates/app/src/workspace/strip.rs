@@ -2,7 +2,9 @@
 //! shown one raised by a thumb that slides to the next one shown, and + for a new query on the selected connection.
 //! A middle click closes a tab, as in browsers. A console whose text differs
 //! from its saved query shows a dot in place of its close button, which
-//! comes back on hover, so the tab never changes width.
+//! comes back on hover, so the tab never changes width; one with a
+//! transaction open shows an amber dot there instead, which wins over the
+//! other, its tooltip saying closing asks first.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, StatefulInteractiveElement,
@@ -32,7 +34,15 @@ impl Workspace {
             .enumerate()
             .map(|(index, tab)| {
                 let shown = active.as_deref() == Some(tab.id.as_str());
-                let edited = self.console(&tab.id).is_some_and(|console| console.read(cx).is_edited());
+                let console = self.console(&tab.id).map(|console| console.read(cx));
+                let edited = console.is_some_and(|console| console.is_edited());
+                let pending = console.is_some_and(|console| console.transaction().is_some());
+                let marker = if pending { Some(theme.txn) } else { edited.then_some(theme.text2) };
+                let tooltip = if pending {
+                    format!("{} · {}", m.transactions.tab_dot, (m.query.close_tab)(&tab.title))
+                } else {
+                    (m.query.close_tab)(&tab.title)
+                };
                 let (select, middle, close) = (tab.id.clone(), tab.id.clone(), tab.id.clone());
                 let kind_icon = match tab.kind {
                     super::tabs::TabKind::Query { .. } => "code",
@@ -61,16 +71,16 @@ impl Workspace {
                             .group("close-tab")
                             .rounded(px(9.))
                             .hover(|button| button.bg(theme.sel))
-                            .tooltip(Tooltip::text((m.query.close_tab)(&tab.title)))
+                            .tooltip(Tooltip::text(tooltip))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.close_tab(&close, window, cx);
                             }))
                             .map(|button| {
-                                if !edited {
+                                let Some(tint) = marker else {
                                     return button.child(icon("close", theme.text3, 11.));
-                                }
-                                button.child(dot(theme.text2).group_hover("close-tab", |dot| dot.opacity(0.))).child(
+                                };
+                                button.child(dot(tint).group_hover("close-tab", |dot| dot.opacity(0.))).child(
                                     div()
                                         .absolute()
                                         .inset_0()

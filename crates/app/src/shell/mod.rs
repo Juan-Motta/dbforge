@@ -10,6 +10,10 @@
 //! part is its own view, which its feature grows.
 //! ⌘K / Ctrl+K toggles the palette, ⌘B / Ctrl+B the explorer and ⌘J /
 //! Ctrl+J the statement console, from anywhere in the window.
+//!
+//! Quitting or closing the window with transactions open asks first whether
+//! to roll them all back or commit them; so does a connection being edited
+//! or deleted, which is refused while one of its consoles holds one.
 
 pub mod connection_details;
 pub mod connection_facts;
@@ -18,6 +22,7 @@ pub mod set_aside;
 mod toolbar;
 
 use dbforge_core::connections::model::Connection;
+use dbforge_core::query::open_transactions;
 use gpui::{
     AnyView, AppContext, BorrowAppContext, Context, DismissEvent, Entity, Focusable, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Render, Styled, Subscription, Window, actions, div, linear_color_stop, linear_gradient,
@@ -42,7 +47,8 @@ use crate::preferences::{Preferences, keys};
 use crate::settings::{Section, SettingsDialog, SettingsEvent};
 use crate::statement_log::{StatementConsole, StatementConsoleEvent};
 use crate::theme::{ActiveTheme, Theme};
-use crate::ui::notice::{Notices, notice_layer};
+use crate::transactions::{LeaveDialog, LeaveEvent, Leaving, Pending};
+use crate::ui::notice::{Notices, Tone, notice_layer, notify};
 use crate::updates::{UpdateDialog, Updates};
 use crate::workspace::WorkspaceEvent;
 
@@ -165,6 +171,11 @@ impl Shell {
         subscriptions.push(cx.observe_in(&Updates::global(cx), window, |this, _, window, cx| {
             this.sync_update(window, cx);
         }));
+        // Closing the window quits: it asks first while transactions are open.
+        let shell = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            shell.update(cx, |shell, cx| shell.ask_before_quitting(window, cx)).unwrap_or(true)
+        });
         // A notice came or went.
         let notices = Notices::global(cx);
         subscriptions.push(cx.observe(&notices, |_, _, cx| cx.notify()));
@@ -482,6 +493,43 @@ impl Shell {
         self.toolbar.update(cx, |toolbar, cx| toolbar.show(selected, cx));
     }
 
+    /// Whether the app may quit now: no transaction is open. Otherwise the
+    /// dialog listing them asks whether to roll them all back or commit
+    /// them, and quits once that is done.
+    pub fn ask_before_quitting(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let open = open_transactions(Backend::global(cx).core().query_sessions());
+        if open.is_empty() {
+            return true;
+        }
+        let asking = self.dialog.as_ref().is_some_and(|open| open.view.clone().downcast::<LeaveDialog>().is_ok());
+        if !asking {
+            let workspace = self.workspace.read(cx);
+            let pending = open
+                .into_iter()
+                .map(|transaction| Pending {
+                    title: workspace.tab_title(&transaction.session_id).unwrap_or_default().to_owned(),
+                    transaction,
+                })
+                .collect();
+            let dialog = cx.new(|cx| LeaveDialog::new(Leaving::Quit, pending, cx));
+            dialog.read(cx).focus(window);
+            let ended = cx.subscribe(&dialog, |_, _, _: &LeaveEvent, cx| cx.quit());
+            self.show_dialog(dialog, vec![ended], window, cx);
+        }
+        false
+    }
+
+    /// Refuses to edit or delete `connection` while one of its consoles has
+    /// a transaction open: a changed connection would leave it behind. The notice says so.
+    fn refuse_while_open(&self, connection: &Connection, cx: &mut Context<Self>) -> bool {
+        let open = open_transactions(Backend::global(cx).core().query_sessions());
+        if !open.iter().any(|open| open.connection_id == connection.id) {
+            return false;
+        }
+        notify((cx.messages().transactions.connection_busy)(&connection.name), Tone::Error, cx);
+        true
+    }
+
     /// Opens the connection dialog on `connection`, or for a new one.
     pub fn open_connection_dialog(
         &mut self,
@@ -489,6 +537,9 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if connection.as_ref().is_some_and(|connection| self.refuse_while_open(connection, cx)) {
+            return;
+        }
         let dialog = cx.new(|cx| ConnectionDialog::new(connection, window, cx));
         dialog.read(cx).focus(window, cx);
         let saved = cx.subscribe(&dialog, |this, _, event: &ConnectionDialogEvent, cx| {
@@ -505,6 +556,9 @@ impl Shell {
 
     /// Asks before deleting `connection`.
     pub fn open_delete_dialog(&mut self, connection: Connection, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refuse_while_open(&connection, cx) {
+            return;
+        }
         let dialog = cx.new(|cx| DeleteConnectionDialog::new(connection, cx));
         dialog.read(cx).focus(window);
         let deleted =
