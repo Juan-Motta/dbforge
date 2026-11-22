@@ -37,6 +37,10 @@ pub struct TransactionMessages {
     pub idle_notice: fn(&str, u64) -> String,
     /// A script that starts or ends a transaction itself, in Manual: the statement's keyword.
     pub control_refused: fn(&str) -> String,
+    /// A script whose statement commits implicitly on MySQL or MariaDB, in Manual: the statement's keyword.
+    pub implicit_commit_refused: fn(&str) -> String,
+    /// The Analyze checkbox's tooltip while a transaction is open: Explain then runs without it.
+    pub analyze_locked: &'static str,
     /// Another database or container picked while a transaction is open.
     pub change_refused: &'static str,
     /// Editing or deleting a connection one of whose consoles has a transaction open.

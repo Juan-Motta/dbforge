@@ -1294,6 +1294,14 @@ pub(super) const MESSAGES: Messages = Messages {
                  Revertir de la barra. No se ejecutó nada."
             )
         },
+        implicit_commit_refused: |keyword| {
+            format!(
+                "{keyword} confirmaría la transacción abierta: confírmala o reviértela primero, o cambia a \
+                 Auto-commit. No se ejecutó nada."
+            )
+        },
+        analyze_locked: "Desactivado mientras hay una transacción abierta: Analyze se ejecuta en otra conexión y \
+                         podría esperar para siempre las filas que esta transacción bloqueó",
         change_refused: "Hay una transacción abierta en esta consola: confírmala o reviértela antes de cambiar de \
                          base de datos.",
         connection_busy: |name| {

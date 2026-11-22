@@ -25,18 +25,30 @@ pub fn default_mode(confirming_tag: Option<&str>) -> TransactionMode {
     }
 }
 
-/// The first statement of `sql` that starts or ends a transaction itself,
-/// as its leading keywords (`COMMIT`, `START TRANSACTION`); Manual runs none,
-/// since the console would no longer know whether one is open. Comments
-/// before a statement are skipped; strings and quoted names never count.
-pub fn transaction_control(sql: &str, dialect: Dialect) -> Option<String> {
+/// Why Manual refuses a statement, with its leading keywords.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// It starts or ends a transaction itself (`COMMIT`, `START TRANSACTION`):
+    /// the console would no longer know whether one is open.
+    Control(String),
+    /// MySQL and MariaDB commit the open transaction before running it
+    /// (`CREATE`, `ALTER`, `LOCK`…): Rollback would no longer undo what came before.
+    ImplicitCommit(String),
+}
+
+/// The first statement of `sql` that Manual refuses, and why; Manual runs
+/// none of the script then. Comments before a statement are skipped; strings
+/// and quoted names never count.
+pub fn refusal(sql: &str, dialect: Dialect) -> Option<Refusal> {
     statements(sql, dialect).into_iter().find_map(|range| {
         let words = leading_words(&sql[range], dialect);
         controls(&words, dialect)
+            .map(Refusal::Control)
+            .or_else(|| commits_implicitly(&words, dialect).map(Refusal::ImplicitCommit))
     })
 }
 
-/// The first two words of `statement`, upper-cased, after its comments.
+/// The first four words of `statement`, upper-cased, after its comments.
 fn leading_words(statement: &str, dialect: Dialect) -> Vec<String> {
     let mut state = LineState::Normal;
     let mut offset = 0;
@@ -58,7 +70,7 @@ fn leading_words(statement: &str, dialect: Dialect) -> Vec<String> {
     statement[start..]
         .split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|word| !word.is_empty())
-        .take(2)
+        .take(4)
         .map(str::to_uppercase)
         .collect()
 }
@@ -81,6 +93,25 @@ fn controls(words: &[String], dialect: Dialect) -> Option<String> {
         // `END` commits on PostgreSQL and SQLite; elsewhere it closes a block.
         ("END", Dialect::Postgres | Dialect::Sqlite) => Some(first.to_owned()),
         ("ABORT", Dialect::Postgres) => Some(first.to_owned()),
+        _ => None,
+    }
+}
+
+/// Whether a statement starting with `words` commits the open transaction
+/// before it runs, on MySQL and MariaDB: the keyword that does. Temporary
+/// tables are the exception; other dialects keep DDL in the transaction.
+fn commits_implicitly(words: &[String], dialect: Dialect) -> Option<String> {
+    if dialect != Dialect::Mysql {
+        return None;
+    }
+    let first = words.first()?.as_str();
+    let rest = &words[1..];
+    match first {
+        "CREATE" | "DROP" if rest.iter().any(|word| word == "TEMPORARY") => None,
+        "CREATE" | "ALTER" | "DROP" | "RENAME" | "TRUNCATE" | "GRANT" | "REVOKE" | "LOCK" | "UNLOCK" | "ANALYZE"
+        | "OPTIMIZE" | "REPAIR" | "CHECK" | "FLUSH" | "INSTALL" | "UNINSTALL" => Some(first.to_owned()),
+        // `SET autocommit`, `SET @@autocommit`, `SET SESSION autocommit`.
+        "SET" if rest.iter().take(2).any(|word| word == "AUTOCOMMIT") => Some("SET AUTOCOMMIT".to_owned()),
         _ => None,
     }
 }
@@ -146,7 +177,10 @@ mod tests {
     const MINUTE: i64 = 60_000;
 
     fn refused(sql: &str, dialect: Dialect) -> Option<String> {
-        transaction_control(sql, dialect)
+        match refusal(sql, dialect)? {
+            Refusal::Control(keywords) => Some(keywords),
+            Refusal::ImplicitCommit(keywords) => panic!("{keywords} commits implicitly"),
+        }
     }
 
     #[test]
@@ -194,6 +228,60 @@ mod tests {
         assert_eq!(refused("END TRANSACTION", Dialect::Sqlite).as_deref(), Some("END"));
         assert_eq!(refused("ABORT", Dialect::Sqlite), None);
         assert_eq!(refused("COMMIT", Dialect::Cosmos), None);
+    }
+
+    fn implicit(sql: &str) -> Option<Refusal> {
+        refusal(sql, Dialect::Mysql)
+    }
+
+    #[test]
+    fn refuses_what_commits_implicitly_on_mysql_and_mariadb() {
+        let commits = |keywords: &str| Some(Refusal::ImplicitCommit(keywords.to_owned()));
+        assert_eq!(implicit("CREATE TABLE a (id INT)"), commits("CREATE"));
+        assert_eq!(implicit("UPDATE t SET a = 1;\n alter table t add b int"), commits("ALTER"));
+        assert_eq!(implicit("-- old\nDROP INDEX i ON t"), commits("DROP"));
+        for (sql, keywords) in [
+            ("RENAME TABLE a TO b", "RENAME"),
+            ("truncate t", "TRUNCATE"),
+            ("GRANT SELECT ON t TO u", "GRANT"),
+            ("REVOKE ALL ON t FROM u", "REVOKE"),
+            ("LOCK TABLES t WRITE", "LOCK"),
+            ("UNLOCK TABLES", "UNLOCK"),
+            ("ANALYZE TABLE t", "ANALYZE"),
+            ("OPTIMIZE TABLE t", "OPTIMIZE"),
+            ("REPAIR TABLE t", "REPAIR"),
+            ("CHECK TABLE t", "CHECK"),
+            ("FLUSH PRIVILEGES", "FLUSH"),
+            ("INSTALL PLUGIN p SONAME 'p.so'", "INSTALL"),
+            ("UNINSTALL PLUGIN p", "UNINSTALL"),
+            ("SET autocommit = 1", "SET AUTOCOMMIT"),
+            ("set @@autocommit=1", "SET AUTOCOMMIT"),
+            ("SET SESSION autocommit = 1", "SET AUTOCOMMIT"),
+        ] {
+            assert_eq!(implicit(sql), commits(keywords), "{sql}");
+        }
+    }
+
+    #[test]
+    fn lets_temporary_tables_and_other_statements_run_in_manual_on_mysql() {
+        assert_eq!(implicit("CREATE TEMPORARY TABLE tmp (id INT)"), None);
+        assert_eq!(implicit("drop temporary table tmp"), None);
+        assert_eq!(implicit("SET @x = 1; SET NAMES utf8mb4; INSERT INTO t VALUES (1)"), None);
+        assert_eq!(implicit("SELECT 'CREATE TABLE x'; UPDATE t SET note = 'drop'"), None);
+        assert_eq!(implicit("/* CREATE */ SELECT 1"), None);
+        // Transaction control is still refused as such.
+        assert_eq!(implicit("COMMIT"), Some(Refusal::Control("COMMIT".into())));
+    }
+
+    #[test]
+    fn other_dialects_keep_ddl_in_the_transaction() {
+        for dialect in [Dialect::Postgres, Dialect::Sqlite, Dialect::Sqlserver] {
+            assert_eq!(
+                refusal("CREATE TABLE a (id INT); DROP TABLE a; TRUNCATE TABLE t", dialect),
+                None,
+                "{dialect:?}"
+            );
+        }
     }
 
     #[test]

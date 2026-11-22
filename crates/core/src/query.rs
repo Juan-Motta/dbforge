@@ -103,20 +103,32 @@ struct Dialect {
     begin: &'static str,
     commit: &'static str,
     rollback: &'static str,
+    /// Sent after the transaction ends, to undo what `begin` changed on the connection.
+    restore: Option<&'static str>,
 }
 
 impl Dialect {
     /// `None` for engines without transactions a console can hold open.
+    ///
+    /// MySQL and MariaDB turn autocommit off rather than `START TRANSACTION`:
+    /// a statement that commits implicitly (DDL, `LOCK TABLES`…) then leaves
+    /// the next statements in a new transaction instead of autocommitting them.
     fn of(engine: Engine) -> Option<Self> {
-        let (begin, commit, rollback) = match engine {
-            Engine::Postgres | Engine::Sqlite => ("BEGIN", "COMMIT", "ROLLBACK"),
-            Engine::Mysql | Engine::Mariadb => ("START TRANSACTION", "COMMIT", "ROLLBACK"),
-            Engine::Sqlserver => ("BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION"),
+        let (begin, commit, rollback, restore) = match engine {
+            Engine::Postgres | Engine::Sqlite => ("BEGIN", "COMMIT", "ROLLBACK", None),
+            Engine::Mysql | Engine::Mariadb => ("SET autocommit = 0", "COMMIT", "ROLLBACK", Some("SET autocommit = 1")),
+            Engine::Sqlserver => ("BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION", None),
             Engine::Mongodb | Engine::Redis | Engine::Cosmosdb => return None,
         };
-        Some(Self { begin, commit, rollback })
+        Some(Self { begin, commit, rollback, restore })
     }
 }
+
+/// Said when a console closed while its run was opening the connection.
+const CLOSED: &str = "This console was closed.";
+
+/// Said when SQL Server ended the transaction itself: a trigger's ROLLBACK, `XACT_ABORT`.
+const SERVER_ENDED: &str = "The server ended the transaction (it was rolled back).";
 
 /// Whether a console on `engine` can run in [`TransactionMode::Manual`]:
 /// the SQL engines can; MongoDB, Redis and Cosmos DB can't.
@@ -169,6 +181,22 @@ impl QuerySessions {
 
     fn mode(&self, id: &str) -> TransactionMode {
         self.modes.lock().unwrap().get(id).copied().unwrap_or_default()
+    }
+
+    fn has_mode(&self, id: &str) -> bool {
+        self.modes.lock().unwrap().contains_key(id)
+    }
+
+    /// Inserts `session` unless the console was closed since `had_mode` was
+    /// read. Checked with the modes locked, as `close_session` removes the
+    /// mode before taking the session: it either finds this one or it was first.
+    fn insert_unless_closed(&self, id: &str, had_mode: bool, session: Arc<QuerySession>) -> Result<()> {
+        let modes = self.modes.lock().unwrap();
+        if had_mode && !modes.contains_key(id) {
+            return Err(AppError::Invalid(CLOSED.into()));
+        }
+        self.insert(id.to_string(), session);
+        Ok(())
     }
 }
 
@@ -257,6 +285,34 @@ fn rolled_back_by(engine: Engine, error: &str) -> bool {
 
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+}
+
+/// Ends the transaction with `statement`, then restores what the dialect's
+/// BEGIN changed on the connection. A connection whose restore failed is
+/// dropped from `sessions`: an Auto run on it would never commit.
+async fn send_end(
+    sessions: &QuerySessions,
+    session_id: &str,
+    session: &Arc<QuerySession>,
+    driver: &mut drivers::Session,
+    statement: &str,
+    restore: Option<&str>,
+) -> Result<()> {
+    run_statement(driver, statement).await?;
+    if let Some(restore) = restore
+        && run_statement(driver, restore).await.is_err()
+    {
+        sessions.remove(session_id, session);
+    }
+    Ok(())
+}
+
+/// Whether SQL Server still has a transaction open on `driver`, read with
+/// `@@TRANCOUNT`; `None` when it couldn't be read.
+async fn sqlserver_in_transaction(driver: &mut drivers::Session) -> Option<bool> {
+    let outcome = Box::pin(driver.run("SELECT @@TRANCOUNT", ROW_LIMIT)).await.ok()?;
+    let count = outcome.results.first()?.rows.first()?.first()?.clone()?;
+    Some(count.trim() != "0")
 }
 
 /// Runs one statement the console sends itself (BEGIN, COMMIT, ROLLBACK).
@@ -363,9 +419,8 @@ async fn end_transaction(
         TransactionEnd::Committed => dialect.commit,
         TransactionEnd::RolledBack => dialect.rollback,
     };
-    let sent =
-        statement_log::scoped(log, &session.connection.id, Origin::Console, run_statement(&mut driver, statement))
-            .await;
+    let end_it = send_end(sessions, session_id, &session, &mut driver, statement, dialect.restore);
+    let sent = statement_log::scoped(log, &session.connection.id, Origin::Console, end_it).await;
     let ended = |end| CommitOutcome { ended: end, transaction: transaction.clone() };
     let Err(error) = sent else {
         session.take_transaction();
@@ -454,6 +509,8 @@ async fn run_in_session(
     if sessions.mode(session_id) == TransactionMode::Manual && !supports_manual_transactions(engine) {
         return Err(AppError::Invalid(format!("{} consoles can only run in Auto-commit.", engine.label())));
     }
+    // A console the app created has a mode; once it's gone, the console was closed.
+    let had_mode = sessions.has_mode(session_id);
     let session = match sessions.get(session_id) {
         // Edited connection settings, or another database or container, take effect on the next run.
         Some(session) if session.connection == connection && session.scope == scope => session,
@@ -461,7 +518,8 @@ async fn run_in_session(
         Some(session) if session.transaction().is_some() => return Err(AppError::Invalid(CHANGE_REFUSED.into())),
         _ => {
             let session = Arc::new(Box::pin(QuerySession::open(connection, password?, scope)).await?);
-            sessions.insert(session_id.to_string(), session.clone());
+            // Closed while it connected: dropping the new session closes its connection.
+            sessions.insert_unless_closed(session_id, had_mode, session.clone())?;
             session
         }
     };
@@ -470,6 +528,11 @@ async fn run_in_session(
         .driver
         .try_lock()
         .map_err(|_| AppError::Invalid("A query is already running in this console".into()))?;
+    // Closed between the insert and the lock: `close_session` found nothing running to wait for.
+    if had_mode && !sessions.has_mode(session_id) {
+        sessions.remove(session_id, &session);
+        return Err(AppError::Invalid(CLOSED.into()));
+    }
     // Read with the session locked: `set_transaction_mode` refuses Auto while it runs.
     let begin = match sessions.mode(session_id) {
         TransactionMode::Manual if session.transaction().is_none() => Dialect::of(engine).map(|d| d.begin),
@@ -501,7 +564,34 @@ async fn run_in_session(
         }
         return outcome;
     }
-    session.record_run(outcome)
+    let was_open = session.transaction().is_some();
+    let outcome = session.record_run(outcome);
+    if was_open
+        && session.transaction().is_none()
+        && let Some(restore) = Dialect::of(engine).and_then(|dialect| dialect.restore)
+        && run_statement(&mut driver, restore).await.is_err()
+    {
+        // The server rolled back (a deadlock), but autocommit is still off: never reuse it.
+        sessions.remove(session_id, &session);
+    }
+    if engine == Engine::Sqlserver
+        && session.transaction().is_some()
+        && sqlserver_in_transaction(&mut driver).await == Some(false)
+    {
+        // A trigger's ROLLBACK or XACT_ABORT ended it: the next run must open a new one.
+        session.take_transaction();
+        return match outcome {
+            Ok(mut outcome) => {
+                outcome.error = Some(match outcome.error {
+                    Some(error) => format!("{error} {SERVER_ENDED}"),
+                    None => SERVER_ENDED.to_owned(),
+                });
+                Ok(outcome)
+            }
+            Err(error) => Err(AppError::Invalid(format!("{error} {SERVER_ENDED}"))),
+        };
+    }
+    outcome
 }
 
 /// The plan of the console's statement. See `drivers::explain` for why ANALYZE is safe.
@@ -548,12 +638,12 @@ pub async fn close_session(sessions: &QuerySessions, log: &StatementLog, session
     };
     if session.transaction().is_some() {
         // Waits for a cancelled run to stop; past that, closing the connection rolls back.
-        if let Ok(mut driver) = tokio::time::timeout(CLOSE_WAIT, session.driver.lock()).await {
-            let rollback = Dialect::of(session.connection.engine).map(|d| d.rollback);
-            if let (Some(_), Some(rollback)) = (session.take_transaction(), rollback) {
-                // Best effort: if it fails, the connection closes next and the server rolls back.
-                let _ = statement_log::scoped(log, &id, Origin::Console, run_statement(&mut driver, rollback)).await;
-            }
+        if let Ok(mut driver) = tokio::time::timeout(CLOSE_WAIT, session.driver.lock()).await
+            && let (Some(_), Some(dialect)) = (session.take_transaction(), Dialect::of(session.connection.engine))
+        {
+            // Best effort: if it fails, the connection closes next and the server rolls back.
+            let end_it = send_end(sessions, &session_id, &session, &mut driver, dialect.rollback, dialect.restore);
+            let _ = statement_log::scoped(log, &id, Origin::Console, end_it).await;
         }
     }
     cancelled
@@ -786,6 +876,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn closing_the_console_while_its_first_manual_run_connects_runs_nothing() {
+        let fx = Arc::new(Fixture::sqlite().await);
+        fx.manual("c1");
+        let running = tokio::spawn({
+            let fx = fx.clone();
+            async move { fx.run("c1", "INSERT INTO t VALUES (1)").await }
+        });
+        // The run is now opening the console's connection.
+        tokio::task::yield_now().await;
+        close_session(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
+
+        let error = running.await.unwrap().unwrap_err();
+        assert_eq!(error.to_string(), "This console was closed.");
+        assert!(fx.sessions.get("c1").is_none(), "no session is left behind");
+        assert_eq!(fx.state("c1"), None);
+        assert!(fx.logged().is_empty(), "nothing was sent: {:?}", fx.logged());
+        assert_eq!(fx.committed_rows().await, "0");
+    }
+
+    #[tokio::test]
     async fn counts_changes_and_rows_and_the_last_activity() {
         let fx = Fixture::sqlite().await;
         fx.manual("c1");
@@ -932,5 +1042,69 @@ mod tests {
         assert!(error.contains("rolled back"), "{error}");
         assert_eq!(fx.state("c1"), None);
         assert_eq!(fx.committed_rows().await, "0");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the SQL Server container on port 51433"]
+    async fn sql_server_ending_the_transaction_itself_is_noticed_after_the_run() {
+        use crate::drivers::sqlserver::tests::{PASSWORD, database};
+        let connection = database(
+            "dbforge_txn_ended",
+            "CREATE TABLE t (id INT)
+             GO
+             CREATE TRIGGER no_99 ON t AFTER INSERT AS
+             IF EXISTS (SELECT 1 FROM inserted WHERE id = 99) ROLLBACK TRANSACTION",
+        )
+        .await;
+        let fx = Fixture::with(tempfile::tempdir().unwrap(), connection, PASSWORD);
+        fx.manual("c1");
+        fx.run("c1", "INSERT INTO t VALUES (1)").await.unwrap();
+        assert!(fx.state("c1").is_some());
+
+        // The trigger's ROLLBACK ends the console's transaction too.
+        let error = fx.run("c1", "INSERT INTO t VALUES (99)").await.unwrap_err().to_string();
+        assert!(error.ends_with("The server ended the transaction (it was rolled back)."), "{error}");
+        assert_eq!(fx.state("c1"), None);
+        assert!(fx.logged().contains(&fx.console("SELECT @@TRANCOUNT")), "{:?}", fx.logged());
+        assert_eq!(fx.committed_rows().await, "0");
+
+        // XACT_ABORT rolls back on any error.
+        fx.run("c1", "SET XACT_ABORT ON; INSERT INTO t VALUES (2)").await.unwrap();
+        let error = fx.run("c1", "INSERT INTO t VALUES ('x')").await.unwrap_err().to_string();
+        assert!(error.ends_with("The server ended the transaction (it was rolled back)."), "{error}");
+        assert_eq!(fx.state("c1"), None);
+        assert_eq!(fx.committed_rows().await, "0");
+        // The next run opens a new transaction.
+        fx.run("c1", "INSERT INTO t VALUES (3)").await.unwrap();
+        assert!(fx.state("c1").is_some());
+        close_session(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the MySQL container on port 53306"]
+    async fn mysql_turns_autocommit_off_so_an_implicit_commit_never_leaves_later_runs_autocommitting() {
+        use crate::drivers::mysql::tests::{PASSWORD, local};
+        let fx = Fixture::with(tempfile::tempdir().unwrap(), local(), PASSWORD);
+        fx.run("setup", "DROP TABLE IF EXISTS t; CREATE TABLE t (id INT)").await.unwrap();
+        close_session(&fx.sessions, &fx.log, "setup".into()).await.unwrap();
+        fx.log.clear();
+        fx.manual("c1");
+        fx.run("c1", "INSERT INTO t VALUES (1)").await.unwrap();
+        assert_eq!(fx.logged()[0], fx.console("SET autocommit = 0"));
+
+        // DDL commits implicitly, past the app's check; what follows stays uncommitted.
+        fx.run("c1", "CREATE TABLE IF NOT EXISTS other (id INT)").await.unwrap();
+        fx.run("c1", "INSERT INTO t VALUES (2)").await.unwrap();
+        rollback_transaction(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
+        let logged = fx.logged();
+        assert_eq!(&logged[logged.len() - 2..], [fx.console("ROLLBACK"), fx.console("SET autocommit = 1")]);
+        assert_eq!(fx.committed_rows().await, "1", "only the row the CREATE committed");
+
+        // Back in Auto, each statement commits again.
+        set_transaction_mode(&fx.sessions, "c1", TransactionMode::Auto).unwrap();
+        fx.run("c1", "INSERT INTO t VALUES (3)").await.unwrap();
+        assert_eq!(fx.committed_rows().await, "2");
+        fx.run("c1", "DROP TABLE t; DROP TABLE other").await.unwrap();
+        close_session(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
     }
 }

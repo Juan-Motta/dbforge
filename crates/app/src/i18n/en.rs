@@ -1255,6 +1255,14 @@ pub(super) const MESSAGES: Messages = Messages {
                  toolbar. Nothing ran."
             )
         },
+        implicit_commit_refused: |keyword| {
+            format!(
+                "{keyword} would commit the open transaction: commit or roll back first, or switch to Auto-commit. \
+                 Nothing ran."
+            )
+        },
+        analyze_locked: "Off while a transaction is open: Analyze runs on another connection and could wait forever \
+                         on the rows this transaction locked",
         change_refused: "A transaction is open on this console: commit or roll back before changing the database.",
         connection_busy: |name| {
             format!("A transaction is open on {name}: commit or roll back before editing or deleting the connection.")

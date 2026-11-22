@@ -61,7 +61,7 @@ use crate::sql::statements::changes_structure;
 use crate::theme::{ActiveTheme, color};
 use crate::transactions::now_ms;
 use crate::transactions::rules::{
-    CapsuleTone, capsule as transaction_capsule, default_mode, idle_minutes, idle_warnings, transaction_control,
+    CapsuleTone, Refusal, capsule as transaction_capsule, default_mode, idle_minutes, idle_warnings, refusal,
 };
 use crate::ui::field::Tooltip;
 use crate::ui::notice::{Tone, notify};
@@ -637,14 +637,25 @@ impl QueryConsole {
     }
 
     /// Why Manual refuses `sql`: it starts or ends a transaction itself,
-    /// which the Commit and Rollback buttons do; the console would no longer
-    /// know whether one is open.
+    /// which the Commit and Rollback buttons do, so the console would no
+    /// longer know whether one is open; or, on MySQL and MariaDB, it would
+    /// commit the open transaction implicitly.
     fn refused_in_manual(&self, sql: &str, cx: &gpui::App) -> Option<String> {
         if self.mode != Some(TransactionMode::Manual) {
             return None;
         }
-        let keyword = transaction_control(sql, self.syntax.dialect()?)?;
-        Some((cx.messages().transactions.control_refused)(&keyword))
+        let m = &cx.messages().transactions;
+        Some(match refusal(sql, self.syntax.dialect()?)? {
+            Refusal::Control(keyword) => (m.control_refused)(&keyword),
+            Refusal::ImplicitCommit(keyword) => (m.implicit_commit_refused)(&keyword),
+        })
+    }
+
+    /// Whether Explain measures with Analyze: never while a transaction is
+    /// open, since Analyze runs on another connection and could wait forever
+    /// on the rows the transaction locked, leaving Commit and Rollback off.
+    pub fn analyzes(&self) -> bool {
+        self.analyze && self.transaction.is_none()
     }
 
     /// Shows the plan of `sql` in place of the results. It runs only with
@@ -656,7 +667,7 @@ impl QueryConsole {
         }
         self.explaining = true;
         self.results.update(cx, |results, cx| results.set_running(Some(Instant::now()), cx));
-        let (connection, scope, analyze) = (self.connection_id.clone(), self.scope(), self.analyze);
+        let (connection, scope, analyze) = (self.connection_id.clone(), self.scope(), self.analyzes());
         let explaining = Backend::global(cx).spawn(cx, move |core| async move {
             explain_query(core.connections(), core.statement_log(), connection, scope, sql, analyze).await
         });
@@ -1256,10 +1267,17 @@ impl QueryConsole {
                 ],
             ))
             .child(
-                div().id("analyze").tooltip(Tooltip::text(m.analyze_title)).child(
-                    Checkbox::new("analyze-checkbox", m.analyze, self.analyze)
-                        .on_change(cx.listener(|this, analyze: &bool, _, cx| this.set_analyze(*analyze, cx))),
-                ),
+                div()
+                    .id("analyze")
+                    .tooltip(Tooltip::text(match self.transaction {
+                        Some(_) => cx.messages().transactions.analyze_locked,
+                        None => m.analyze_title,
+                    }))
+                    .child(
+                        Checkbox::new("analyze-checkbox", m.analyze, self.analyzes())
+                            .disabled(self.transaction.is_some())
+                            .on_change(cx.listener(|this, analyze: &bool, _, cx| this.set_analyze(*analyze, cx))),
+                    ),
             )
             .child(self.explain_button(cx))
             .children(self.mode_choice(cx))

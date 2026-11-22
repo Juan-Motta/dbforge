@@ -114,6 +114,9 @@ fn a_manual_run_opens_a_transaction_that_commit_makes_visible_to_other_tabs(cx: 
         let transaction = console.transaction().expect("a transaction is open");
         assert_eq!((transaction.changes, transaction.rows), (1, 1));
     });
+    // Explain skips Analyze while the transaction holds locks: it runs on another connection.
+    console.update(cx, |console, cx| console.set_analyze(true, cx));
+    assert!(!console.read_with(cx, |console, _| console.analyzes()));
     // The capsule in the toolbar and the amber dot on the tab.
     draw(cx);
     assert_eq!(people(cx, &connection), "0", "other tabs don't see it yet");
@@ -122,7 +125,7 @@ fn a_manual_run_opens_a_transaction_that_commit_makes_visible_to_other_tabs(cx: 
 
     console.update(cx, |console, cx| console.end_transaction(TransactionEnd::Committed, cx));
     wait_until(cx, "the commit", |cx| console.read_with(cx, |console, _| console.ending().is_none()));
-    console.read_with(cx, |console, _| assert!(console.transaction().is_none()));
+    console.read_with(cx, |console, _| assert!(console.transaction().is_none() && console.analyzes()));
     assert_eq!(notice(cx).as_deref(), Some("Committed 1 change (1 row)"));
     assert_eq!(people(cx, &connection), "1");
     draw(cx);
