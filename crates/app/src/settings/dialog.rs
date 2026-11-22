@@ -254,13 +254,12 @@ impl SettingsDialog {
         let theme = *cx.theme();
         let m = &cx.messages().settings_dialog;
         let current = cx.global::<Locale>().0;
-        div()
-            .py(px(14.))
+        let row = div()
+            .px(px(12.))
+            .py(px(10.))
             .flex()
             .items_center()
             .gap(px(24.))
-            .border_b_1()
-            .border_color(theme.line)
             .child(
                 div()
                     .flex_1()
@@ -273,7 +272,9 @@ impl SettingsDialog {
             .child(choice_group(&theme).children(Language::ALL.map(|(language, name)| {
                 choice(&theme, language.as_str(), name, language == current)
                     .on_click(cx.listener(move |_, _, _, cx| language.save(cx)))
-            })))
+            })));
+        // Framed like the other settings' rows (About's version and updates).
+        div().pt(px(14.)).child(option_list(&theme, vec![row.into_any_element()]))
     }
 
     fn render_about(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -289,8 +290,6 @@ impl SettingsDialog {
                     .flex()
                     .items_center()
                     .gap(px(14.))
-                    .border_b_1()
-                    .border_color(theme.line)
                     .child(
                         div()
                             .size(px(44.))
@@ -311,32 +310,30 @@ impl SettingsDialog {
                             .child(div().text_size(px(12.5)).text_color(theme.text3).child(m.tagline)),
                     ),
             )
-            .child(
-                div()
-                    .py(px(14.))
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(theme.line)
-                    .child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(m.version))
-                    .child(div().text_size(px(13.)).text_color(theme.text2).child(dbforge_core::VERSION)),
-            )
             .child(self.render_updates(cx))
     }
 
-    /// Below the version, as the former web UI: the automatic check, then a check now.
+    /// The version and the automatic check in one frame, as the other
+    /// settings' rows, then a check now.
     fn render_updates(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let m = &cx.messages().settings_dialog;
         let automatic = Updates::automatic(cx);
+        let version = div()
+            .px(px(12.))
+            .py(px(10.))
+            .flex()
+            .items_center()
+            .child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(m.version))
+            .child(div().text_size(px(13.)).text_color(theme.text2).child(dbforge_core::VERSION));
         div()
-            .mt(px(18.))
             .flex()
             .flex_col()
             .gap(px(10.))
             .child(option_list(
                 &theme,
                 vec![
+                    version.into_any_element(),
                     OptionItem::new("updates-automatic", Mark::Check, m.check_automatically, automatic)
                         .description(m.check_automatically_description)
                         .on_select(cx.listener(move |_, _, _, cx| {
