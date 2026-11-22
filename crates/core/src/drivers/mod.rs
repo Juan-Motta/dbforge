@@ -11,7 +11,7 @@ mod mysql;
 pub(crate) mod postgres;
 pub mod redis;
 mod sqlite;
-mod sqlserver;
+pub(crate) mod sqlserver;
 mod sqlx_edits;
 mod sqlx_results;
 
