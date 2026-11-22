@@ -17,7 +17,7 @@ use super::tools::{RunRequest, RunResult, Tools};
 use crate::connections::model::{AgentAccess, Connection, Engine};
 use crate::events::Event;
 use crate::saved_queries::params::{parameters, substitute};
-use crate::saved_queries::{ParamKind, ParamValue, SavedQuery, SavedQueryInput, SavedScope, checked};
+use crate::saved_queries::{ParamKind, ParamValue, SavedQuery, SavedQueryInput, SavedScope, Stale, checked};
 
 /// What the agent hears when the user says no, or nothing in time.
 const DECLINED: &str = "The user declined this change in DBForge, or didn't answer in time. Nothing was changed.";
@@ -185,16 +185,32 @@ fn not_found(id: &str) -> String {
     format!("No saved query with id {id}. Call list_saved_queries to see the ones you can use.")
 }
 
+/// What the agent hears when saved query `name` was changed in the app while its approval waited.
+fn changed_meanwhile(name: &str) -> String {
+    format!(
+        "The saved query {name} changed while waiting for approval, so nothing was changed. Call list_saved_queries and try again."
+    )
+}
+
+/// What the agent hears when saved query `name` was deleted in the app while its approval waited.
+fn deleted_meanwhile(name: &str) -> String {
+    format!(
+        "The saved query {name} was deleted while waiting for approval, so nothing was changed. Call list_saved_queries to see the ones you can use."
+    )
+}
+
 /// How `list_connections` and the saved queries' `engine` name it, or its id in the config.
 fn names_engine(engine: Engine, text: &str) -> bool {
     let id = serde_json::to_value(engine).ok();
     engine.label().eq_ignore_ascii_case(text) || id.as_ref().and_then(|id| id.as_str()) == Some(&text.to_lowercase())
 }
 
-/// What saved query `query` was made of.
-fn input_of(query: &SavedQuery) -> SavedQueryInput {
-    let SavedQuery { name, sql, description, folder, scope, engine, .. } = query.clone();
-    SavedQueryInput { name, sql, description, folder, scope, engine }
+/// What the agent hears when saved query `name` was changed or deleted while its approval waited.
+fn stale(name: &str, why: Stale) -> String {
+    match why {
+        Stale::Changed => changed_meanwhile(name),
+        Stale::Deleted => deleted_meanwhile(name),
+    }
 }
 
 impl Tools {
@@ -379,7 +395,7 @@ impl Tools {
         let after = self.draft(input.clone());
         let change = match &existing {
             None => SavedQueryChange::Create { query: after },
-            Some(query) => SavedQueryChange::Update { before: self.draft(input_of(query)), after },
+            Some(query) => SavedQueryChange::Update { before: self.draft(query.content()), after },
         };
         if let Some(query) = existing.as_ref().filter(|_| change.changed_fields().is_empty() && !change.changes_sql()) {
             // Nothing to change, so nothing to ask.
@@ -387,7 +403,16 @@ impl Tools {
             return Ok(Self::view(query.clone(), &runs_on(query, &connections)));
         }
         self.approve(agent, change).await?;
-        let saved = self.core.saved_queries().save(request.id.as_deref(), input).map_err(|error| error.to_string())?;
+        let store = self.core.saved_queries();
+        let saved = match &existing {
+            None => store.save(None, input).map_err(|error| error.to_string())?,
+            // Only onto the query the user approved the change of: a change
+            // made meanwhile, by the user or another approved one, is kept.
+            Some(query) => store
+                .save_if_unchanged(&query.id, &query.content(), input)
+                .map_err(|error| error.to_string())?
+                .map_err(|why| stale(&query.name, why))?,
+        };
         self.core.events().emit(Event::SavedQueriesChanged);
         let connections = agent_connections(self);
         let on = runs_on(&saved, &connections);
@@ -400,8 +425,12 @@ impl Tools {
         request: DeleteSavedRequest,
     ) -> Result<String, String> {
         let (query, _) = self.reachable(&request.id)?;
-        self.approve(agent, SavedQueryChange::Delete { query: self.draft(input_of(&query)) }).await?;
-        self.core.saved_queries().remove(&query.id).map_err(|error| error.to_string())?;
+        self.approve(agent, SavedQueryChange::Delete { query: self.draft(query.content()) }).await?;
+        self.core
+            .saved_queries()
+            .remove_if_unchanged(&query.id, &query.content())
+            .map_err(|error| error.to_string())?
+            .map_err(|why| stale(&query.name, why))?;
         self.core.events().emit(Event::SavedQueriesChanged);
         Ok(format!("Deleted the saved query {}.", query.name))
     }
@@ -768,7 +797,7 @@ mod tests {
         assert_eq!((created.name.as_str(), created.parameters.as_slice()), ("Orders", &["status".to_string()][..]));
         let stored = s.core().saved_queries().get(&created.id).unwrap();
         assert_eq!(
-            super::input_of(&stored),
+            stored.content(),
             SavedQueryInput {
                 name: expected.name,
                 sql: expected.sql,
@@ -968,6 +997,129 @@ mod tests {
         assert_eq!(deleted.unwrap(), "Deleted the saved query Orders.");
         assert!(s.core().saved_queries().list().is_empty());
         assert_eq!(s.heard.changed(), 1);
+    }
+
+    fn rename(id: &str, name: &str) -> SaveQueryRequest {
+        SaveQueryRequest {
+            id: Some(id.into()),
+            name: Some(name.into()),
+            sql: None,
+            description: None,
+            folder: None,
+            scope: None,
+        }
+    }
+
+    fn resql(id: &str, sql: &str) -> SaveQueryRequest {
+        SaveQueryRequest {
+            id: Some(id.into()),
+            name: None,
+            sql: Some(sql.into()),
+            description: None,
+            folder: None,
+            scope: None,
+        }
+    }
+
+    /// Runs `work`, doing `meanwhile` to the core as each approval is asked
+    /// and then approving it; its outcome.
+    async fn approving_after<T>(s: &mut Setup, meanwhile: impl Fn(&Core), work: impl Future<Output = T>) -> T {
+        let core = s.tools.core.clone();
+        let asked = &mut s.asked;
+        let answer = async {
+            while let Some(request) = asked.recv().await {
+                meanwhile(&core);
+                core.mcp_approvals().answer(&request.id, true);
+            }
+        };
+        tokio::select! {
+            outcome = Box::pin(work) => outcome,
+            () = answer => unreachable!("the core keeps its events"),
+        }
+    }
+
+    #[tokio::test]
+    async fn two_approved_updates_of_one_query_never_undo_each_other() {
+        let mut s = setup();
+        let shop = s.connection("shop", Engine::Postgres, AgentAccess::Read, None);
+        let query = s.saved("Orders", "select 1", on(&shop), Engine::Postgres);
+        let (a, b) = (s.tools(), s.tools());
+
+        let ((renamed, resqled), asked) = s
+            .answering(true, async {
+                tokio::join!(
+                    a.save_saved(None, rename(&query.id, "Paid")),
+                    b.save_saved(None, resql(&query.id, "select 2"))
+                )
+            })
+            .await;
+        assert_eq!(asked.len(), 2, "both were asked");
+        let stored = s.core().saved_queries().get(&query.id).unwrap();
+        let changed = changed_meanwhile("Orders");
+        match (renamed, resqled) {
+            (Ok(done), Err(refused)) => {
+                assert_eq!(refused, changed);
+                assert_eq!(
+                    (done.name.as_str(), stored.name.as_str(), stored.sql.as_str()),
+                    ("Paid", "Paid", "select 1")
+                );
+            }
+            (Err(refused), Ok(done)) => {
+                assert_eq!(refused, changed);
+                assert_eq!(
+                    (done.sql.as_str(), stored.name.as_str(), stored.sql.as_str()),
+                    ("select 2", "Orders", "select 2")
+                );
+            }
+            other => panic!("exactly one is applied: {other:?}"),
+        }
+        assert_eq!(s.heard.changed(), 1, "only the applied one is heard");
+    }
+
+    #[tokio::test]
+    async fn a_user_edit_made_while_the_approval_waits_is_kept() {
+        let mut s = setup();
+        let shop = s.connection("shop", Engine::Postgres, AgentAccess::Read, None);
+        let query = s.saved("Orders", "select 1", on(&shop), Engine::Postgres);
+        let tools = s.tools();
+        let mut edit = query.content();
+        edit.folder = Some("Mine".into());
+        let user_edit = |core: &Core| {
+            core.saved_queries().save(Some(&query.id), edit.clone()).unwrap();
+        };
+
+        let refused = approving_after(&mut s, user_edit, tools.save_saved(None, resql(&query.id, "select 2"))).await;
+        assert_eq!(refused.unwrap_err(), changed_meanwhile("Orders"));
+        let stored = s.core().saved_queries().get(&query.id).unwrap();
+        assert_eq!(stored.content(), edit, "the user's edit stays");
+        assert_eq!(s.heard.changed(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_delete_of_a_query_changed_or_deleted_meanwhile_does_nothing() {
+        let mut s = setup();
+        let shop = s.connection("shop", Engine::Postgres, AgentAccess::Read, None);
+        let query = s.saved("Orders", "select 1", on(&shop), Engine::Postgres);
+        let tools = s.tools();
+        let mut edit = query.content();
+        edit.sql = "select 3".into();
+        let user_edit = |core: &Core| {
+            core.saved_queries().save(Some(&query.id), edit.clone()).unwrap();
+        };
+        let delete = || tools.delete_saved(None, DeleteSavedRequest { id: query.id.clone() });
+
+        let refused = approving_after(&mut s, user_edit, delete()).await;
+        assert_eq!(refused.unwrap_err(), changed_meanwhile("Orders"));
+        assert_eq!(s.core().saved_queries().get(&query.id).unwrap().content(), edit);
+
+        let user_delete = |core: &Core| {
+            let _ = core.saved_queries().remove(&query.id);
+        };
+        let gone = approving_after(&mut s, user_delete, delete()).await;
+        assert_eq!(gone.unwrap_err(), deleted_meanwhile("Orders"));
+        let updated = approving_after(&mut s, |_: &Core| {}, tools.save_saved(None, rename(&query.id, "x"))).await;
+        assert_eq!(updated.unwrap_err(), not_found(&query.id), "no word of connections");
+        assert_eq!(s.heard.changed(), 0);
     }
 
     #[tokio::test]
