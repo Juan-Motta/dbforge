@@ -12,6 +12,7 @@ mod keyspace;
 mod mcp;
 mod palette;
 mod query;
+mod saved;
 mod settings;
 mod shell;
 mod statements;
@@ -30,6 +31,7 @@ pub use self::keyspace::KeyspaceMessages;
 pub use self::mcp::McpMessages;
 pub use self::palette::PaletteMessages;
 pub use self::query::{HistoryMessages, PlanMessages, QueryMessages, thousands};
+pub use self::saved::SavedMessages;
 pub use self::settings::{SettingsMessages, TagsMessages};
 pub use self::shell::{AppMenuMessages, ShellMessages};
 pub use self::statements::StatementMessages;
@@ -155,6 +157,8 @@ pub struct Messages {
     pub connection: ConnectionMessages,
     /// The query console, its results and the history.
     pub query: QueryMessages,
+    /// Saved queries: the Library, saving a console, running one with parameters.
+    pub saved: SavedMessages,
     /// A table's tab: its rows, their pending changes, the cell inspector.
     pub table: TableMessages,
     /// A table's structure: its columns, indexes, keys, triggers and DDL.

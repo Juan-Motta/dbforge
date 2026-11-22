@@ -4,4 +4,4 @@
 pub mod format;
 mod panel;
 
-pub use panel::{HistoryEvent, HistoryPanel, WIDTH};
+pub use panel::{HistoryEvent, HistoryPanel, NEW_TAB_CLICK};

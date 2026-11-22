@@ -100,6 +100,7 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::ui::code_editor::key_bindings());
     cx.bind_keys(crate::grid::key_bindings());
     cx.bind_keys(crate::query::key_bindings());
+    cx.bind_keys(crate::saved::key_bindings());
     cx.bind_keys(crate::table::key_bindings());
     cx.bind_keys(crate::ui::menu::key_bindings());
     cx.bind_keys(crate::ui::select::key_bindings());

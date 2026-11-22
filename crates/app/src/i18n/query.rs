@@ -11,9 +11,9 @@ pub struct QueryMessages {
     pub container_to_query: &'static str,
     pub no_containers: &'static str,
     pub could_not_cancel: fn(&str) -> String,
-    /// The History button's tooltip, with its shortcut.
-    pub history_title: fn(&str) -> String,
-    pub history: &'static str,
+    /// The Library button's tooltip, with its shortcut.
+    pub library_title: fn(&str) -> String,
+    pub library: &'static str,
     pub cancel: &'static str,
     pub cancelling: &'static str,
     pub run: &'static str,
@@ -65,7 +65,6 @@ pub struct PlanMessages {
 /// The history panel's texts in one language.
 pub struct HistoryMessages {
     pub title: &'static str,
-    pub close: &'static str,
     pub search_placeholder: &'static str,
     pub errors: &'static str,
     pub this_connection: &'static str,

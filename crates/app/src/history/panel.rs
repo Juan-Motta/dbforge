@@ -1,8 +1,9 @@
-//! The history beside a console: the runs, newest first and grouped by day,
-//! searched by their SQL, narrowed to errors, to this connection or not. A
-//! click puts a run's SQL in the console; ⌘-click (Ctrl-click) opens it in a
-//! new tab. While a new list loads the previous one stays, so typing in the
-//! search never flickers.
+//! The History view of a console's Library: the runs, newest first and
+//! grouped by day, searched by their SQL, narrowed to errors, to this
+//! connection or not. A click puts a run's SQL in the console; ⌘-click
+//! (Ctrl-click) opens it in a new tab. While a new list loads the previous
+//! one stays, so typing in the search never flickers. The Library draws the
+//! header above it.
 
 use crate::ui::Ellipsis;
 use chrono::Local;
@@ -17,13 +18,10 @@ use super::format::{first_line, format_duration, format_time, group_by_day, outc
 use crate::backend::Backend;
 use crate::i18n::Translate;
 use crate::theme::{ActiveTheme, MONO};
-use crate::ui::{TextInput, TextInputEvent, any, capsule, dot, group, icon, segment, spinner};
-
-/// The panel's width.
-pub const WIDTH: f32 = 320.;
+use crate::ui::{TextInput, TextInputEvent, any, capsule, dot, group, icon, segment, segment_face, segmented};
 
 /// How a click that opens a new tab is written on this OS.
-const NEW_TAB_CLICK: &str = if cfg!(target_os = "macos") { "⌘-click" } else { "Ctrl-click" };
+pub const NEW_TAB_CLICK: &str = if cfg!(target_os = "macos") { "⌘-click" } else { "Ctrl-click" };
 
 /// What the panel asks of its console.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,7 +30,6 @@ pub enum HistoryEvent {
     Load(HistoryEntry),
     /// Open this run's SQL in a new console on its own connection.
     OpenNew(HistoryEntry),
-    Close,
 }
 
 /// One row of the list: a day's heading or a run.
@@ -82,6 +79,11 @@ impl HistoryPanel {
         };
         panel.reload(cx);
         panel
+    }
+
+    /// A list is being read; the previous one shows meanwhile.
+    pub fn is_loading(&self) -> bool {
+        self.loading
     }
 
     /// Reads the list again: after a run, or when a filter changed.
@@ -245,42 +247,9 @@ impl Render for HistoryPanel {
         let toggle =
             |id: &'static str, label: &'static str, on: bool| segment(&theme, None, label, on).id(id).cursor_pointer();
         div()
-            .w(px(WIDTH))
-            .flex_none()
-            .h_full()
+            .size_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(px(44.))
-                    .flex_none()
-                    .px(px(14.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).text_size(px(13.)).child(m.title))
-                    // The spinner keeps its room, so the header never moves while a list loads.
-                    .child(
-                        div()
-                            .size(px(14.))
-                            .when(self.loading, |slot| slot.child(spinner("history-loading", theme.text3, 14.))),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        div()
-                            .id("close-history")
-                            .size(px(26.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(13.))
-                            .cursor_pointer()
-                            .hover(|button| button.bg(theme.sel))
-                            .tooltip(crate::ui::field::Tooltip::text(m.close))
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(HistoryEvent::Close)))
-                            .child(icon("close", theme.text2, 13.)),
-                    ),
-            )
             .child(
                 div()
                     .px(px(10.))
@@ -301,14 +270,20 @@ impl Render for HistoryPanel {
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_errors(cx))))],
                     )),
             )
-            .child(div().px(px(10.)).pt(px(8.)).child(group(
+            .child(div().px(px(10.)).pt(px(8.)).flex().child(segmented(
                 &theme,
+                "history-scope",
+                Some(if self.this_connection { 0 } else { 1 }),
                 vec![
-                        any(toggle("scope-connection", m.this_connection, self.this_connection)
-                            .on_click(cx.listener(|this, _, _, cx| this.set_scope(true, cx)))),
-                        any(toggle("scope-all", m.all, !self.this_connection)
-                            .on_click(cx.listener(|this, _, _, cx| this.set_scope(false, cx)))),
-                    ],
+                    any(segment_face(&theme, None, m.this_connection, self.this_connection)
+                        .id("scope-connection")
+                        .cursor_pointer()
+                        .on_click(cx.listener(|this, _, _, cx| this.set_scope(true, cx)))),
+                    any(segment_face(&theme, None, m.all, !self.this_connection)
+                        .id("scope-all")
+                        .cursor_pointer()
+                        .on_click(cx.listener(|this, _, _, cx| this.set_scope(false, cx)))),
+                ],
             )))
             .child(div().flex_1().min_h_0().pt(px(4.)).child(self.body(cx)))
             .child(

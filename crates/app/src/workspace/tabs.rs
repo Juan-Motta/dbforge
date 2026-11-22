@@ -1,6 +1,7 @@
 //! The open tabs, apart from drawing them: which are open, which one shows,
 //! and how opening and closing change that. Query consoles are numbered
-//! "Query 1", "Query 2"… for as long as the app runs. A table opens once
+//! "Query 1", "Query 2"… for as long as the app runs, and take a saved
+//! query's name once they are one. A table opens once
 //! (opening it again shows its tab), or filtered in a tab of its own (a
 //! foreign key followed); a schema's diagram and a Redis database's key
 //! browser open once too.
@@ -133,6 +134,17 @@ impl Tabs {
         &self.tabs[index]
     }
 
+    /// Retitles the tab `id` (a console that became a saved query); whether it is open.
+    pub fn set_title(&mut self, id: &str, title: impl Into<String>) -> bool {
+        match self.tabs.iter_mut().find(|tab| tab.id == id) {
+            Some(tab) => {
+                tab.title = title.into();
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Shows the tab `id`, if it is open.
     pub fn activate(&mut self, id: &str) {
         if self.tabs.iter().any(|tab| tab.id == id) {
@@ -217,6 +229,19 @@ mod tests {
         let scope = QueryScope { database: Some("shop".into()), container: Some("orders".into()) };
         let tab = tabs.new_query(en, "cosmos", scope.clone(), None);
         assert_eq!(tab.kind, TabKind::Query { scope, initial_sql: None }, "a Cosmos DB console keeps its container");
+    }
+
+    #[test]
+    fn retitles_an_open_tab_and_keeps_numbering_the_next_ones() {
+        let mut tabs = Tabs::default();
+        tabs.new_query(en, "pg", QueryScope::default(), None);
+        tabs.new_query(en, "pg", QueryScope::default(), None);
+        assert!(tabs.set_title("query:1", "Orders by status"));
+        assert!(!tabs.set_title("query:9", "Nope"), "a closed tab");
+        assert_eq!(titles(&tabs), ["Orders by status", "Query 2"]);
+        assert_eq!(tabs.active_id(), Some("query:2"), "retitling shows nothing else");
+        tabs.new_query(en, "pg", QueryScope::default(), None);
+        assert_eq!(titles(&tabs)[2], "Query 3");
     }
 
     #[test]

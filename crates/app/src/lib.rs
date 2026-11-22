@@ -26,6 +26,7 @@ pub mod menu_bar;
 pub mod palette;
 pub mod preferences;
 pub mod query;
+pub mod saved;
 pub mod settings;
 pub mod shell;
 pub mod sql;
