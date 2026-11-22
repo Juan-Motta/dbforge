@@ -6,7 +6,9 @@
 //! ([`Approvals`], [`ApprovalDialog`]). The core owns the server, the token
 //! and the wait for an answer; nothing here answers for the user.
 
+mod access;
 mod agent_setup;
+pub mod agents;
 mod approvals;
 mod dialog;
 mod queue;
@@ -15,4 +17,4 @@ pub mod setup;
 
 pub use approvals::Approvals;
 pub use dialog::{ApprovalDialog, key_bindings};
-pub use section::McpSection;
+pub use section::{McpSection, McpSectionEvent};

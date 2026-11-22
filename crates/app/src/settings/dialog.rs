@@ -12,7 +12,7 @@ use super::{PasswordsSection, Section};
 use crate::backup::{BackupEvent, BackupSection};
 use crate::dump::ExportSettings;
 use crate::i18n::{Language, Locale, Translate};
-use crate::mcp::McpSection;
+use crate::mcp::{McpSection, McpSectionEvent};
 use crate::preferences::Preferences;
 use crate::tags::TagsSection;
 use crate::tags::section::TagsEvent;
@@ -25,6 +25,10 @@ use crate::updates::Updates;
 actions!(settings_dialog, [Dismiss]);
 
 const CONTEXT: &str = "SettingsDialog";
+
+/// The dialog's size, the same for every section; a smaller window shrinks it to fit.
+const WIDTH: f32 = 1000.;
+const HEIGHT: f32 = 680.;
 
 /// The themes, in the order the former web UI shows them.
 const THEMES: [ThemePreference; 3] = [ThemePreference::Dark, ThemePreference::Light, ThemePreference::System];
@@ -39,7 +43,8 @@ pub enum SettingsEvent {
     /// The tags were saved: connections show their new names and colours,
     /// and lost a deleted tag when `removed`.
     TagsSaved { removed: bool },
-    /// A backup brought connections and tags in: the explorer reads them again.
+    /// A backup brought connections and tags in, or an agent access was
+    /// saved: the explorer reads them again.
     ConnectionsChanged,
 }
 
@@ -49,8 +54,9 @@ pub struct SettingsDialog {
     passwords: Entity<PasswordsSection>,
     exports: Entity<ExportSettings>,
     backup: Entity<BackupSection>,
-    /// Agents (MCP) while it is shown: the token is read only when the user goes there.
-    agents: Option<Entity<McpSection>>,
+    /// Agents (MCP) while it is shown, with what it tells the dialog: the
+    /// token is read only when the user goes there.
+    agents: Option<(Entity<McpSection>, Subscription)>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -113,7 +119,12 @@ impl SettingsDialog {
         if section != Section::Agents {
             self.agents = None;
         } else if self.agents.is_none() {
-            self.agents = Some(cx.new(|cx| McpSection::new(window, cx)));
+            let agents = cx.new(|cx| McpSection::new(window, cx));
+            // An agent access saved there shows in the explorer too.
+            let changed = cx.subscribe(&agents, |_, _, McpSectionEvent::ConnectionsChanged, cx| {
+                cx.emit(SettingsEvent::ConnectionsChanged);
+            });
+            self.agents = Some((agents, changed));
         }
         self.section = section;
         cx.notify();
@@ -171,7 +182,9 @@ impl SettingsDialog {
             Section::Agents => (
                 m.agents,
                 Some(m.agents_intro),
-                self.agents.clone().map_or_else(|| div().into_any_element(), |agents| agents.into_any_element()),
+                self.agents
+                    .as_ref()
+                    .map_or_else(|| div().into_any_element(), |(agents, _)| agents.clone().into_any_element()),
             ),
         };
         div()
@@ -365,8 +378,8 @@ impl Render for SettingsDialog {
             .key_context(CONTEXT)
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))
             .bg(theme.card)
-            .w(px(880.))
-            .h(px(620.))
+            .w(px(WIDTH))
+            .h(px(HEIGHT))
             .max_w_full()
             .max_h_full()
             .rounded(px(22.))

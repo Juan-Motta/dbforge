@@ -34,7 +34,7 @@ use std::time::Duration;
 use dbforge_core::connections::tags::Tag;
 use gpui::{
     Animation, AnimationExt, AnyElement, BoxShadow, Div, ElementId, FontWeight, Hsla, IntoElement, ParentElement,
-    Styled, Transformation, div, percentage, point, px, svg,
+    Styled, Transformation, div, percentage, point, prelude::FluentBuilder, px, svg,
 };
 
 pub use button::{button, enabled, ghost_button, icon_button};
@@ -152,6 +152,31 @@ pub fn spinner(id: impl Into<ElementId>, tint: Hsla, size: f32) -> impl IntoElem
         Animation::new(Duration::from_millis(900)).repeat(),
         |ring, turned| ring.with_transformation(Transformation::rotate(percentage(turned))),
     )
+}
+
+/// An on/off switch: a track with its knob at the end while `on`, the
+/// accent's while on. The owner adds the id, the tooltip and the click.
+pub fn switch(theme: &Theme, on: bool) -> Div {
+    div()
+        .w(px(40.))
+        .h(px(24.))
+        .flex_none()
+        .p(px(2.))
+        .flex()
+        .items_center()
+        .rounded(px(12.))
+        .map(|track| {
+            if on {
+                track.justify_end().bg(gpui::linear_gradient(
+                    180.,
+                    gpui::linear_color_stop(theme.accent_hi, 0.),
+                    gpui::linear_color_stop(theme.accent, 1.),
+                ))
+            } else {
+                track.justify_start().bg(theme.line)
+            }
+        })
+        .child(div().size(px(20.)).rounded(px(10.)).bg(gpui::white()).shadow(shadow(6., 2., 0x00000059)))
 }
 
 /// The accent's capsule button: Run, a dialog's main action.

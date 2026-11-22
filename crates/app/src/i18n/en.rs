@@ -964,7 +964,6 @@ pub(super) const MESSAGES: Messages = Messages {
         enable: "Let AI agents use DBForge",
         enable_description: "Runs an MCP server on this computer while DBForge is open. Agents query your \
                              connections without seeing their passwords.",
-        listening: "Agents can connect",
         failed: "The server isn’t running",
         port: "Port",
         port_help: "Only this computer can reach it (127.0.0.1). Press Enter to apply.",
@@ -976,7 +975,6 @@ pub(super) const MESSAGES: Messages = Messages {
         regenerate: "Regenerate",
         regenerate_confirm: "Agents using the current token will stop connecting.",
         cancel: "Cancel",
-        add_to_agents: "Add DBForge to an agent",
         claude_code: "Claude Code",
         codex: "Codex",
         opencode: "OpenCode",
@@ -995,7 +993,6 @@ pub(super) const MESSAGES: Messages = Messages {
                                hold no token.",
         transport_http_note: "The agent connects to DBForge while it is open, with the token. If DBForge was \
                               closed when the agent started, restart the agent.",
-        prompt_title: "Or let the agent set it up: paste this prompt into it",
         prompt_help: "The prompt carries the token; it adds DBForge for every project and notes it in the current \
                       one.",
         prompt_help_stdio: "The prompt adds DBForge for every project and notes it in the current one.",
@@ -1004,6 +1001,49 @@ pub(super) const MESSAGES: Messages = Messages {
                       choose Agent access. Read only blocks writes, not everything an administrator account can \
                       do (ending sessions, server settings); for agents, a database user with only the rights \
                       they need is safest.",
+        status_running: "Running",
+        status_stopped: "Stopped",
+        status_failed: "Failed",
+        status_on: "Agents can use DBForge",
+        status_off: "Agents can’t use DBForge",
+        server_on: |address| format!("MCP server on {address}"),
+        agents_connected: |count| match count {
+            1 => "1 agent connected".to_owned(),
+            count => format!("{count} agents connected"),
+        },
+        statements_today: |count| match count {
+            1 => "1 agent statement today".to_owned(),
+            count => format!("{count} agent statements today"),
+        },
+        changes_waiting: |count| match count {
+            1 => "1 change waiting for you".to_owned(),
+            count => format!("{count} changes waiting for you"),
+        },
+        port_and_token: "Port and token",
+        your_agents: "Your agents",
+        add_one: "Add one",
+        no_agents: "Agents show here once they use DBForge.",
+        connected: "Connected",
+        seen_minutes_ago: |minutes| format!("Seen {minutes} min ago"),
+        seen_hours_ago: |hours| format!("Seen {hours} h ago"),
+        seen_days_ago: |days| match days {
+            1 => "Seen yesterday".to_owned(),
+            days => format!("Seen {days} days ago"),
+        },
+        not_seen: "Not seen since DBForge opened",
+        reaches_stdio: "Starts DBForge itself · added for every project",
+        reaches_http: "Connects over HTTP with the token · added for every project",
+        paste_prompt: "Paste a prompt",
+        run_command: "Run a command",
+        prompt_hint: |agent| format!("Paste it into {agent}: it adds DBForge, checks it and notes it in the project."),
+        command_hint: |agent| format!("Add DBForge to {agent} yourself, then note it in the project."),
+        copy_prompt: "Copy prompt",
+        reach_title: "What agents can reach",
+        reach_hint: "Hidden connections don’t exist for agents",
+        access_hidden: "Hidden",
+        access_read: "Read only",
+        access_write: "Read and write",
+        no_connections: "No saved connections yet.",
     },
     updates: UpdateMessages {
         title: "Software Update",

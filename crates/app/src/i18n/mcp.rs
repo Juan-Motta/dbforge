@@ -18,7 +18,6 @@ pub struct McpMessages {
     // The settings
     pub enable: &'static str,
     pub enable_description: &'static str,
-    pub listening: &'static str,
     pub failed: &'static str,
     pub port: &'static str,
     pub port_help: &'static str,
@@ -30,7 +29,6 @@ pub struct McpMessages {
     pub regenerate: &'static str,
     pub regenerate_confirm: &'static str,
     pub cancel: &'static str,
-    pub add_to_agents: &'static str,
     pub claude_code: &'static str,
     pub codex: &'static str,
     pub opencode: &'static str,
@@ -47,10 +45,47 @@ pub struct McpMessages {
     pub transport_http: &'static str,
     pub transport_stdio_note: &'static str,
     pub transport_http_note: &'static str,
-    pub prompt_title: &'static str,
     pub prompt_help: &'static str,
     pub prompt_help_stdio: &'static str,
     /// The agent's instructions file (`CLAUDE.md`, `AGENTS.md`).
     pub note_title: fn(&str) -> String,
     pub access_note: &'static str,
+    // The status card
+    pub status_running: &'static str,
+    pub status_stopped: &'static str,
+    pub status_failed: &'static str,
+    /// The card's title while the server runs, and while it is off.
+    pub status_on: &'static str,
+    pub status_off: &'static str,
+    /// The address agents reach, `127.0.0.1:7419`.
+    pub server_on: fn(&str) -> String,
+    pub agents_connected: fn(usize) -> String,
+    pub statements_today: fn(usize) -> String,
+    pub changes_waiting: fn(usize) -> String,
+    pub port_and_token: &'static str,
+    // The agents
+    pub your_agents: &'static str,
+    pub add_one: &'static str,
+    pub no_agents: &'static str,
+    pub connected: &'static str,
+    pub seen_minutes_ago: fn(i64) -> String,
+    pub seen_hours_ago: fn(i64) -> String,
+    pub seen_days_ago: fn(i64) -> String,
+    pub not_seen: &'static str,
+    /// How the agent shown reaches DBForge, under its name.
+    pub reaches_stdio: &'static str,
+    pub reaches_http: &'static str,
+    pub paste_prompt: &'static str,
+    pub run_command: &'static str,
+    /// The agent's name.
+    pub prompt_hint: fn(&str) -> String,
+    pub command_hint: fn(&str) -> String,
+    pub copy_prompt: &'static str,
+    // What agents can reach
+    pub reach_title: &'static str,
+    pub reach_hint: &'static str,
+    pub access_hidden: &'static str,
+    pub access_read: &'static str,
+    pub access_write: &'static str,
+    pub no_connections: &'static str,
 }
