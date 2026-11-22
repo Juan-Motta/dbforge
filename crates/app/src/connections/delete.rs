@@ -99,7 +99,7 @@ impl Render for DeleteConnectionDialog {
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Confirm, _, cx| this.delete(cx)))
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))
-            .bg(theme.card)
+            .bg(theme.dialog)
             .w(px(400.))
             .rounded(px(22.))
             .p(px(22.))

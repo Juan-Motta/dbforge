@@ -97,6 +97,9 @@ pub struct Theme {
     pub glass: Hsla,
     pub glass_hi: Hsla,
     pub card: Hsla,
+    /// Dialogs, menus and popovers that float over the workspace: the card's
+    /// colour, opaque, so nothing behind shows through their text.
+    pub dialog: Hsla,
     /// The light edge of a panel.
     pub rim: Hsla,
     pub line: Hsla,
@@ -137,6 +140,7 @@ impl Theme {
             glass: pick(0x222128C7, 0xFFFFFFBD),
             glass_hi: pick(0xFFFFFF1A, 0xFFFFFFE6),
             card: pick(0x16151BE6, 0xFFFFFFEB),
+            dialog: pick(0x16151BFF, 0xFFFFFFFF),
             rim: pick(0xFFFFFF29, 0xFFFFFFB3),
             line: pick(0xFFFFFF14, 0x1C1A2214),
             sel: pick(0xFFFFFF1F, 0x1C1A2212),

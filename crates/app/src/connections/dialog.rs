@@ -710,7 +710,7 @@ impl Render for ConnectionDialog {
             Section::Ssh => self.render_ssh(window, cx).into_any_element(),
         };
         glass(&theme)
-            .bg(theme.card)
+            .bg(theme.dialog)
             .rounded(px(22.))
             .overflow_hidden()
             .track_focus(&self.focus)

@@ -397,7 +397,7 @@ impl Render for SettingsDialog {
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))
-            .bg(theme.card)
+            .bg(theme.dialog)
             .w(px(WIDTH))
             .h(px(HEIGHT))
             .max_w_full()

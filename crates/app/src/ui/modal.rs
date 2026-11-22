@@ -12,7 +12,7 @@ use crate::theme::Theme;
 /// The dialog's card, `width` wide at most; it never grows past the window.
 pub fn modal(theme: &Theme, width: f32, title: impl Into<gpui::SharedString>) -> Div {
     glass(theme)
-        .bg(theme.card)
+        .bg(theme.dialog)
         .w(px(width))
         .max_w_full()
         .max_h_full()
