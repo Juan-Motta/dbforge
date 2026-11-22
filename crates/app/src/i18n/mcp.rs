@@ -47,8 +47,6 @@ pub struct McpMessages {
     pub transport_http_note: &'static str,
     pub prompt_help: &'static str,
     pub prompt_help_stdio: &'static str,
-    /// The agent's instructions file (`CLAUDE.md`, `AGENTS.md`).
-    pub note_title: fn(&str) -> String,
     pub access_note: &'static str,
     // The status card
     pub status_running: &'static str,

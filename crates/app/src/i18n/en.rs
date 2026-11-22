@@ -995,10 +995,8 @@ pub(super) const MESSAGES: Messages = Messages {
                                hold no token.",
         transport_http_note: "The agent connects to DBForge while it is open, with the token. If DBForge was \
                               closed when the agent started, restart the agent.",
-        prompt_help: "The prompt carries the token; it adds DBForge for every project and notes it in the current \
-                      one.",
-        prompt_help_stdio: "The prompt adds DBForge for every project and notes it in the current one.",
-        note_title: |file| format!("So it uses DBForge in a project: add to its {file}"),
+        prompt_help: "The prompt carries the token; it adds DBForge for every project.",
+        prompt_help_stdio: "The prompt adds DBForge for every project.",
         access_note: "Agents only see connections you give them access to: open a connection’s settings and \
                       choose Agent access. Read only blocks writes, not everything an administrator account can \
                       do (ending sessions, server settings); for agents, a database user with only the rights \
@@ -1037,7 +1035,7 @@ pub(super) const MESSAGES: Messages = Messages {
         reaches_http: "Connects over HTTP with the token · added for every project",
         paste_prompt: "Paste a prompt",
         run_command: "Run a command",
-        prompt_hint: |agent| format!("Paste it into {agent}: it adds DBForge, checks it and notes it in the project."),
+        prompt_hint: |agent| format!("Paste it into {agent}: it adds DBForge for every project and checks it."),
         command_hint: |agent| format!("Add DBForge to {agent} yourself, then note it in the project."),
         copy_prompt: "Copy prompt",
         reach_title: "What agents can reach",

@@ -1031,9 +1031,8 @@ pub(super) const MESSAGES: Messages = Messages {
                                configuración no lleva token.",
         transport_http_note: "El agente se conecta a DBForge mientras está abierto, con el token. Si DBForge \
                               estaba cerrado cuando el agente arrancó, reinicia el agente.",
-        prompt_help: "El prompt lleva el token; añade DBForge para todos los proyectos y lo anota en el actual.",
-        prompt_help_stdio: "El prompt añade DBForge para todos los proyectos y lo anota en el actual.",
-        note_title: |file| format!("Para que use DBForge en un proyecto: añade a su {file}"),
+        prompt_help: "El prompt lleva el token; añade DBForge para todos los proyectos.",
+        prompt_help_stdio: "El prompt añade DBForge para todos los proyectos.",
         access_note: "Los agentes solo ven las conexiones a las que les des acceso: abre la configuración de una \
                       conexión y elige Acceso de agentes. Solo lectura bloquea las escrituras, no todo lo que \
                       puede hacer una cuenta de administrador (cerrar sesiones, ajustes del servidor); para \
@@ -1072,7 +1071,7 @@ pub(super) const MESSAGES: Messages = Messages {
         reaches_http: "Se conecta por HTTP con el token · añadido para todos los proyectos",
         paste_prompt: "Pegar un prompt",
         run_command: "Ejecutar un comando",
-        prompt_hint: |agent| format!("Pégalo en {agent}: añade DBForge, lo comprueba y lo anota en el proyecto."),
+        prompt_hint: |agent| format!("Pégalo en {agent}: añade DBForge para todos los proyectos y lo comprueba."),
         command_hint: |agent| format!("Añade DBForge a {agent} tú mismo y anótalo en el proyecto."),
         copy_prompt: "Copiar prompt",
         reach_title: "Qué pueden alcanzar los agentes",

@@ -15,10 +15,7 @@ use gpui::{
 
 use super::agents::{Ago, Pick, ago, is_connected, shown_pick, to_add};
 use super::section::{McpSection, SetupMode, tile, value_row};
-use super::setup::{
-    AgentId, Endpoint, Step, StepKind, TRANSPORTS, Transport, agent_prompt, instructions_file, project_note,
-    server_url, setup_steps,
-};
+use super::setup::{AgentId, Endpoint, Step, StepKind, TRANSPORTS, Transport, agent_prompt, server_url, setup_steps};
 use crate::i18n::{McpMessages, Translate};
 use crate::theme::{MONO, Theme, color};
 use crate::ui::field::Tooltip;
@@ -136,11 +133,10 @@ pub(super) struct Block {
     tall: bool,
 }
 
-/// The setup of one agent: its steps, the prompt that has it add DBForge, and the project note.
+/// The setup of one agent: its steps, and the prompt that has it add DBForge.
 pub(super) struct Setup {
     pub steps: Vec<Block>,
     pub prompt: Block,
-    pub note: Block,
 }
 
 impl McpSection {
@@ -192,13 +188,6 @@ impl McpSection {
                 title: String::new(),
                 shown: agent_prompt(agent, shown),
                 copied: agent_prompt(agent, copied),
-                tall: true,
-            },
-            note: Block {
-                id: format!("{key}-note").into(),
-                title: (m.note_title)(instructions_file(agent)),
-                shown: project_note(),
-                copied: project_note(),
                 tall: true,
             },
         }
@@ -472,7 +461,7 @@ impl McpSection {
                     if transport == Transport::Stdio { m.transport_stdio_note } else { m.transport_http_note },
                 ))
         });
-        let Setup { steps, note: project, .. } = self.setup(m);
+        let Setup { steps, .. } = self.setup(m);
         let steps: Vec<AnyElement> =
             steps.into_iter().map(|block| self.render_block(theme, block, ready, cx)).collect();
         div()
@@ -483,7 +472,6 @@ impl McpSection {
             .gap(px(14.))
             .children(transports)
             .children(steps)
-            .child(self.render_block(theme, project, ready, cx))
     }
 }
 
