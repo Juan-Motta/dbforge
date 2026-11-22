@@ -645,6 +645,11 @@ impl QueryConsole {
             return None;
         }
         let m = &cx.messages().transactions;
+        // A failed transaction (PostgreSQL) answers every statement with an error until it is
+        // rolled back: say what to do instead of sending it.
+        if self.transaction.as_ref().is_some_and(|transaction| transaction.aborted) {
+            return Some(m.aborted_refused.to_owned());
+        }
         Some(match refusal(sql, self.syntax.dialect()?)? {
             Refusal::Control(keyword) => (m.control_refused)(&keyword),
             Refusal::ImplicitCommit(keyword) => (m.implicit_commit_refused)(&keyword),

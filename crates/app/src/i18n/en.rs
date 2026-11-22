@@ -1220,6 +1220,8 @@ pub(super) const MESSAGES: Messages = Messages {
         open: "Transaction open",
         failed: "Transaction failed",
         only_rollback: "only Rollback works",
+        aborted_refused: "A statement failed in this transaction, so the database ignores everything until it is \
+                          rolled back. Roll back, then run again. Nothing ran.",
         idle: |minutes| format!("Open {minutes} min · holds locks"),
         changes: |n| if n == 1 { "1 change".into() } else { format!("{n} changes") },
         rows: |n| if n == 1 { "1 row".into() } else { format!("{} rows", thousands(n)) },

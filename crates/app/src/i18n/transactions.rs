@@ -17,6 +17,8 @@ pub struct TransactionMessages {
     /// Its title after a statement failed (PostgreSQL), and what still works.
     pub failed: &'static str,
     pub only_rollback: &'static str,
+    /// Why a run is refused while the transaction has failed (PostgreSQL ignores it until rolled back).
+    pub aborted_refused: &'static str,
     /// Its title once the transaction has been idle `minutes`.
     pub idle: fn(u64) -> String,
     pub changes: fn(u32) -> String,

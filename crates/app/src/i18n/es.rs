@@ -1259,6 +1259,8 @@ pub(super) const MESSAGES: Messages = Messages {
         open: "Transacción abierta",
         failed: "Transacción fallida",
         only_rollback: "solo se puede revertir",
+        aborted_refused: "Una sentencia falló en esta transacción, así que la base de datos ignora todo hasta \
+                          revertirla. Reviértela y vuelve a ejecutar. No se ejecutó nada.",
         idle: |minutes| format!("Abierta {minutes} min · retiene bloqueos"),
         changes: |n| if n == 1 { "1 cambio".into() } else { format!("{n} cambios") },
         rows: |n| if n == 1 { "1 fila".into() } else { format!("{} filas", thousands(n)) },
