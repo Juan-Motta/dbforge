@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::model::{Connection, ConnectionInput, ConnectionParts};
+use super::model::{AgentAccess, Connection, ConnectionInput, ConnectionParts};
 use super::store::ConnectionStore;
 use super::tags::{Tag, TagStore};
 use crate::credentials::{Storage, StorageInfo, SwitchProgress};
@@ -20,6 +20,14 @@ pub async fn save_connection(store: &ConnectionStore, input: ConnectionInput) ->
     // A tunnel opened with the old settings or secret is not reused.
     crate::tunnel::close(&connection.id).await;
     Ok(connection)
+}
+
+/// Changes what agents may do with connection `id`, keeping its other
+/// settings and its secrets as they were. Agents' next calls use it at once.
+pub fn set_agent_access(store: &ConnectionStore, id: &str, access: AgentAccess) -> Result<Connection> {
+    let connection = Connection { agent_access: access, ..store.get(id)? };
+    // No secrets given: the saved password and SSH secret are kept.
+    store.save(ConnectionParts { connection, password: None, ssh_secret: None })
 }
 
 /// Saves a copy of a connection, its secrets included, under `name`.
@@ -100,4 +108,43 @@ pub fn save_tags(store: &ConnectionStore, tags: &TagStore, list: Vec<Tag>) -> Re
     let kept: Vec<String> = tags.list().into_iter().map(|tag| tag.id).collect();
     store.keep_only_tags(&kept)?;
     Ok(tags.list())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connections::store::tests::{connection, load, temp_store};
+
+    #[test]
+    fn changes_only_the_agent_access_keeping_everything_else_and_the_password() {
+        let (_dir, path) = temp_store();
+        let store = load(path.clone());
+        let saved = Connection { environment: Some("prod".into()), ..connection("a", "Shop") };
+        let parts = ConnectionParts {
+            connection: saved.clone(),
+            password: Some("s3cret".into()),
+            ssh_secret: Some("key".into()),
+        };
+        store.save(parts).unwrap();
+
+        let changed = set_agent_access(&store, "a", AgentAccess::Write).unwrap();
+        assert_eq!(changed, Connection { agent_access: AgentAccess::Write, ..saved.clone() });
+        assert_eq!(store.get("a").unwrap(), changed);
+        assert_eq!(store.password("a").unwrap().as_deref(), Some("s3cret"));
+        assert_eq!(store.ssh_secret("a").unwrap().as_deref(), Some("key"));
+        // Written to the file too. (Only the file is reopened: a second credential
+        // store on the same folder would pick the keychain, as an older install does.)
+        let file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(file[0]["agentAccess"], "write");
+    }
+
+    #[test]
+    fn an_unknown_connection_is_not_found() {
+        let (_dir, path) = temp_store();
+        let store = load(path);
+        assert!(
+            matches!(set_agent_access(&store, "missing", AgentAccess::Read), Err(AppError::NotFound(id)) if id == "missing")
+        );
+        assert!(store.list().is_empty());
+    }
 }

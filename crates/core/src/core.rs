@@ -15,7 +15,7 @@ use crate::events::Events;
 use crate::files::SetAside;
 use crate::history::HistoryStore;
 use crate::jobs::Jobs;
-use crate::mcp::{self, Approvals, McpServer, SessionFile, SettingsFile};
+use crate::mcp::{self, AgentRegistry, Approvals, McpServer, SessionFile, SettingsFile};
 use crate::query::QuerySessions;
 use crate::statement_log::{self, StatementLog};
 use crate::tunnel;
@@ -74,6 +74,8 @@ pub struct Core {
     mcp_settings: SettingsFile,
     mcp_server: McpServer,
     mcp_approvals: Approvals,
+    mcp_sessions: Arc<SessionFile>,
+    mcp_agents: AgentRegistry,
     statement_log: StatementLog,
     history: HistoryStore,
     set_aside: SetAside,
@@ -119,8 +121,10 @@ impl Core {
             query_sessions: QuerySessions::default(),
             jobs: Jobs::default(),
             mcp_settings,
-            mcp_server: McpServer::new(mcp_sessions),
+            mcp_server: McpServer::new(mcp_sessions.clone()),
             mcp_approvals: Approvals::default(),
+            mcp_sessions,
+            mcp_agents: AgentRegistry::default(),
             statement_log,
             history,
             set_aside: SetAside(set_aside),
@@ -171,6 +175,16 @@ impl Core {
 
     pub fn mcp_approvals(&self) -> &Approvals {
         &self.mcp_approvals
+    }
+
+    /// The agents' saved MCP sessions.
+    pub fn mcp_sessions(&self) -> &SessionFile {
+        &self.mcp_sessions
+    }
+
+    /// The agents that called a tool in this run.
+    pub fn mcp_agents(&self) -> &AgentRegistry {
+        &self.mcp_agents
     }
 
     pub fn statement_log(&self) -> &StatementLog {

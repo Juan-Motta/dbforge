@@ -32,6 +32,21 @@ impl SessionFile {
         Ok(Self { sessions: JsonFile::load(file, Vec::new)? })
     }
 
+    /// The agent of each saved session (its own name and version, as it sent
+    /// them when it connected), oldest session first.
+    pub fn agents(&self) -> Vec<(String, Option<String>)> {
+        self.sessions.read(|sessions| {
+            sessions
+                .iter()
+                .map(|saved| {
+                    let client = &saved.state.initialize_params.client_info;
+                    let version = Some(client.version.clone()).filter(|version| !version.is_empty());
+                    (client.name.clone(), version)
+                })
+                .collect()
+        })
+    }
+
     /// Where the file was moved when it couldn't be read at start.
     pub fn set_aside(&self) -> Option<&std::path::Path> {
         self.sessions.set_aside()
@@ -100,6 +115,20 @@ mod tests {
         assert_eq!(agent_of(reopened.load("a").await.unwrap()).as_deref(), Some("claude-code"));
         assert_eq!(agent_of(reopened.load("b").await.unwrap()), None);
         assert!(!std::fs::read_to_string(dir.path().join("mcp-sessions.json")).unwrap().contains("Bearer"));
+    }
+
+    #[tokio::test]
+    async fn lists_the_agents_of_the_saved_sessions_oldest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = SessionFile::load(dir.path().join("mcp-sessions.json")).unwrap();
+        assert!(file.agents().is_empty());
+        file.store("a", &state("claude-code")).await.unwrap();
+        file.store("b", &state("codex")).await.unwrap();
+        file.store("a", &state("claude-code")).await.unwrap();
+        assert_eq!(
+            file.agents(),
+            [("codex".to_owned(), Some("1".to_owned())), ("claude-code".to_owned(), Some("1".to_owned()))]
+        );
     }
 
     #[tokio::test]
