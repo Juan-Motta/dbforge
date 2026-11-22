@@ -287,6 +287,7 @@ pub(super) const MESSAGES: Messages = Messages {
         no_match: |search| format!("No saved query matches “{search}”."),
         hint: |click, save| format!("Click to load · {click} opens a new tab · {save} saves the current tab"),
         run: "Run",
+        explain: "Explain",
         open_in_tab: "Open in a new tab",
         more: "More",
         rename: "Rename…",

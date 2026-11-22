@@ -300,6 +300,7 @@ pub(super) const MESSAGES: Messages = Messages {
             format!("Clic para cargar · {click} abre una pestaña nueva · {save} guarda la pestaña actual")
         },
         run: "Ejecutar",
+        explain: "Explicar",
         open_in_tab: "Abrir en una pestaña nueva",
         more: "Más",
         rename: "Cambiar nombre…",

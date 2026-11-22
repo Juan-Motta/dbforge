@@ -16,7 +16,7 @@ use gpui::KeyBinding;
 
 pub use library::{LibraryEvent, LibraryPanel, LibraryView, WIDTH};
 pub use list::{SavedEvent, SavedPanel};
-pub use run_dialog::{RunDialog, RunDialogEvent, RunRequest};
+pub use run_dialog::{RunAction, RunDialog, RunDialogEvent, RunRequest};
 pub use save_form::{Draft, SaveForm, SaveFormEvent};
 pub use store::SavedStore;
 

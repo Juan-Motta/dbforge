@@ -21,6 +21,7 @@ pub struct SavedMessages {
     /// Given how a click that opens a new tab is written (`⌘-click`) and the save shortcut.
     pub hint: fn(&str, &str) -> String,
     pub run: &'static str,
+    pub explain: &'static str,
     pub open_in_tab: &'static str,
     pub more: &'static str,
     pub rename: &'static str,

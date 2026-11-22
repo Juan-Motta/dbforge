@@ -39,7 +39,15 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-/// A saved query to run, and where.
+/// What the values are asked for: to run the query, or to explain it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunAction {
+    #[default]
+    Run,
+    Explain,
+}
+
+/// A saved query to run (or explain), and where.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunRequest {
     pub query: SavedQuery,
@@ -49,6 +57,8 @@ pub struct RunRequest {
     pub connection_name: String,
     /// The tab of the console that asked, when one did.
     pub console: Option<String>,
+    /// Run it, or explain it (Explain in its console).
+    pub action: RunAction,
 }
 
 /// What the dialog tells its owner, besides closing ([`DismissEvent`]).
@@ -284,6 +294,7 @@ impl Render for RunDialog {
         let outcome = self.outcome(cx);
         let invalid = outcome.as_ref().err().and_then(param_of).map(str::to_owned);
         let ready = outcome.is_ok();
+        let explain = self.request.action == RunAction::Explain;
         let query = &self.request.query;
         let mut subtitle: Vec<String> = query.folder.iter().cloned().collect();
         subtitle.push(self.request.connection_name.clone());
@@ -369,9 +380,11 @@ impl Render for RunDialog {
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
                     )
                     .child(
-                        enabled(primary_button(&theme, m.run), ready)
+                        enabled(primary_button(&theme, if explain { m.explain } else { m.run }), ready)
                             .id("run-saved-run")
-                            .child(div().font_weight(FontWeight::MEDIUM).opacity(0.8).child(shortcuts::RUN))
+                            .when(!explain, |run| {
+                                run.child(div().font_weight(FontWeight::MEDIUM).opacity(0.8).child(shortcuts::RUN))
+                            })
                             .when(ready, |run| run.on_click(cx.listener(|this, _, _, cx| this.run(cx)))),
                     ),
             )

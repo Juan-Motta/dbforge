@@ -35,7 +35,7 @@ use crate::keyspace::{KeyBrowser, KeyBrowserEvent};
 use crate::query::{ConsoleEvent, QueryConsole};
 use crate::saved::rules::{Place, run_connection};
 use crate::saved::store;
-use crate::saved::{RunDialog, RunDialogEvent, RunRequest};
+use crate::saved::{RunAction, RunDialog, RunDialogEvent, RunRequest};
 use crate::shell::OpenObject;
 use crate::shell::explorer::tree::NodeKind;
 use crate::sql::snippets::table_ref;
@@ -212,7 +212,7 @@ impl Workspace {
             ConsoleEvent::OpenSaved(query) => {
                 self.open_saved(query.clone(), Some((connection_id, engine)), window, cx);
             }
-            ConsoleEvent::AskParameters { query, sql } => {
+            ConsoleEvent::AskParameters { query, sql, action } => {
                 let connection_name = self.connection_name(&connection_id, cx);
                 let request = RunRequest {
                     query: query.clone(),
@@ -220,6 +220,7 @@ impl Workspace {
                     connection_id,
                     connection_name,
                     console: Some(tab),
+                    action: *action,
                 };
                 self.ask_parameters(request, window, cx);
             }
@@ -308,6 +309,7 @@ impl Workspace {
             connection_id: connection.id,
             connection_name: connection.name,
             console: None,
+            action: RunAction::Run,
         };
         if parameters(&request.sql, request.query.engine).is_empty() {
             let sql = request.sql.clone();
@@ -364,7 +366,10 @@ impl Workspace {
         };
         let id = console.read(cx).session_id().to_owned();
         self.activate(&id, window, cx);
-        console.update(cx, |console, cx| console.run(sql, cx));
+        match request.action {
+            RunAction::Run => console.update(cx, |console, cx| console.run(sql, cx)),
+            RunAction::Explain => console.update(cx, |console, cx| console.explain(sql, cx)),
+        }
         store::mark_run(request.query.id, values, cx).detach();
     }
 

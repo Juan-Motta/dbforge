@@ -191,3 +191,31 @@ fn running_a_query_with_parameters_asks_for_valid_values_first(cx: &mut TestAppC
     });
     draw(cx);
 }
+
+#[gpui::test]
+fn explaining_a_saved_query_with_parameters_asks_for_them_first(cx: &mut TestAppContext) {
+    let _dir = setup(cx);
+    let (workspace, cx) = cx.add_window_view(|_, _| Workspace::default());
+    let connection = save_postgres(cx);
+    let query = save_query(
+        SavedQueryInput {
+            name: "Tables in a schema".into(),
+            sql: "select * from information_schema.tables where table_schema = :schema".into(),
+            description: None,
+            folder: None,
+            scope: SavedScope::Connection { connection_id: connection },
+            engine: Engine::Postgres,
+        },
+        cx,
+    );
+    workspace.update_in(cx, |workspace, window, cx| workspace.open_saved(query.clone(), None, window, cx));
+    let console = workspace.read_with(cx, |workspace, _| {
+        let tab = workspace.tabs().active().expect("a console for the query").id.clone();
+        workspace.console(&tab).cloned().expect("its console")
+    });
+    console.update(cx, |console, cx| console.explain_requested(cx));
+    cx.run_until_parked();
+    let dialog = workspace.read_with(cx, |workspace, _| workspace.run_dialog().cloned()).expect("the values first");
+    dialog.read_with(cx, |dialog, _| assert_eq!(dialog.request().action, super::RunAction::Explain));
+    draw(cx);
+}
