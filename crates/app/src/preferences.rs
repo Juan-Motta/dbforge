@@ -32,6 +32,8 @@ pub mod keys {
     pub const INSPECTOR_WIDTH: &str = "dbforge.inspectorWidth";
     pub const STATEMENTS_HEIGHT: &str = "dbforge.statementsHeight";
     pub const STATEMENTS_OPEN: &str = "dbforge.statementsOpen";
+    /// What a console's Library shows: `history` or `saved`.
+    pub const LIBRARY_VIEW: &str = "dbforge.libraryView";
 }
 
 type Values = BTreeMap<String, String>;

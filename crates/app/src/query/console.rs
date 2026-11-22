@@ -1,6 +1,6 @@
 //! A query console: the database it queries (and for Cosmos DB the
 //! container), the editor, the results of its last run below it and, on
-//! ⌘Y, the history beside them. Each console has its own core session (a
+//! ⌘Y, the Library beside them (its history and the saved queries). Each console has its own core session (a
 //! connection kept open between runs, so a transaction or a `SET` carries
 //! over); closing its tab closes it. SQL engines' consoles complete the
 //! database's names; MongoDB's takes mongosh, Cosmos DB's SQL over one
@@ -10,6 +10,12 @@
 //! script, as the web console did. Explain shows the plan of the same text
 //! instead; with Analyze it runs the statement to measure it, inside a
 //! transaction the core rolls back.
+//!
+//! ⌘S saves the console as a saved query: the first time a form under the
+//! toolbar asks for its name, folder and scope; once it is one (or when it
+//! was opened from one) ⌘S updates it, its tab takes its name, and the tab
+//! shows a dot while the text differs from the saved one. Running it with
+//! `:parameters` asks for their values first.
 
 use crate::ui::Ellipsis;
 use std::rc::Rc;
@@ -20,10 +26,13 @@ use dbforge_core::drivers::{ObjectKind, StatementResult};
 use dbforge_core::explorer::{completion_schema, list_objects};
 use dbforge_core::history::HistoryEntry;
 use dbforge_core::query::{QueryScope, cancel_query, close_session, explain_query, run_query};
+use dbforge_core::saved_queries::params::parameters;
+use dbforge_core::saved_queries::{SavedQuery, SavedQueryInput};
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px,
+    AnyElement, AnyView, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, StatefulInteractiveElement,
+    Styled, Subscription, Window, actions, deferred, div, linear_color_stop, linear_gradient, point,
+    prelude::FluentBuilder, px,
 };
 
 use super::plan::parse_plan;
@@ -31,19 +40,22 @@ use super::results::{LastRun, ResultsEvent, ResultsPanel};
 use super::shortcuts;
 use crate::backend::Backend;
 use crate::connections::engine::is_relational;
-use crate::history::{HistoryEvent, HistoryPanel};
 use crate::i18n::Translate;
+use crate::saved::rules::{Place, is_edited, run_connection};
+use crate::saved::store::{self, SavedStore};
+use crate::saved::{Draft, LibraryEvent, LibraryPanel, SaveForm, SaveFormEvent};
 use crate::sql::Syntax;
 use crate::sql::completion::CompletionNames;
 use crate::sql::statements::changes_structure;
 use crate::theme::{ActiveTheme, color};
 use crate::ui::field::Tooltip;
+use crate::ui::notice::{Tone, notify};
 use crate::ui::{
-    Checkbox, CodeEditor, MenuItem, PopoverMenu, any, button, capsule, card, enabled, group, icon, popover, segment,
-    shadow,
+    Checkbox, CodeEditor, CodeEditorEvent, MenuItem, PopoverMenu, any, button, capsule, card, enabled, group, icon,
+    popover, segment, shadow,
 };
 
-actions!(query_console, [Run, ToggleHistory]);
+actions!(query_console, [Run, ToggleLibrary, SaveQuery]);
 
 const CONTEXT: &str = "QueryConsole";
 
@@ -55,16 +67,33 @@ const GAP: f32 = 10.;
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     let context = Some(CONTEXT);
-    vec![KeyBinding::new("secondary-enter", Run, context), KeyBinding::new("secondary-y", ToggleHistory, context)]
+    vec![
+        KeyBinding::new("secondary-enter", Run, context),
+        KeyBinding::new("secondary-y", ToggleLibrary, context),
+        KeyBinding::new("secondary-s", SaveQuery, context),
+    ]
 }
 
 /// What a console asks of the workspace.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ConsoleEvent {
     /// Open this past run in a new console on its own connection.
     OpenQuery(HistoryEntry),
     /// Export this result's rows.
     ExportResult(StatementResult),
+    /// The console is this saved query (saved, opened, renamed): its tab takes its name.
+    Saved(SavedQuery),
+    /// Whether its text differs from its saved query changed: its tab's dot.
+    EditedChanged,
+    /// Run this saved query, asking for its parameters first.
+    RunSaved(SavedQuery),
+    /// Open this saved query in a new tab.
+    OpenSaved(SavedQuery),
+    /// Ask for the values of `sql`'s parameters (the console's text, of its
+    /// saved query), then run it here.
+    AskParameters { query: SavedQuery, sql: String },
+    /// Show this dialog over the window, or close the one shown.
+    Dialog(Option<AnyView>),
 }
 
 /// A run going now.
@@ -91,7 +120,14 @@ pub struct QueryConsole {
     containers_generation: u64,
     editor: Entity<CodeEditor>,
     results: Entity<ResultsPanel>,
-    history: Option<Entity<HistoryPanel>>,
+    /// The Library beside the console, and what the console hears from it.
+    library: Option<(Entity<LibraryPanel>, Subscription)>,
+    /// The saved query the console is, once saved or when opened from one.
+    saved: Option<SavedQuery>,
+    /// Its text differs from its saved query's.
+    edited: bool,
+    /// The form saving it the first time, open.
+    save_form: Option<(Entity<SaveForm>, [Subscription; 2])>,
     running: Option<Running>,
     /// An explain going now.
     explaining: bool,
@@ -131,6 +167,11 @@ impl QueryConsole {
         let exporting = cx.subscribe(&results, |_, _, ResultsEvent::Export(result): &ResultsEvent, cx| {
             cx.emit(ConsoleEvent::ExportResult(result.clone()));
         });
+        let typing = cx.subscribe(&editor, |this, _, CodeEditorEvent::Changed: &CodeEditorEvent, cx| {
+            this.sync_edited(cx);
+        });
+        let store = SavedStore::global(cx);
+        let following = cx.observe(&store, Self::follow_saved);
         let mut console = Self {
             session_id,
             connection_id,
@@ -143,7 +184,10 @@ impl QueryConsole {
             containers_generation: 0,
             editor,
             results,
-            history: None,
+            library: None,
+            saved: None,
+            edited: false,
+            save_form: None,
             running: None,
             explaining: false,
             analyze: false,
@@ -151,7 +195,7 @@ impl QueryConsole {
             picker_menu: None,
             names_generation: 0,
             focus: cx.focus_handle(),
-            _subscriptions: vec![exporting],
+            _subscriptions: vec![exporting, typing, following],
         };
         console.load_databases(cx);
         console.load_containers(cx);
@@ -165,6 +209,28 @@ impl QueryConsole {
 
     pub fn connection_id(&self) -> &str {
         &self.connection_id
+    }
+
+    pub fn engine(&self) -> Engine {
+        self.engine
+    }
+
+    /// The saved query the console is, if it is one.
+    pub fn saved_query(&self) -> Option<&SavedQuery> {
+        self.saved.as_ref()
+    }
+
+    /// Its text differs from its saved query's (its tab shows a dot).
+    pub fn is_edited(&self) -> bool {
+        self.edited
+    }
+
+    pub fn library(&self) -> Option<&Entity<LibraryPanel>> {
+        self.library.as_ref().map(|(library, _)| library)
+    }
+
+    pub fn save_form(&self) -> Option<&Entity<SaveForm>> {
+        self.save_form.as_ref().map(|(form, _)| form)
     }
 
     pub fn editor(&self) -> &Entity<CodeEditor> {
@@ -356,8 +422,8 @@ impl QueryConsole {
                     Err(error) => LastRun::Failed(error.to_string()),
                 };
                 this.results.update(cx, |results, cx| results.show(last, cx));
-                if let Some(history) = &this.history {
-                    history.update(cx, |history, cx| history.reload(cx));
+                if let Some((library, _)) = &this.library {
+                    library.update(cx, |library, cx| library.reload_history(cx));
                 }
                 if changes_structure(&sql) {
                     this.load_names(cx);
@@ -438,29 +504,29 @@ impl QueryConsole {
             .detach();
     }
 
-    /// Shows or hides the history beside the console.
-    pub fn toggle_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.history.take().is_some() {
+    /// Shows or hides the Library beside the console.
+    pub fn toggle_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.library.take().is_some() {
             self.focus(window, cx);
         } else {
-            let connection = self.connection_id.clone();
-            let history = cx.new(|cx| HistoryPanel::new(connection, window, cx));
-            self._subscriptions.push(cx.subscribe_in(&history, window, Self::on_history));
-            self.history = Some(history);
+            let (connection, engine) = (self.connection_id.clone(), self.engine);
+            let library = cx.new(|cx| LibraryPanel::new(connection, engine, window, cx));
+            let events = cx.subscribe_in(&library, window, Self::on_library);
+            self.library = Some((library, events));
         }
         cx.notify();
     }
 
-    fn on_history(
+    fn on_library(
         &mut self,
-        _: &Entity<HistoryPanel>,
-        event: &HistoryEvent,
+        _: &Entity<LibraryPanel>,
+        event: &LibraryEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
-            HistoryEvent::Load(entry) => self.load(entry, window, cx),
-            HistoryEvent::OpenNew(entry) => {
+            LibraryEvent::LoadRun(entry) => self.load(entry, window, cx),
+            LibraryEvent::OpenRun(entry) => {
                 // A run whose connection was deleted can't open; it loads here instead.
                 let exists =
                     Backend::global(cx).core().connections().list().iter().any(|c| c.id == entry.connection_id);
@@ -470,12 +536,155 @@ impl QueryConsole {
                     self.load(entry, window, cx);
                 }
             }
-            HistoryEvent::Close => {
-                self.history = None;
+            // A query of another connection opens on its own.
+            LibraryEvent::LoadSaved(query) => {
+                let place = Place { connection_id: &self.connection_id, engine: self.engine };
+                if run_connection(query, Some(place)).as_deref() == Some(self.connection_id.as_str()) {
+                    self.load_saved(query.clone(), window, cx);
+                } else {
+                    cx.emit(ConsoleEvent::OpenSaved(query.clone()));
+                }
+            }
+            LibraryEvent::RunSaved(query) => cx.emit(ConsoleEvent::RunSaved(query.clone())),
+            LibraryEvent::OpenSaved(query) => cx.emit(ConsoleEvent::OpenSaved(query.clone())),
+            LibraryEvent::Dialog(dialog) => cx.emit(ConsoleEvent::Dialog(dialog.clone())),
+            LibraryEvent::Close => {
+                self.library = None;
                 self.focus(window, cx);
                 cx.notify();
             }
         }
+    }
+
+    /// Makes the console saved query `query`: ⌘S updates it from then on.
+    pub fn link_saved(&mut self, query: SavedQuery, cx: &mut Context<Self>) {
+        self.saved = Some(query.clone());
+        self.sync_edited(cx);
+        cx.emit(ConsoleEvent::Saved(query));
+        cx.notify();
+    }
+
+    /// Puts saved query `query` in the editor, the console becoming it.
+    pub fn load_saved(&mut self, query: SavedQuery, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.set_text(&query.sql, cx));
+        self.link_saved(query, cx);
+        self.focus(window, cx);
+    }
+
+    /// Tells the tab when the text starts or stops differing from the saved query's.
+    fn sync_edited(&mut self, cx: &mut Context<Self>) {
+        let edited = is_edited(self.saved.as_ref().map(|query| query.sql.as_str()), self.editor.read(cx).text());
+        if edited != self.edited {
+            self.edited = edited;
+            cx.emit(ConsoleEvent::EditedChanged);
+            cx.notify();
+        }
+    }
+
+    /// Follows the console's saved query as the list changes: renamed or
+    /// changed elsewhere, its tab follows; deleted, the console is a plain one again.
+    fn follow_saved(&mut self, store: Entity<SavedStore>, cx: &mut Context<Self>) {
+        let Some(linked) = &self.saved else { return };
+        let store = store.read(cx);
+        if !store.is_loaded() {
+            return;
+        }
+        match store.get(&linked.id).cloned() {
+            Some(query) if query != *linked => {
+                let renamed = query.name != linked.name;
+                self.saved = Some(query.clone());
+                self.sync_edited(cx);
+                if renamed {
+                    cx.emit(ConsoleEvent::Saved(query));
+                }
+            }
+            Some(_) => {}
+            None => {
+                self.saved = None;
+                self.sync_edited(cx);
+            }
+        }
+    }
+
+    /// ⌘S: updates the console's saved query with its text, or asks how to
+    /// save it the first time.
+    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(query) = self.saved.clone() else {
+            self.open_save_form(window, cx);
+            return;
+        };
+        let input = SavedQueryInput {
+            name: query.name,
+            sql: self.editor.read(cx).text().to_owned(),
+            description: query.description,
+            folder: query.folder,
+            scope: query.scope,
+            engine: query.engine,
+        };
+        let saving = store::save(Some(query.id), input, cx);
+        cx.spawn(async move |this, cx| match saving.await {
+            Ok(query) => {
+                let _ = this.update(cx, |this, cx| {
+                    this.saved = Some(query);
+                    this.sync_edited(cx);
+                });
+            }
+            Err(error) => {
+                let _ = cx.update(|cx| notify(error, Tone::Error, cx));
+            }
+        })
+        .detach();
+    }
+
+    /// The form asking how to save the console, under its toolbar.
+    fn open_save_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((form, _)) = &self.save_form {
+            form.read(cx).focus(window, cx);
+            return;
+        }
+        let connection_name = Backend::global(cx)
+            .core()
+            .connections()
+            .list()
+            .into_iter()
+            .find(|connection| connection.id == self.connection_id)
+            .map(|connection| connection.name)
+            .unwrap_or_else(|| self.connection_id.clone());
+        let draft = Draft {
+            connection_id: self.connection_id.clone(),
+            connection_name,
+            engine: self.engine,
+            sql: self.editor.read(cx).text().to_owned(),
+        };
+        let form = cx.new(|cx| SaveForm::new(draft, window, cx));
+        form.read(cx).focus(window, cx);
+        let saved = cx.subscribe(&form, |this, _, SaveFormEvent::Saved(query): &SaveFormEvent, cx| {
+            this.link_saved(query.clone(), cx);
+        });
+        let closed = cx.subscribe_in(&form, window, |this, _, _: &DismissEvent, window, cx| {
+            this.save_form = None;
+            this.focus(window, cx);
+            cx.notify();
+        });
+        self.save_form = Some((form, [saved, closed]));
+        cx.notify();
+    }
+
+    /// ⌘↵ and Run: the selection, or the whole script. A saved query's
+    /// `:parameters` are asked for first.
+    pub fn run_requested(&mut self, cx: &mut Context<Self>) {
+        let sql = self.text_to_run(cx);
+        if let Some(query) = self.saved.clone() {
+            if sql.trim().is_empty() || self.busy() {
+                return;
+            }
+            if !parameters(&sql, self.engine).is_empty() {
+                cx.emit(ConsoleEvent::AskParameters { query, sql });
+                return;
+            }
+            store::mark_run(query.id, None, cx).detach();
+        }
+        self.run(sql, cx);
     }
 
     /// Puts a past run's SQL in the editor, without running it.
@@ -656,10 +865,7 @@ impl QueryConsole {
                         .text_size(px(13.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .when(!self.explaining, |run| {
-                            run.on_click(cx.listener(|this, _, _, cx| {
-                                let sql = this.text_to_run(cx);
-                                this.run(sql, cx);
-                            }))
+                            run.on_click(cx.listener(|this, _, _, cx| this.run_requested(cx)))
                         })
                         .child(icon("play", gpui::white(), 14.))
                         .child(m.run)
@@ -691,6 +897,16 @@ impl QueryConsole {
         .into_any_element()
     }
 
+    /// What Save does: save the console, or update the saved query it is.
+    fn save_tooltip(&self, cx: &gpui::App) -> String {
+        let m = &cx.messages().saved;
+        let key = crate::ui::shortcut("s");
+        match &self.saved {
+            Some(query) => (m.save_changes_tooltip)(&query.name, &key),
+            None => (m.save_tooltip)(&key),
+        }
+    }
+
     fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = *cx.theme();
         let m = &cx.messages().query;
@@ -717,11 +933,18 @@ impl QueryConsole {
             }))
             .child(group(
                 &theme,
-                vec![any(segment(&theme, Some("clock"), m.history, self.history.is_some())
-                    .id("toggle-history")
-                    .cursor_pointer()
-                    .tooltip(Tooltip::text((m.history_title)(shortcuts::HISTORY)))
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_history(window, cx))))],
+                vec![
+                    any(segment(&theme, None, cx.messages().saved.save, self.save_form.is_some())
+                        .id("save-query")
+                        .cursor_pointer()
+                        .tooltip(Tooltip::text(self.save_tooltip(cx)))
+                        .on_click(cx.listener(|this, _, window, cx| this.save(window, cx)))),
+                    any(segment(&theme, Some("clock"), m.library, self.library.is_some())
+                        .id("toggle-library")
+                        .cursor_pointer()
+                        .tooltip(Tooltip::text((m.library_title)(shortcuts::LIBRARY)))
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_library(window, cx)))),
+                ],
             ))
             .child(
                 div().id("analyze").tooltip(Tooltip::text(m.analyze_title)).child(
@@ -741,11 +964,10 @@ impl Render for QueryConsole {
         div()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
-            .on_action(cx.listener(|this, _: &Run, _, cx| {
-                let sql = this.text_to_run(cx);
-                this.run(sql, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ToggleHistory, window, cx| this.toggle_history(window, cx)))
+            .on_action(cx.listener(|this, _: &Run, _, cx| this.run_requested(cx)))
+            .on_action(cx.listener(|this, _: &ToggleLibrary, window, cx| this.toggle_library(window, cx)))
+            .on_action(cx.listener(|this, _: &SaveQuery, window, cx| this.save(window, cx)))
+            .relative()
             .flex_1()
             .min_h_0()
             .flex()
@@ -768,14 +990,20 @@ impl Render for QueryConsole {
                             .child(card(&theme).child(self.editor.clone()))
                             .child(card(&theme).child(self.results.clone())),
                     )
-                    // A card fills the space left; the history's keeps its own width.
+                    // A card fills the space left; the Library's keeps its own width.
                     .children(
-                        self.history.clone().map(|history| {
-                            card(&theme).flex_none().flex_basis(px(crate::history::WIDTH)).child(history)
-                        }),
+                        self.library()
+                            .cloned()
+                            .map(|library| card(&theme).flex_none().flex_basis(px(crate::saved::WIDTH)).child(library)),
                     ),
             )
             .children(self.picker_menu.as_ref().map(|(menu, position, _)| popover(menu.clone(), *position)))
+            // Under the toolbar's Save, over the editor.
+            .children(
+                self.save_form()
+                    .cloned()
+                    .map(|form| deferred(div().absolute().top(px(42.)).right(px(150.)).child(form)).with_priority(1)),
+            )
     }
 }
 
@@ -829,7 +1057,7 @@ mod tests {
                 error: Some("no such column: nope".into()),
             };
             console.results.update(cx, |results, cx| results.show(LastRun::Outcome(outcome), cx));
-            console.toggle_history(window, cx);
+            console.toggle_library(window, cx);
         });
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear());
@@ -840,7 +1068,7 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear());
         console.read_with(cx, |console, cx| {
             assert_eq!(console.results.read(cx).grid().read(cx).row_count(), 1000);
-            assert!(console.history.is_some());
+            assert!(console.library.is_some());
         });
     }
 

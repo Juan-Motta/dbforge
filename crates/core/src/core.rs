@@ -17,6 +17,7 @@ use crate::history::HistoryStore;
 use crate::jobs::Jobs;
 use crate::mcp::{self, AgentRegistry, Approvals, McpServer, SessionFile, SettingsFile};
 use crate::query::QuerySessions;
+use crate::saved_queries::SavedQueries;
 use crate::statement_log::{self, StatementLog};
 use crate::tunnel;
 
@@ -30,6 +31,7 @@ pub const TAGS_FILE: &str = "tags.json";
 pub const TOOLS_FILE: &str = "tools.json";
 pub const MCP_SETTINGS_FILE: &str = "mcp.json";
 pub const MCP_SESSIONS_FILE: &str = "mcp-sessions.json";
+pub const SAVED_QUERIES_FILE: &str = "saved_queries.json";
 pub const KNOWN_HOSTS_FILE: &str = "known_hosts";
 /// The window's own preferences (theme, language, panel sizes), which the app keeps.
 pub const PREFERENCES_FILE: &str = "preferences.json";
@@ -69,6 +71,7 @@ pub struct Core {
     connections: Arc<ConnectionStore>,
     tags: TagStore,
     tool_paths: ToolPaths,
+    saved_queries: SavedQueries,
     query_sessions: QuerySessions,
     jobs: Jobs,
     mcp_settings: SettingsFile,
@@ -96,6 +99,7 @@ impl Core {
         tunnel::init(config.join(KNOWN_HOSTS_FILE), Box::new(move |id| secrets.credentials().get(id)));
         let tags = TagStore::load(config.join(TAGS_FILE))?;
         let tool_paths = ToolPaths::load(config.join(TOOLS_FILE))?;
+        let saved_queries = SavedQueries::load(config.join(SAVED_QUERIES_FILE))?;
         let mcp_settings = SettingsFile::load(config.join(MCP_SETTINGS_FILE))?;
         let mcp_sessions = Arc::new(SessionFile::load(config.join(MCP_SESSIONS_FILE))?);
         let statement_log = StatementLog::new(STATEMENT_LOG_CAPACITY, statement_log::EventSink(events.clone()));
@@ -104,6 +108,7 @@ impl Core {
             connections.set_aside(),
             tags.set_aside(),
             tool_paths.set_aside(),
+            saved_queries.set_aside(),
             mcp_settings.set_aside(),
             mcp_sessions.set_aside(),
         ]
@@ -118,6 +123,7 @@ impl Core {
             connections,
             tags,
             tool_paths,
+            saved_queries,
             query_sessions: QuerySessions::default(),
             jobs: Jobs::default(),
             mcp_settings,
@@ -155,6 +161,11 @@ impl Core {
 
     pub fn tool_paths(&self) -> &ToolPaths {
         &self.tool_paths
+    }
+
+    /// The queries the user saved with a name.
+    pub fn saved_queries(&self) -> &SavedQueries {
+        &self.saved_queries
     }
 
     pub fn query_sessions(&self) -> &QuerySessions {
@@ -217,6 +228,7 @@ mod tests {
             [CONNECTIONS_FILE, TAGS_FILE, TOOLS_FILE, MCP_SETTINGS_FILE, MCP_SESSIONS_FILE, KNOWN_HOSTS_FILE],
             ["connections.json", "tags.json", "tools.json", "mcp.json", "mcp-sessions.json", "known_hosts"]
         );
+        assert_eq!(SAVED_QUERIES_FILE, "saved_queries.json");
         assert_eq!(dirs.preferences_file(), dirs.config.join("preferences.json"));
         assert_eq!(HISTORY_FILE, "history.jsonl");
     }
@@ -230,6 +242,7 @@ mod tests {
         let core = Core::load(dirs.clone(), Arc::new(NoEvents)).unwrap();
         assert!(core.connections().list().is_empty());
         assert!(core.set_aside().0.is_empty());
+        assert!(core.saved_queries().list().is_empty());
         assert_eq!(core.dirs(), &dirs);
     }
 

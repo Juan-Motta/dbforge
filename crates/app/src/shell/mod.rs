@@ -392,6 +392,15 @@ impl Shell {
                     workspace.open_table(&connection_id, table, None, None, window, cx);
                 });
             }
+            // On the connection a query was saved for, or the one selected.
+            PaletteEvent::RunSaved(query) => {
+                self.workspace.update(cx, |workspace, cx| workspace.run_saved(query, None, window, cx));
+            }
+            PaletteEvent::OpenSaved(query) => {
+                self.workspace.update(cx, |workspace, cx| {
+                    workspace.open_saved(query, None, window, cx);
+                });
+            }
             PaletteEvent::Run(CommandAction::NewQuery) => {
                 self.workspace.update(cx, |workspace, cx| workspace.new_query_on_target(window, cx));
             }
@@ -876,7 +885,7 @@ impl Shell {
                 (None, _) => {}
             }
             if history {
-                console.toggle_history(window, cx);
+                console.toggle_library(window, cx);
             }
         });
     }

@@ -1,6 +1,8 @@
 //! The tab strip: each open tab with its icon, title and close button, the
 //! shown one raised by a thumb that slides to the next one shown, and + for a new query on the selected connection.
-//! A middle click closes a tab, as in browsers.
+//! A middle click closes a tab, as in browsers. A console whose text differs
+//! from its saved query shows a dot in place of its close button, which
+//! comes back on hover, so the tab never changes width.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, StatefulInteractiveElement,
@@ -12,7 +14,7 @@ use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::ui::field::Tooltip;
 use crate::ui::segmented::sliding;
-use crate::ui::{any, enabled, glass, icon, segment, segment_face};
+use crate::ui::{any, dot, enabled, glass, icon, segment, segment_face};
 
 /// The strip's height.
 pub const STRIP_HEIGHT: f32 = 40.;
@@ -30,6 +32,7 @@ impl Workspace {
             .enumerate()
             .map(|(index, tab)| {
                 let shown = active.as_deref() == Some(tab.id.as_str());
+                let edited = self.console(&tab.id).is_some_and(|console| console.read(cx).is_edited());
                 let (select, middle, close) = (tab.id.clone(), tab.id.clone(), tab.id.clone());
                 let kind_icon = match tab.kind {
                     super::tabs::TabKind::Query { .. } => "code",
@@ -54,6 +57,8 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .justify_center()
+                            .relative()
+                            .group("close-tab")
                             .rounded(px(9.))
                             .hover(|button| button.bg(theme.sel))
                             .tooltip(Tooltip::text((m.query.close_tab)(&tab.title)))
@@ -61,7 +66,22 @@ impl Workspace {
                                 cx.stop_propagation();
                                 this.close_tab(&close, window, cx);
                             }))
-                            .child(icon("close", theme.text3, 11.)),
+                            .map(|button| {
+                                if !edited {
+                                    return button.child(icon("close", theme.text3, 11.));
+                                }
+                                button.child(dot(theme.text2).group_hover("close-tab", |dot| dot.opacity(0.))).child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .opacity(0.)
+                                        .group_hover("close-tab", |close| close.opacity(1.))
+                                        .child(icon("close", theme.text3, 11.)),
+                                )
+                            }),
                     ))
             })
             .collect();

@@ -4,18 +4,25 @@
 //! console's text and results, a table's page and pending changes) until
 //! they close. A dialog a tab opens (a table's PROD question) goes to the
 //! window as a [`WorkspaceEvent`].
+//!
+//! Saved queries open and run here: in a console opened from the query (an
+//! open one, else a new tab titled with its name) on the connection it was
+//! saved for, or for one saved for any connection of its engine, on the
+//! connection at hand. One with `:parameters` asks for their values first.
 
 mod strip;
 pub mod tabs;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use dbforge_core::connections::model::{Connection, Engine};
 use dbforge_core::drivers::{RowFilter, TableRef};
 use dbforge_core::query::QueryScope;
+use dbforge_core::saved_queries::params::parameters;
+use dbforge_core::saved_queries::{ParamValue, SavedQuery};
 use gpui::{
-    AnyView, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, Styled,
-    Subscription, Window, div, px,
+    AnyView, AppContext, Context, DismissEvent, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render,
+    Styled, Subscription, Window, div, px,
 };
 
 use self::tabs::{TabKind, TableName, Tabs};
@@ -26,12 +33,16 @@ use crate::i18n::Translate;
 use crate::import::ImportTarget;
 use crate::keyspace::{KeyBrowser, KeyBrowserEvent};
 use crate::query::{ConsoleEvent, QueryConsole};
+use crate::saved::rules::{Place, run_connection};
+use crate::saved::store;
+use crate::saved::{RunDialog, RunDialogEvent, RunRequest};
 use crate::shell::OpenObject;
 use crate::shell::explorer::tree::NodeKind;
 use crate::sql::snippets::table_ref;
 use crate::table::{TablePage, TablePageEvent, TableTabView};
 use crate::theme::ActiveTheme;
 use crate::ui::card;
+use crate::ui::notice::{Tone, notify};
 
 /// Space between the strip and the tab's content.
 const GAP: f32 = 10.;
@@ -74,6 +85,12 @@ struct OpenTable {
     _events: Subscription,
 }
 
+/// The dialog asking for a saved query's parameters, and what the workspace hears from it.
+struct OpenRunDialog {
+    dialog: Entity<RunDialog>,
+    _events: Vec<Subscription>,
+}
+
 /// An open key browser and what the workspace hears from it.
 struct OpenKeyspace {
     browser: Entity<KeyBrowser>,
@@ -100,6 +117,7 @@ pub struct Workspace {
     keyspaces: HashMap<String, OpenKeyspace>,
     /// The connection selected in the explorer, and where in it: what "New query" queries.
     target: Option<(Connection, Vec<String>)>,
+    run_dialog: Option<OpenRunDialog>,
 }
 
 impl EventEmitter<WorkspaceEvent> for Workspace {}
@@ -157,21 +175,207 @@ impl Workspace {
         let console = cx.new(|cx| {
             QueryConsole::new(tab.id.clone(), tab.connection_id.clone(), connection.engine, scope, initial_sql, cx)
         });
-        let events = cx.subscribe_in(&console, window, |this, _, event: &ConsoleEvent, window, cx| match event {
+        let events = cx.subscribe_in(&console, window, Self::on_console);
+        self.consoles.insert(tab.id, OpenConsole { console: console.clone(), _events: events });
+        console.read(cx).focus(window, cx);
+        cx.notify();
+        Some(console)
+    }
+
+    fn on_console(
+        &mut self,
+        console: &Entity<QueryConsole>,
+        event: &ConsoleEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (tab, connection_id, engine) = {
+            let console = console.read(cx);
+            (console.session_id().to_owned(), console.connection_id().to_owned(), console.engine())
+        };
+        match event {
             ConsoleEvent::OpenQuery(entry) => {
                 let scope = QueryScope { database: entry.database.clone(), container: entry.container.clone() };
-                this.new_query(&entry.connection_id, scope, Some(entry.sql.clone()), window, cx);
+                self.new_query(&entry.connection_id, scope, Some(entry.sql.clone()), window, cx);
             }
             ConsoleEvent::ExportResult(result) => cx.emit(WorkspaceEvent::Export(ExportSource::Rows {
                 name: "query_result".into(),
                 columns: result.columns.clone(),
                 rows: std::sync::Arc::new(result.rows.clone()),
             })),
-        });
-        self.consoles.insert(tab.id, OpenConsole { console: console.clone(), _events: events });
-        console.read(cx).focus(window, cx);
-        cx.notify();
+            ConsoleEvent::Saved(query) => {
+                self.tabs.set_title(&tab, query.name.clone());
+                cx.notify();
+            }
+            ConsoleEvent::EditedChanged => cx.notify(),
+            ConsoleEvent::RunSaved(query) => self.run_saved(query.clone(), Some((connection_id, engine)), window, cx),
+            ConsoleEvent::OpenSaved(query) => {
+                self.open_saved(query.clone(), Some((connection_id, engine)), window, cx);
+            }
+            ConsoleEvent::AskParameters { query, sql } => {
+                let connection_name = self.connection_name(&connection_id, cx);
+                let request = RunRequest {
+                    query: query.clone(),
+                    sql: sql.clone(),
+                    connection_id,
+                    connection_name,
+                    console: Some(tab),
+                };
+                self.ask_parameters(request, window, cx);
+            }
+            ConsoleEvent::Dialog(dialog) => cx.emit(WorkspaceEvent::Dialog(dialog.clone())),
+        }
+    }
+
+    fn connection_name(&self, connection_id: &str, cx: &gpui::App) -> String {
+        Backend::global(cx)
+            .core()
+            .connections()
+            .list()
+            .into_iter()
+            .find(|connection| connection.id == connection_id)
+            .map_or_else(|| connection_id.to_owned(), |connection| connection.name)
+    }
+
+    /// The connection saved query `query` opens or runs on, seen `from` a
+    /// console's connection (or else the one selected); why none, otherwise.
+    fn saved_connection(
+        &self,
+        query: &SavedQuery,
+        from: Option<(String, Engine)>,
+        cx: &gpui::App,
+    ) -> Result<Connection, String> {
+        let m = &cx.messages().saved;
+        let from =
+            from.or_else(|| self.target.as_ref().map(|(connection, _)| (connection.id.clone(), connection.engine)));
+        let place = from.as_ref().map(|(connection_id, engine)| Place { connection_id, engine: *engine });
+        let id = run_connection(query, place).ok_or_else(|| (m.no_connection_to_run)(query.engine.label()))?;
+        Backend::global(cx)
+            .core()
+            .connections()
+            .list()
+            .into_iter()
+            .find(|connection| connection.id == id)
+            .ok_or_else(|| m.connection_gone.to_owned())
+    }
+
+    /// Opens saved query `query` in a new tab, titled with its name, on its
+    /// connection (seen `from` a console's, or else the one selected).
+    pub fn open_saved(
+        &mut self,
+        query: SavedQuery,
+        from: Option<(String, Engine)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<QueryConsole>> {
+        match self.saved_connection(&query, from, cx) {
+            Ok(connection) => self.open_saved_on(query, &connection.id, window, cx),
+            Err(message) => {
+                notify(message, Tone::Error, cx);
+                None
+            }
+        }
+    }
+
+    fn open_saved_on(
+        &mut self,
+        query: SavedQuery,
+        connection_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<QueryConsole>> {
+        let console = self.new_query(connection_id, QueryScope::default(), Some(query.sql.clone()), window, cx)?;
+        console.update(cx, |console, cx| console.link_saved(query, cx));
         Some(console)
+    }
+
+    /// Runs saved query `query` on its connection (seen `from` a console's,
+    /// or else the one selected), asking for its parameters first.
+    pub fn run_saved(
+        &mut self,
+        query: SavedQuery,
+        from: Option<(String, Engine)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let connection = match self.saved_connection(&query, from, cx) {
+            Ok(connection) => connection,
+            Err(message) => return notify(message, Tone::Error, cx),
+        };
+        let request = RunRequest {
+            sql: query.sql.clone(),
+            query,
+            connection_id: connection.id,
+            connection_name: connection.name,
+            console: None,
+        };
+        if parameters(&request.sql, request.query.engine).is_empty() {
+            let sql = request.sql.clone();
+            self.finish_run(request, sql, None, window, cx);
+        } else {
+            self.ask_parameters(request, window, cx);
+        }
+    }
+
+    /// The dialog asking for the parameters of `request`, if one is open.
+    pub fn run_dialog(&self) -> Option<&Entity<RunDialog>> {
+        self.run_dialog.as_ref().map(|open| &open.dialog)
+    }
+
+    /// Asks for the values of `request`'s parameters, then runs it.
+    fn ask_parameters(&mut self, request: RunRequest, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = cx.new(|cx| RunDialog::new(request, window, cx));
+        dialog.read(cx).focus(window, cx);
+        let ran = cx.subscribe_in(&dialog, window, |this, _, event: &RunDialogEvent, window, cx| {
+            let RunDialogEvent::Run { request, sql, values, remember } = event;
+            let remembered = remember.then(|| values.clone());
+            this.finish_run(request.clone(), sql.clone(), remembered, window, cx);
+        });
+        let closed = cx.subscribe_in(&dialog, window, |this, _, _: &DismissEvent, window, cx| {
+            this.run_dialog = None;
+            cx.emit(WorkspaceEvent::Dialog(None));
+            if let Some(id) = this.tabs.active_id().map(str::to_owned) {
+                this.activate(&id, window, cx);
+            }
+        });
+        self.run_dialog = Some(OpenRunDialog { dialog: dialog.clone(), _events: vec![ran, closed] });
+        cx.emit(WorkspaceEvent::Dialog(Some(dialog.into())));
+    }
+
+    /// Runs `sql` (`request`'s query, its values written in) in the console
+    /// that asked, else one opened from the query on its connection, else a
+    /// new one; then records the run, remembering `values` when given.
+    fn finish_run(
+        &mut self,
+        request: RunRequest,
+        sql: String,
+        values: Option<BTreeMap<String, ParamValue>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let console = request
+            .console
+            .as_deref()
+            .and_then(|id| self.console(id).cloned())
+            .or_else(|| self.saved_console(&request.query.id, &request.connection_id, cx))
+            .or_else(|| self.open_saved_on(request.query.clone(), &request.connection_id, window, cx));
+        let Some(console) = console else {
+            return notify(cx.messages().saved.connection_gone, Tone::Error, cx);
+        };
+        let id = console.read(cx).session_id().to_owned();
+        self.activate(&id, window, cx);
+        console.update(cx, |console, cx| console.run(sql, cx));
+        store::mark_run(request.query.id, values, cx).detach();
+    }
+
+    /// The first console, in tab order, opened from saved query `id` on `connection_id`.
+    fn saved_console(&self, id: &str, connection_id: &str, cx: &gpui::App) -> Option<Entity<QueryConsole>> {
+        self.tabs.tabs().iter().find_map(|tab| {
+            let console = self.console(&tab.id)?;
+            let read = console.read(cx);
+            let opened_from = read.saved_query().is_some_and(|query| query.id == id);
+            (opened_from && read.connection_id() == connection_id).then(|| console.clone())
+        })
     }
 
     /// The table page of tab `id`, if it is one.

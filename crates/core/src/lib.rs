@@ -23,6 +23,7 @@ pub mod jobs;
 pub mod keyspace;
 pub mod mcp;
 pub mod query;
+pub mod saved_queries;
 pub mod statement_log;
 pub mod tunnel;
 
