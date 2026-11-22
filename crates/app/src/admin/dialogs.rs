@@ -35,7 +35,7 @@ pub enum AdminEvent {
 /// A dialog's frame: its title, its body, room for an error and its buttons.
 fn frame(theme: &Theme, title: String) -> gpui::Div {
     glass(theme)
-        .bg(theme.card)
+        .bg(theme.dialog)
         .w(px(420.))
         .max_w_full()
         .rounded(px(22.))

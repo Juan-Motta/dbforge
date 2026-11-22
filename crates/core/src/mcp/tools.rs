@@ -44,6 +44,15 @@ impl Tools {
         Ok((connection, password))
     }
 
+    /// Records the call as the agent's activity, so the app lists it; the
+    /// agent's own name for itself, when it sent its client info.
+    fn note_agent(&self, context: &RequestContext<RoleServer>) -> Option<String> {
+        let client = context.peer.peer_info().map(|info| info.client_info.clone())?;
+        let version = Some(client.version.as_str()).filter(|version| !version.is_empty());
+        self.core.mcp_agents().record(self.core.events().as_ref(), &client.name, version);
+        Some(client.name)
+    }
+
     /// Runs `work` with its statements recorded as the agent's, on `connection`.
     async fn as_agent<T>(
         &self,
@@ -220,7 +229,8 @@ impl Tools {
     #[tool(
         description = "Lists the database connections saved in DBForge that you may use, with the language each one takes and whether you may change data. Call this first."
     )]
-    async fn list_connections(&self) -> Json<ConnectionList> {
+    async fn list_connections(&self, context: RequestContext<RoleServer>) -> Json<ConnectionList> {
+        self.note_agent(&context);
         let tags = self.core.tags().list();
         let connections = self
             .core
@@ -252,7 +262,9 @@ impl Tools {
     async fn list_objects(
         &self,
         Parameters(request): Parameters<ListObjectsRequest>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<ObjectList>, String> {
+        self.note_agent(&context);
         let (connection, password) = self.open(&request.connection_id)?;
         let objects = self
             .as_agent(&connection, drivers::list_objects(&connection, password.as_deref(), &request.path))
@@ -273,7 +285,9 @@ impl Tools {
     async fn describe_table(
         &self,
         Parameters(request): Parameters<DescribeTableRequest>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<TableView>, String> {
+        self.note_agent(&context);
         let (connection, password) = self.open(&request.connection_id)?;
         let table = TableRef { database: request.database, schema: request.schema, name: request.table };
         let structure =
@@ -288,7 +302,12 @@ impl Tools {
     #[tool(
         description = "Runs one statement that only reads (SELECT, find, GET…) on a connection and returns its rows. The server keeps it from changing anything; a statement that would is refused. Takes at most a minute."
     )]
-    async fn query(&self, Parameters(request): Parameters<RunRequest>) -> Result<Json<RunResult>, String> {
+    async fn query(
+        &self,
+        Parameters(request): Parameters<RunRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<RunResult>, String> {
+        self.note_agent(&context);
         let (connection, password) = self.open(&request.connection_id)?;
         let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
         let read = drivers::run_read_only(
@@ -316,6 +335,7 @@ impl Tools {
         Parameters(request): Parameters<RunRequest>,
         context: RequestContext<RoleServer>,
     ) -> Result<Json<RunResult>, String> {
+        let agent = self.note_agent(&context);
         let (connection, password) = self.open(&request.connection_id)?;
         if connection.agent_access != AgentAccess::Write {
             return Err(format!(
@@ -327,7 +347,7 @@ impl Tools {
         if tag.as_ref().is_some_and(|tag| tag.confirm) {
             let request = ApprovalRequest {
                 id: uuid::Uuid::new_v4().to_string(),
-                agent: context.peer.peer_info().map(|info| info.client_info.name.clone()),
+                agent,
                 connection_id: connection.id.clone(),
                 connection_name: connection.name.clone(),
                 tag: tag.map(|tag| tag.name),

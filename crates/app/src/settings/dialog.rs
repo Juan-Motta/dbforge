@@ -12,7 +12,7 @@ use super::{PasswordsSection, Section};
 use crate::backup::{BackupEvent, BackupSection};
 use crate::dump::ExportSettings;
 use crate::i18n::{Language, Locale, Translate};
-use crate::mcp::McpSection;
+use crate::mcp::{AccessSection, McpSection, McpSectionEvent};
 use crate::preferences::Preferences;
 use crate::tags::TagsSection;
 use crate::tags::section::TagsEvent;
@@ -25,6 +25,10 @@ use crate::updates::Updates;
 actions!(settings_dialog, [Dismiss]);
 
 const CONTEXT: &str = "SettingsDialog";
+
+/// The dialog's size, the same for every section; a smaller window shrinks it to fit.
+const WIDTH: f32 = 1000.;
+const HEIGHT: f32 = 760.;
 
 /// The themes, in the order the former web UI shows them.
 const THEMES: [ThemePreference; 3] = [ThemePreference::Dark, ThemePreference::Light, ThemePreference::System];
@@ -39,7 +43,8 @@ pub enum SettingsEvent {
     /// The tags were saved: connections show their new names and colours,
     /// and lost a deleted tag when `removed`.
     TagsSaved { removed: bool },
-    /// A backup brought connections and tags in: the explorer reads them again.
+    /// A backup brought connections and tags in, or an agent access was
+    /// saved: the explorer reads them again.
     ConnectionsChanged,
 }
 
@@ -49,8 +54,11 @@ pub struct SettingsDialog {
     passwords: Entity<PasswordsSection>,
     exports: Entity<ExportSettings>,
     backup: Entity<BackupSection>,
-    /// Agents (MCP) while it is shown: the token is read only when the user goes there.
-    agents: Option<Entity<McpSection>>,
+    /// Agents (MCP) while it is shown, with what it tells the dialog: the
+    /// token is read only when the user goes there.
+    agents: Option<(Entity<McpSection>, Subscription)>,
+    /// Agent access while it is shown, read again each time.
+    access: Option<(Entity<AccessSection>, Subscription)>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -89,6 +97,7 @@ impl SettingsDialog {
             exports,
             backup,
             agents: None,
+            access: None,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
@@ -113,7 +122,22 @@ impl SettingsDialog {
         if section != Section::Agents {
             self.agents = None;
         } else if self.agents.is_none() {
-            self.agents = Some(cx.new(|cx| McpSection::new(window, cx)));
+            let agents = cx.new(|cx| McpSection::new(window, cx));
+            // An agent access saved there shows in the explorer too.
+            let changed = cx.subscribe(&agents, |_, _, McpSectionEvent::ConnectionsChanged, cx| {
+                cx.emit(SettingsEvent::ConnectionsChanged);
+            });
+            self.agents = Some((agents, changed));
+        }
+        if section != Section::AgentAccess {
+            self.access = None;
+        } else if self.access.is_none() {
+            let access = cx.new(AccessSection::new);
+            // An access saved there shows in the explorer too.
+            let changed = cx.subscribe(&access, |_, _, McpSectionEvent::ConnectionsChanged, cx| {
+                cx.emit(SettingsEvent::ConnectionsChanged);
+            });
+            self.access = Some((access, changed));
         }
         self.section = section;
         cx.notify();
@@ -171,7 +195,16 @@ impl SettingsDialog {
             Section::Agents => (
                 m.agents,
                 Some(m.agents_intro),
-                self.agents.clone().map_or_else(|| div().into_any_element(), |agents| agents.into_any_element()),
+                self.agents
+                    .as_ref()
+                    .map_or_else(|| div().into_any_element(), |(agents, _)| agents.clone().into_any_element()),
+            ),
+            Section::AgentAccess => (
+                m.agent_access,
+                Some(m.agent_access_intro),
+                self.access
+                    .as_ref()
+                    .map_or_else(|| div().into_any_element(), |(access, _)| access.clone().into_any_element()),
             ),
         };
         div()
@@ -221,13 +254,12 @@ impl SettingsDialog {
         let theme = *cx.theme();
         let m = &cx.messages().settings_dialog;
         let current = cx.global::<Locale>().0;
-        div()
-            .py(px(14.))
+        let row = div()
+            .px(px(12.))
+            .py(px(10.))
             .flex()
             .items_center()
             .gap(px(24.))
-            .border_b_1()
-            .border_color(theme.line)
             .child(
                 div()
                     .flex_1()
@@ -240,7 +272,9 @@ impl SettingsDialog {
             .child(choice_group(&theme).children(Language::ALL.map(|(language, name)| {
                 choice(&theme, language.as_str(), name, language == current)
                     .on_click(cx.listener(move |_, _, _, cx| language.save(cx)))
-            })))
+            })));
+        // Framed like the other settings' rows (About's version and updates).
+        div().pt(px(14.)).child(option_list(&theme, vec![row.into_any_element()]))
     }
 
     fn render_about(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -256,8 +290,6 @@ impl SettingsDialog {
                     .flex()
                     .items_center()
                     .gap(px(14.))
-                    .border_b_1()
-                    .border_color(theme.line)
                     .child(
                         div()
                             .size(px(44.))
@@ -278,32 +310,30 @@ impl SettingsDialog {
                             .child(div().text_size(px(12.5)).text_color(theme.text3).child(m.tagline)),
                     ),
             )
-            .child(
-                div()
-                    .py(px(14.))
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(theme.line)
-                    .child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(m.version))
-                    .child(div().text_size(px(13.)).text_color(theme.text2).child(dbforge_core::VERSION)),
-            )
             .child(self.render_updates(cx))
     }
 
-    /// Below the version, as the former web UI: the automatic check, then a check now.
+    /// The version and the automatic check in one frame, as the other
+    /// settings' rows, then a check now.
     fn render_updates(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let m = &cx.messages().settings_dialog;
         let automatic = Updates::automatic(cx);
+        let version = div()
+            .px(px(12.))
+            .py(px(10.))
+            .flex()
+            .items_center()
+            .child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(m.version))
+            .child(div().text_size(px(13.)).text_color(theme.text2).child(dbforge_core::VERSION));
         div()
-            .mt(px(18.))
             .flex()
             .flex_col()
             .gap(px(10.))
             .child(option_list(
                 &theme,
                 vec![
+                    version.into_any_element(),
                     OptionItem::new("updates-automatic", Mark::Check, m.check_automatically, automatic)
                         .description(m.check_automatically_description)
                         .on_select(cx.listener(move |_, _, _, cx| {
@@ -364,9 +394,9 @@ impl Render for SettingsDialog {
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))
-            .bg(theme.card)
-            .w(px(880.))
-            .h(px(620.))
+            .bg(theme.dialog)
+            .w(px(WIDTH))
+            .h(px(HEIGHT))
             .max_w_full()
             .max_h_full()
             .rounded(px(22.))

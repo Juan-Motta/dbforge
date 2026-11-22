@@ -109,7 +109,7 @@ pub fn notice_layer(theme: &Theme, notice: &Notice) -> impl IntoElement {
             .rounded(px(8.))
             .border_1()
             .border_color(border)
-            .bg(theme.card)
+            .bg(theme.dialog)
             .shadow(shadow(24., 10., 0x00000038))
             .text_size(px(12.5))
             .text_color(tint)

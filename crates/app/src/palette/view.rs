@@ -407,7 +407,7 @@ impl Render for CommandPalette {
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.step(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.step(1, cx)))
-            .bg(theme.card)
+            .bg(theme.dialog)
             .w(px(620.))
             .max_w_full()
             .rounded(px(18.))

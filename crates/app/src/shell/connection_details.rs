@@ -140,7 +140,7 @@ impl Render for ConnectionDetails {
         };
         let facts = connection_facts(&self.connection, version, shell);
         glass(&theme)
-            .bg(theme.card)
+            .bg(theme.dialog)
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))

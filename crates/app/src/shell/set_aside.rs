@@ -56,7 +56,7 @@ impl Render for SetAsideDialog {
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Confirm, _, cx| this.close(cx)))
             .on_action(cx.listener(|this, _: &Dismiss, _, cx| this.close(cx)))
-            .bg(theme.card)
+            .bg(theme.dialog)
             .w(px(500.))
             .rounded(px(22.))
             .p(px(22.))

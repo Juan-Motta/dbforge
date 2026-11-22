@@ -3,7 +3,7 @@
 //! something is picked. Appearance (the theme), Language, Tags, Passwords
 //! (where credentials are kept), Export and import (the export folder and
 //! PostgreSQL's tools, from `dump`), Backup (from `backup`) and About live
-//! here, and Agents (MCP) from `mcp`.
+//! here, and Agents (MCP) and Agent access from `mcp`.
 
 mod dialog;
 mod passwords;
@@ -23,18 +23,20 @@ pub enum Section {
     Tags,
     Exports,
     Agents,
+    AgentAccess,
     Passwords,
     Backup,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 8] = [
+    pub const ALL: [Section; 9] = [
         Section::Appearance,
         Section::Language,
         Section::Tags,
         Section::Exports,
         Section::Agents,
+        Section::AgentAccess,
         Section::Passwords,
         Section::Backup,
         Section::About,
@@ -57,6 +59,7 @@ impl Section {
             Self::Tags => "tags",
             Self::Exports => "exports",
             Self::Agents => "agents",
+            Self::AgentAccess => "agent-access",
             Self::Passwords => "passwords",
             Self::Backup => "backup",
             Self::About => "about",
@@ -70,6 +73,7 @@ impl Section {
             Self::Tags => m.tags,
             Self::Exports => m.exports,
             Self::Agents => m.agents,
+            Self::AgentAccess => m.agent_access,
             Self::Passwords => m.passwords,
             Self::Backup => m.backup,
             Self::About => m.about,
@@ -111,7 +115,10 @@ mod tests {
     #[test]
     fn lists_the_sections_in_the_web_ui_s_order_and_reads_their_names() {
         let names: Vec<&str> = Section::ALL.iter().map(|section| section.name()).collect();
-        assert_eq!(names, ["appearance", "language", "tags", "exports", "agents", "passwords", "backup", "about"]);
+        assert_eq!(
+            names,
+            ["appearance", "language", "tags", "exports", "agents", "agent-access", "passwords", "backup", "about"]
+        );
         for section in Section::ALL {
             assert_eq!(Section::parse(section.name()), Some(section));
         }

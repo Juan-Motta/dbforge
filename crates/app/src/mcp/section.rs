@@ -1,32 +1,52 @@
-//! Settings › Agents (MCP), as the former web UI's `McpSettings.tsx`: the MCP
-//! server on or off, its port, the token agents send, and the steps that add
-//! DBForge to an agent ([`super::agent_setup`]). The core saves the settings
-//! and starts, restarts or stops the server to match.
+//! Settings › Agents (MCP), the combined design of the former web UI's
+//! `McpSettings.tsx` and its agents list: a status card (the server on or
+//! off, its state and address, the agents connected, their statements today
+//! and the changes waiting), with the port and the token agents send behind
+//! "Port and token"; the known agents, each with how it has used DBForge
+//! and the setup that adds DBForge to it ([`super::agent_setup`]). What
+//! agents may reach on each saved connection is its own section,
+//! Agent access ([`super::access`]). The core saves the settings and starts, restarts or stops the server to match.
 //!
 //! The token: read from the core when the section opens and kept only in
 //! this view while it is open; shown as bullets until the eye shows it, put
 //! on the clipboard only by a copy button, replaced by Regenerate after a
 //! second press. It never reaches the preferences, the events or a log.
 
-use dbforge_core::mcp::commands::{mcp_state, mcp_token, regenerate_mcp_token, set_mcp_settings};
+use std::time::Duration;
+
+use dbforge_core::Event;
+use dbforge_core::mcp::commands::{mcp_agents, mcp_state, mcp_token, regenerate_mcp_token, set_mcp_settings};
 use dbforge_core::mcp::{McpSettings, Status};
+use dbforge_core::statement_log::commands::list_statements;
 use gpui::{
-    AnyElement, AppContext, ClipboardItem, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    AnyElement, AppContext, ClipboardItem, Context, Entity, EventEmitter, Focusable, FontWeight, Hsla,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Task, Window, div, prelude::FluentBuilder, px,
 };
 
+use super::Approvals;
+use super::agents::{Listed, connected, listed, statements_today};
 use super::setup::{AgentId, Transport, parse_port};
 use crate::backend::Backend;
+use crate::events::EventHub;
 use crate::i18n::{McpMessages, Translate};
+use crate::statement_log::log::{CAPACITY, Kind, kind_of};
 use crate::theme::{ActiveTheme, MONO, Theme};
-use crate::ui::callout::{Callout, Tone, callout_space};
 use crate::ui::field::{Tooltip, field, help, label, text_box};
-use crate::ui::modal::{form_section, note};
-use crate::ui::option_list::{Mark, OptionItem, option_list};
-use crate::ui::{TextInput, TextInputEvent, enabled, icon, icon_button, primary_button};
+use crate::ui::modal::form_section;
+use crate::ui::{
+    Ellipsis, TextInput, TextInputEvent, button, enabled, icon, icon_button, pill, primary_button, switch,
+};
 
 /// Bullets in place of the token while it is hidden: as many as the former web UI shows.
 const HIDDEN_TOKEN_LENGTH: usize = 32;
+
+/// How often the agents are read again, so "Connected" wears off without an event.
+const REFRESH_EVERY: Duration = Duration::from_secs(30);
+
+/// The status card's second line: room for two lines whatever it says, so
+/// the card keeps its height when the server starts, stops or fails.
+const STATUS_LINE_HEIGHT: f32 = 17.;
 
 /// The server's settings and state, as the core last reported them.
 pub(super) struct Loaded {
@@ -34,6 +54,21 @@ pub(super) struct Loaded {
     pub status: Status,
     /// The executable agents start over stdio; `None` leaves HTTP as the only way.
     pub executable: Option<String>,
+}
+
+/// How the agent shown is set up: by pasting a prompt into it (the default) or by running the steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum SetupMode {
+    #[default]
+    Prompt,
+    Command,
+}
+
+/// What the section tells the settings dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpSectionEvent {
+    /// A connection's agent access was saved: the explorer reads the connections again.
+    ConnectionsChanged,
 }
 
 pub struct McpSection {
@@ -45,17 +80,28 @@ pub struct McpSection {
     pub(super) shown: bool,
     /// Regenerate was pressed once: the row asks to confirm.
     regenerating: bool,
-    error: Option<String>,
+    /// "Port and token" is open: the port field and the token show under the status.
+    pub(super) secrets_open: bool,
+    pub(super) error: Option<String>,
     /// The copy button last pressed, which shows a check.
     pub(super) copied: Option<SharedString>,
-    pub(super) agent: AgentId,
+    /// The agents' list, with what was last read of each.
+    pub(super) agents: Vec<Listed>,
+    /// The agent the user picked; until they pick one, the most recently used, else Claude Code.
+    pub(super) picked: Option<AgentId>,
+    pub(super) mode: SetupMode,
     /// The transport picked; HTTP whatever is picked while there is no executable.
     pub(super) transport: Transport,
+    /// Each statement agents ran (its id, and when it started), as the statement log keeps them.
+    agent_statements: Vec<(u64, u64)>,
     /// The settings a running save writes; the latest asked meanwhile wait for it.
     saving: Option<McpSettings>,
     queued: Option<McpSettings>,
+    _refresh: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<McpSectionEvent> for McpSection {}
 
 impl McpSection {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -67,23 +113,55 @@ impl McpSection {
                 _ => {}
             }),
             cx.on_blur(&port.focus_handle(cx), window, |this, _, cx| this.apply_port(cx)),
+            cx.subscribe(&EventHub::global(cx), |this, _, event: &Event, cx| this.hear(event, cx)),
+            cx.observe(&Approvals::global(cx), |_, _, cx| cx.notify()),
         ];
+        // Read again now and then: an agent stops counting as connected without telling anyone.
+        let refresh = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(REFRESH_EVERY).await;
+                if this.update(cx, |this, cx| this.load_agents(cx)).is_err() {
+                    break;
+                }
+            }
+        });
         let mut section = Self {
             loaded: None,
             port,
             token: None,
             shown: false,
             regenerating: false,
+            secrets_open: false,
             error: None,
             copied: None,
-            agent: AgentId::Claude,
+            agents: listed(&[]),
+            picked: None,
+            mode: SetupMode::default(),
             transport: Transport::Stdio,
+            agent_statements: Vec::new(),
             saving: None,
             queued: None,
+            _refresh: refresh,
             _subscriptions: subscriptions,
         };
         section.load(cx);
+        section.load_agents(cx);
+        section.load_statements(cx);
         section
+    }
+
+    fn hear(&mut self, event: &Event, cx: &mut Context<Self>) {
+        match event {
+            Event::McpAgentsChanged => self.load_agents(cx),
+            Event::StatementLogged(entry) if kind_of(entry.origin) == Kind::Agents => {
+                self.agent_statements.push((entry.id, entry.at));
+                if self.agent_statements.len() > CAPACITY {
+                    self.agent_statements.remove(0);
+                }
+                cx.notify();
+            }
+            _ => {}
+        }
     }
 
     /// Reads the server's state and the token, each off the UI thread.
@@ -108,6 +186,40 @@ impl McpSection {
                     Ok(token) => this.token = Some(token),
                     Err(error) => this.error = Some(error),
                 }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Reads the agents that used DBForge, off the UI thread.
+    pub(super) fn load_agents(&mut self, cx: &mut Context<Self>) {
+        let seen = Backend::global(cx).spawn_blocking(cx, |core| mcp_agents(core.mcp_agents(), core.mcp_sessions()));
+        cx.spawn(async move |this, cx| {
+            let seen = seen.await;
+            let _ = this.update(cx, |this, cx| {
+                this.agents = listed(&seen);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Reads when the statements agents ran started, from the statement log.
+    fn load_statements(&mut self, cx: &mut Context<Self>) {
+        let times = Backend::global(cx).spawn_blocking(cx, |core| {
+            let entries = list_statements(core.statement_log());
+            let agents = entries.into_iter().filter(|entry| kind_of(entry.origin) == Kind::Agents);
+            agents.map(|entry| (entry.id, entry.at)).collect()
+        });
+        cx.spawn(async move |this, cx| {
+            let mut statements: Vec<(u64, u64)> = times.await;
+            let _ = this.update(cx, |this, cx| {
+                // Statements logged while the list was read came as events too: keep each once.
+                statements.append(&mut this.agent_statements);
+                statements.sort_unstable_by_key(|(id, _)| *id);
+                statements.dedup_by_key(|(id, _)| *id);
+                this.agent_statements = statements;
                 cx.notify();
             });
         })
@@ -170,6 +282,11 @@ impl McpSection {
         }
     }
 
+    /// Whether the server is set to run (running or failing to): only then are its port and token offered.
+    fn enabled(&self) -> bool {
+        self.latest().is_some_and(|latest| latest.enabled)
+    }
+
     /// Puts `text` on the clipboard; the button `id` shows a check.
     pub(super) fn copy(&mut self, id: SharedString, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -209,20 +326,148 @@ impl McpSection {
         .detach();
     }
 
-    fn render_status(&self, m: &McpMessages) -> AnyElement {
-        let callout = |tone, title: &str, detail: &str| {
-            Callout::new("mcp-status", tone, title.to_owned()).detail(detail.to_owned()).into_any_element()
-        };
+    /// The pill, the card's title and its second line, in the state's tint.
+    fn status_text(
+        &self,
+        m: &McpMessages,
+        theme: &Theme,
+        cx: &Context<Self>,
+    ) -> (&'static str, &'static str, String, Hsla) {
+        let failed = |error: &str| (m.status_failed, m.failed, error.to_owned(), theme.err);
         if let Some(error) = &self.error {
-            return callout(Tone::Failed, m.failed, error);
+            return failed(error);
         }
-        match self.loaded.as_ref().map(|loaded| &loaded.status) {
-            Some(Status::Running { url }) => {
-                Callout::new("mcp-status", Tone::Done, m.listening).detail(url.clone()).mono(true).into_any_element()
+        match self.loaded.as_ref().map(|loaded| (&loaded.status, loaded.settings.port)) {
+            Some((Status::Running { .. }, port)) => {
+                let now = chrono::Local::now();
+                let mut parts = vec![
+                    (m.server_on)(&format!("127.0.0.1:{port}")),
+                    (m.agents_connected)(connected(&self.agents, now.timestamp_millis())),
+                    (m.statements_today)(statements_today(
+                        self.agent_statements.iter().map(|(_, at)| *at),
+                        now.timestamp_millis(),
+                        &chrono::Local,
+                    )),
+                ];
+                let waiting = Approvals::global(cx).read(cx).waiting();
+                if waiting > 0 {
+                    parts.push((m.changes_waiting)(waiting));
+                }
+                (m.status_running, m.status_on, parts.join(" · "), theme.ok)
             }
-            Some(Status::Failed { error }) => callout(Tone::Failed, m.failed, error),
-            Some(Status::Stopped) | None => callout_space().into_any_element(),
+            Some((Status::Failed { error }, _)) => failed(error),
+            Some((Status::Stopped, _)) | None => {
+                (m.status_stopped, m.status_off, m.enable_description.to_owned(), theme.text3)
+            }
         }
+    }
+
+    fn render_status(&self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let m = &cx.messages().mcp;
+        let (state, title, detail, tint) = self.status_text(m, theme, cx);
+        let on = self.enabled();
+        let ready = self.loaded.is_some();
+        let secrets = self.secrets_open && on;
+        let summary = div()
+            .flex()
+            .items_center()
+            .gap(px(14.))
+            .child(
+                div()
+                    .size(px(40.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(12.))
+                    .bg(tint.opacity(0.14))
+                    .child(icon("code", tint, 18.)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(10.))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .ellipsis()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(title),
+                            )
+                            .child(pill(state, tint).flex_none()),
+                    )
+                    .child(
+                        div()
+                            .h(px(STATUS_LINE_HEIGHT * 2.))
+                            .overflow_hidden()
+                            .line_clamp(2)
+                            .text_ellipsis()
+                            .text_size(px(12.5))
+                            .line_height(px(STATUS_LINE_HEIGHT))
+                            .text_color(theme.text3)
+                            .child(detail),
+                    ),
+            )
+            .child(
+                // Kept in place while the server is off, so the switch doesn't move.
+                button(theme, Some("key"), m.port_and_token)
+                    .when(secrets, |button| button.border_color(theme.accent))
+                    .id("mcp-port-and-token")
+                    .when(!on, |button| button.invisible())
+                    .when(on, |button| {
+                        button.cursor_pointer().on_click(cx.listener(|this, _, _, cx| {
+                            this.secrets_open = !this.secrets_open;
+                            cx.notify();
+                        }))
+                    }),
+            )
+            .child(
+                enabled(switch(theme, on), ready)
+                    .id("mcp-enable")
+                    .tooltip(Tooltip::text(m.enable))
+                    .when(ready, |toggle| {
+                        toggle.on_click(cx.listener(move |this, _, _, cx| this.set_enabled(!on, cx)))
+                    }),
+            );
+        tile(theme)
+            .px(px(18.))
+            .py(px(14.))
+            .flex()
+            .flex_col()
+            .border_color(tint.opacity(0.22))
+            .bg(tint.opacity(0.05))
+            .child(summary)
+            .when(secrets, |card| card.child(self.render_secrets(theme, window, cx)))
+    }
+
+    /// Behind "Port and token": the port field and the token's row.
+    fn render_secrets(&self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let m = &cx.messages().mcp;
+        let invalid = parse_port(self.port.read(cx).text()).is_none();
+        let port = field(
+            label(theme, "mcp-port-label", m.port, None),
+            div().w(px(160.)).child(text_box(&self.port, invalid, true, window, cx)),
+            Some(help(theme, if invalid { m.port_invalid } else { m.port_help }, invalid.then_some(theme.err))),
+        );
+        div()
+            .mt(px(14.))
+            .pt(px(14.))
+            .border_t_1()
+            .border_color(theme.line)
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .child(port)
+            .child(self.render_token(theme, cx))
     }
 
     fn render_token(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -352,34 +597,22 @@ fn quiet_button(
     enabled(button, on).id(id).when(on, |button| button.hover(|button| button.bg(theme.sel)))
 }
 
+/// A framed part of the section: the status card, the agents, what they can reach.
+pub(super) fn tile(theme: &Theme) -> gpui::Div {
+    div().rounded(px(14.)).border_1().border_color(theme.line)
+}
+
 impl Render for McpSection {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
-        let m = &cx.messages().mcp;
-        let enabled = self.loaded.as_ref().is_some_and(|loaded| loaded.settings.enabled);
-        let invalid = parse_port(self.port.read(cx).text()).is_none();
-        let toggle = OptionItem::new("mcp-enable", Mark::Check, m.enable, enabled)
-            .icon("code")
-            .description(m.enable_description)
-            .disabled(self.loaded.is_none())
-            .on_select(cx.listener(move |this, _, _, cx| this.set_enabled(!enabled, cx)));
-        let port = field(
-            label(&theme, "mcp-port-label", m.port, None),
-            text_box(&self.port, invalid, true, window, cx),
-            Some(help(&theme, if invalid { m.port_invalid } else { m.port_help }, invalid.then_some(theme.err))),
-        );
         div()
-            .pt(px(16.))
+            .pt(px(6.))
             .pb(px(14.))
             .flex()
             .flex_col()
-            .gap(px(16.))
-            .child(option_list(&theme, vec![toggle.into_any_element()]))
-            .child(self.render_status(m))
-            .child(port)
-            .child(self.render_token(&theme, cx))
-            .child(self.render_agent_setup(&theme, cx))
-            .child(note(&theme, m.access_note))
+            .gap(px(14.))
+            .child(self.render_status(&theme, window, cx))
+            .child(self.render_agents(&theme, cx))
     }
 }
 
@@ -487,5 +720,92 @@ mod tests {
         section.update(cx, |section, cx| section.copy("token".into(), token.clone(), cx));
         assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()), Some(token));
         section.read_with(cx, |section, _| assert_eq!(section.copied.as_ref().map(|id| id.as_ref()), Some("token")));
+    }
+
+    #[gpui::test]
+    fn shows_the_prompt_by_default_and_the_command_once_chosen(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let (section, cx) = opened(free_port(), cx);
+        section.read_with(cx, |section, _| {
+            assert_eq!(section.mode, SetupMode::Prompt);
+            assert_eq!(section.shown_agent(), AgentId::Claude, "no agent used yet");
+        });
+        assert!(cx.debug_bounds("mcp-prompt").is_some(), "the prompt shows");
+        assert!(cx.debug_bounds("mcp-command").is_none());
+
+        let choice = cx.debug_bounds("mcp-mode-Command").expect("the Run a command choice");
+        cx.simulate_click(choice.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        section.read_with(cx, |section, _| assert_eq!(section.mode, SetupMode::Command));
+        // GPUI keeps the bounds of elements drawn in earlier frames, so only what appears is checked.
+        assert!(cx.debug_bounds("mcp-command").is_some(), "the command shows");
+    }
+
+    #[gpui::test]
+    fn the_prompt_shows_a_placeholder_over_http_and_copies_the_real_token(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let (section, cx) = opened(free_port(), cx);
+        section.update(cx, |section, cx| {
+            section.transport = Transport::Http;
+            cx.notify();
+        });
+        let (prompt, token) = section
+            .read_with(cx, |section, cx| (section.setup(&cx.messages().mcp).prompt, section.token.clone().unwrap()));
+        assert!(prompt.shown.contains("<token>") && !prompt.shown.contains(&token));
+        assert!(prompt.copied.contains(&token) && !prompt.copied.contains("<token>"));
+        section.update(cx, |section, cx| section.copy(prompt.id.clone(), prompt.copied.clone(), cx));
+        assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()), Some(prompt.copied));
+    }
+
+    #[gpui::test]
+    fn lists_the_agents_seen_and_hears_when_they_change(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let (section, cx) = opened(free_port(), cx);
+        section.read_with(cx, |section, _| assert!(section.agents.iter().all(|row| !row.used)));
+        cx.update(|_, cx| {
+            let core = Backend::global(cx).core();
+            core.mcp_agents().record(&dbforge_core::events::NoEvents, "codex-mcp-client", Some("1.0"));
+            EventHub::global(cx).update(cx, |_, cx| cx.emit(Event::McpAgentsChanged));
+        });
+        wait_until(cx, "the agent listed", |cx| {
+            section.read_with(cx, |section, _| section.agents.iter().any(|row| row.used))
+        });
+        section.read_with(cx, |section, _| {
+            assert_eq!(section.agents.len(), 5, "the known agents, always");
+            assert_eq!(section.shown_agent(), AgentId::Codex, "the most recently active");
+            let now = chrono::Local::now().timestamp_millis();
+            assert_eq!(connected(&section.agents, now), 1);
+        });
+        draw(cx);
+    }
+
+    #[gpui::test]
+    fn counts_the_agent_statements_logged_today(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let (section, cx) = opened(free_port(), cx);
+        let now = chrono::Local::now().timestamp_millis() as u64;
+        let entry = |id: u64, origin: dbforge_core::statement_log::Origin| dbforge_core::statement_log::Entry {
+            id,
+            at: now,
+            connection_id: "c".into(),
+            database: None,
+            origin,
+            text: "SELECT 1".into(),
+            elapsed_ms: 1,
+            rows: None,
+            error: None,
+        };
+        cx.update(|_, cx| {
+            EventHub::global(cx).update(cx, |_, cx| {
+                cx.emit(Event::StatementLogged(entry(1, dbforge_core::statement_log::Origin::Agent)));
+                cx.emit(Event::StatementLogged(entry(2, dbforge_core::statement_log::Origin::Console)));
+                cx.emit(Event::StatementLogged(entry(3, dbforge_core::statement_log::Origin::Agent)));
+            })
+        });
+        cx.run_until_parked();
+        section.read_with(cx, |section, _| {
+            let times = section.agent_statements.iter().map(|(_, at)| *at);
+            assert_eq!(statements_today(times, now as i64, &chrono::Local), 2);
+        });
     }
 }

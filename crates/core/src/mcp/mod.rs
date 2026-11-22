@@ -5,6 +5,7 @@
 //! connection says what agents may do with it (`AgentAccess`); every statement
 //! an agent causes lands in the statement log as the agent's.
 
+mod agents;
 mod approvals;
 pub mod bridge;
 pub mod commands;
@@ -14,6 +15,7 @@ mod settings;
 pub mod token;
 mod tools;
 
+pub use agents::{AgentRegistry, AgentSeen};
 pub use approvals::{ApprovalRequest, Approvals};
 pub use server::{McpServer, Status};
 pub use sessions::SessionFile;

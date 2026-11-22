@@ -364,7 +364,7 @@ impl Render for FormDialog {
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Submit, _, cx| this.run_submit(cx)))
             .on_action(cx.listener(|_, _: &Dismiss, _, cx| cx.emit(DismissEvent)))
-            .bg(theme.card)
+            .bg(theme.dialog)
             .w(px(440.))
             .max_w_full()
             .rounded(px(22.))

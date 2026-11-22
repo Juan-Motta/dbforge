@@ -174,13 +174,13 @@ impl ConnectionStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::fs;
 
     use super::*;
     use crate::connections::model::Engine;
 
-    fn connection(id: &str, name: &str) -> Connection {
+    pub(crate) fn connection(id: &str, name: &str) -> Connection {
         Connection {
             id: id.into(),
             name: name.into(),
@@ -201,12 +201,12 @@ mod tests {
     }
 
     /// The store at `path`, with its credentials next to it.
-    fn load(path: PathBuf) -> ConnectionStore {
+    pub(crate) fn load(path: PathBuf) -> ConnectionStore {
         let credentials = Credentials::load(path.parent().unwrap().to_path_buf()).unwrap();
         ConnectionStore::load(path, credentials).unwrap()
     }
 
-    fn temp_store() -> (tempfile::TempDir, PathBuf) {
+    pub(crate) fn temp_store() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("connections.json");
         (dir, path)

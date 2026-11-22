@@ -140,7 +140,7 @@ impl Render for ApprovalDialog {
             .on_action(cx.listener(|this, _: &Decline, _, cx| this.decline(cx)))
             .on_action(cx.listener(|this, _: &Press, window, cx| this.press(window, cx)))
             .on_action(cx.listener(|this, _: &SwitchButton, window, cx| this.switch_button(window, cx)))
-            .bg(theme.card)
+            .bg(theme.dialog)
             .w(px(640.))
             .max_w_full()
             .rounded(px(22.))

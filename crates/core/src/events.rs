@@ -24,6 +24,10 @@ pub enum Event {
     McpApprovalAsked(ApprovalRequest),
     /// Nobody waits on the approval `id` any more (the agent left, or time ran out): its dialog closes.
     McpApprovalWithdrawn { id: String },
+    /// An agent used the MCP server for the first time in this run, or again a
+    /// while after it was last announced: the agents list
+    /// ([`crate::mcp::commands::mcp_agents`]) has changed.
+    McpAgentsChanged,
 }
 
 /// Where the core sends its events: the UI.

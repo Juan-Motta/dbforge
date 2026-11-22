@@ -221,11 +221,6 @@ fn http_steps(agent: AgentId, url: &str, token: &str) -> Vec<Step> {
     }
 }
 
-/// Where `agent` reads a project's standing instructions.
-pub fn instructions_file(agent: AgentId) -> &'static str {
-    if agent == AgentId::Claude { "CLAUDE.md" } else { "AGENTS.md" }
-}
-
 /// How `agent` checks that the server is connected, when it has a command for it.
 fn check_command(agent: AgentId) -> Option<&'static str> {
     match agent {
@@ -235,19 +230,6 @@ fn check_command(agent: AgentId) -> Option<&'static str> {
         AgentId::Pi => Some("pi mcp list"),
         AgentId::Other => None,
     }
-}
-
-/// The note for a project's instructions file that has the agent use DBForge for its databases.
-pub fn project_note() -> String {
-    [
-        "## Databases",
-        "",
-        "Query and change this project’s databases through the `dbforge` MCP server, not with",
-        "database clients or credentials: DBForge holds the connections and their passwords.",
-        "Start with `list_connections`; each connection says its language and whether you may",
-        "change data. DBForge must be open for the server to answer.",
-    ]
-    .join("\n")
 }
 
 /// A prompt that has `agent` add DBForge itself, then say so in the project's instructions.
@@ -285,11 +267,6 @@ pub fn agent_prompt(agent: AgentId, endpoint: Endpoint) -> String {
             Some(check) => format!("Then check it is connected with `{check}`{must_be_open}, and tell me if it isn't."),
             None => format!("Then check it is connected{must_be_open}, and tell me if it isn’t."),
         },
-        format!(
-            "Finally, add this section to the {} of the current project, creating the file if needed:\n\n{}",
-            instructions_file(agent),
-            project_note()
-        ),
     ];
     if http {
         parts.push("The token is a secret: don’t print it back, and don’t put it in the project.".to_owned());
@@ -383,9 +360,7 @@ mod tests {
         assert!(prompt.contains(&texts(AgentId::Codex, HTTP)[0]));
         assert!(prompt.contains("export DBFORGE_MCP_TOKEN=abc"));
         assert!(prompt.contains("codex mcp list"));
-        assert!(prompt.contains("AGENTS.md"));
-        assert!(prompt.contains(&project_note()));
-        assert_eq!(instructions_file(AgentId::Claude), "CLAUDE.md");
+        assert!(!prompt.contains("AGENTS.md") && !prompt.contains("CLAUDE.md"), "leaves the project's files alone");
         assert!(!agent_prompt(AgentId::Other, HTTP).contains("mcp list"));
         // Over HTTP the wording stays as it was before stdio existed.
         assert!(agent_prompt(AgentId::Claude, HTTP).contains(

@@ -314,7 +314,7 @@ impl Render for PopoverMenu {
         }
         let theme = cx.theme();
         glass(theme)
-            .bg(theme.card)
+            .bg(theme.dialog)
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.step(false, cx)))
