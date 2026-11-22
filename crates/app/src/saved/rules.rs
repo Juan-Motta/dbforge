@@ -202,6 +202,7 @@ mod tests {
             updated_at: 0,
             last_run_at: None,
             last_values: BTreeMap::new(),
+            recent_values: BTreeMap::new(),
         }
     }
 

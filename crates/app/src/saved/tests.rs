@@ -3,15 +3,16 @@
 //! query with parameters.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use dbforge_core::connections::model::{ConnectionInput, Engine};
 use dbforge_core::query::QueryScope;
-use dbforge_core::saved_queries::{ParamKind, SavedQuery, SavedQueryInput, SavedScope};
-use gpui::{AppContext, Entity, TestAppContext, VisualTestContext};
+use dbforge_core::saved_queries::{ParamKind, ParamValue, SavedQuery, SavedQueryInput, SavedScope};
+use gpui::{AppContext, Entity, TestAppContext, VisualTestContext, px};
 
 use super::store::{self, SavedStore};
-use super::{LibraryPanel, LibraryView};
+use super::{LibraryPanel, LibraryView, RunAction, RunDialog, RunRequest};
 use crate::backend::Backend;
 use crate::preferences::{Preferences, keys};
 use crate::test_support::{draw, setup, wait_until};
@@ -217,5 +218,65 @@ fn explaining_a_saved_query_with_parameters_asks_for_them_first(cx: &mut TestApp
     cx.run_until_parked();
     let dialog = workspace.read_with(cx, |workspace, _| workspace.run_dialog().cloned()).expect("the values first");
     dialog.read_with(cx, |dialog, _| assert_eq!(dialog.request().action, super::RunAction::Explain));
+    draw(cx);
+}
+
+#[gpui::test]
+fn each_parameter_offers_its_recent_values_newest_first_and_picking_one_fills_it(cx: &mut TestAppContext) {
+    let _dir = setup(cx);
+    cx.update(|cx| cx.bind_keys(crate::ui::menu::key_bindings()));
+    let cx = cx.add_empty_window();
+    let connection = save_postgres(cx);
+    let query = save_query(
+        SavedQueryInput {
+            name: "Order by id".into(),
+            sql: "select * from orders where id = :id".into(),
+            description: None,
+            folder: None,
+            scope: SavedScope::Connection { connection_id: connection.clone() },
+            engine: Engine::Postgres,
+        },
+        cx,
+    );
+    for value in ["7", "8"] {
+        let values = BTreeMap::from([("id".to_string(), ParamValue { kind: ParamKind::Number, value: value.into() })]);
+        let done: Rc<RefCell<bool>> = Rc::default();
+        let into = done.clone();
+        cx.update(|_, cx| {
+            let marking = store::mark_run(query.id.clone(), Some(values), cx);
+            cx.spawn(async move |_| {
+                marking.await.expect("recorded");
+                *into.borrow_mut() = true;
+            })
+            .detach();
+        });
+        wait_until(cx, "the run to be recorded", |_| *done.borrow());
+    }
+    let query = queries(cx).into_iter().next().expect("the query");
+    let request = RunRequest {
+        sql: query.sql.clone(),
+        query,
+        connection_id: connection,
+        connection_name: "Vivi Dev".into(),
+        console: None,
+        action: RunAction::Run,
+    };
+    let (dialog, cx) = cx.add_window_view(|window, cx| RunDialog::new(request, window, cx));
+    draw(cx);
+    let number = |value: &str| ParamValue { kind: ParamKind::Number, value: value.into() };
+    dialog.read_with(cx, |dialog, cx| {
+        assert_eq!(dialog.recent_values("id"), [number("8"), number("7")], "newest first");
+        assert_eq!(dialog.outcome(cx).expect("valid").sql, "select * from orders where id = 8", "the last one");
+    });
+    dialog.update_in(cx, |dialog, window, cx| dialog.open_recent("id", gpui::point(px(0.), px(0.)), window, cx));
+    draw(cx);
+    assert!(dialog.read_with(cx, |dialog, _| dialog.recent_menu().is_some()), "the menu opened");
+    // The current value starts highlighted; the one below it is the older one.
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    dialog.read_with(cx, |dialog, cx| {
+        assert!(dialog.recent_menu().is_none(), "the menu closed");
+        assert_eq!(dialog.outcome(cx).expect("valid").sql, "select * from orders where id = 7");
+    });
     draw(cx);
 }

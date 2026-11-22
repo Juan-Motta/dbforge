@@ -38,7 +38,14 @@ pub struct SavedQuery {
     /// The values its parameters were last run with, by parameter name.
     #[serde(default)]
     pub last_values: BTreeMap<String, ParamValue>,
+    /// The last [`RECENT_VALUES`] distinct values each parameter ran with,
+    /// newest first, by parameter name.
+    #[serde(default)]
+    pub recent_values: BTreeMap<String, Vec<ParamValue>>,
 }
+
+/// How many distinct values each parameter of a saved query remembers.
+pub const RECENT_VALUES: usize = 5;
 
 /// Which connections a saved query is offered for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,11 +187,22 @@ impl SavedQueries {
             let query = find_mut(queries, id)?;
             query.last_run_at = Some(now);
             if let Some(values) = values {
+                for (name, value) in &values {
+                    remember(query.recent_values.entry(name.clone()).or_default(), value.clone());
+                }
                 query.last_values = values;
             }
             Ok(query.clone())
         })
     }
+}
+
+/// Puts `value` first in `recent`, dropping an equal one (same kind and
+/// value) and keeping at most [`RECENT_VALUES`].
+fn remember(recent: &mut Vec<ParamValue>, value: ParamValue) {
+    recent.retain(|kept| *kept != value);
+    recent.insert(0, value);
+    recent.truncate(RECENT_VALUES);
 }
 
 fn find_mut<'a>(queries: &'a mut [SavedQuery], id: &str) -> Result<&'a mut SavedQuery> {
@@ -205,6 +223,7 @@ fn created(input: SavedQueryInput, id: String, now: i64) -> SavedQuery {
         updated_at: now,
         last_run_at: None,
         last_values: BTreeMap::new(),
+        recent_values: BTreeMap::new(),
     }
 }
 

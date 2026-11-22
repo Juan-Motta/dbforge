@@ -361,6 +361,8 @@ pub(super) const MESSAGES: Messages = Messages {
         preview: "Vista previa",
         preview_note: "El SQL que ves es exactamente el que se ejecuta: los valores se escriben en él como literales.",
         remember_values: "Recordar los valores",
+        recent_values: "Valores recientes",
+        empty_value: "(vacío)",
         missing_value: |name| format!("Escribe un valor para :{name}."),
         not_a_number: |value| format!("“{value}” no es un número."),
         not_a_date: |value| format!("“{value}” no es una fecha (AAAA-MM-DD)."),

@@ -182,6 +182,101 @@ mod tests {
         assert_eq!(mark_saved_query_run(&store, &saved.id, Some(second.clone())).unwrap().last_values, second);
     }
 
+    fn run_with(store: &SavedQueries, id: &str, pairs: &[(&str, ParamValue)]) -> SavedQuery {
+        let values = pairs.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
+        mark_saved_query_run(store, id, Some(values)).unwrap()
+    }
+
+    fn numbers(values: &[&str]) -> Vec<ParamValue> {
+        values.iter().map(|text| value(ParamKind::Number, text)).collect()
+    }
+
+    #[test]
+    fn recent_values_are_kept_newest_first() {
+        let (_dir, _, store) = store();
+        let saved = save_query(&store, None, input("Orders", None)).unwrap();
+        assert!(saved.recent_values.is_empty());
+        run_with(&store, &saved.id, &[("id", value(ParamKind::Number, "1"))]);
+        let run = run_with(&store, &saved.id, &[("id", value(ParamKind::Number, "2"))]);
+        assert_eq!(run.recent_values["id"], numbers(&["2", "1"]));
+        assert_eq!(run.last_values["id"], value(ParamKind::Number, "2"));
+    }
+
+    #[test]
+    fn reusing_a_recent_value_moves_it_to_the_front() {
+        let (_dir, _, store) = store();
+        let saved = save_query(&store, None, input("Orders", None)).unwrap();
+        for text in ["1", "2", "3", "1"] {
+            run_with(&store, &saved.id, &[("id", value(ParamKind::Number, text))]);
+        }
+        let run = run_with(&store, &saved.id, &[("id", value(ParamKind::Text, "3"))]);
+        let mut expected = vec![value(ParamKind::Text, "3")];
+        expected.extend(numbers(&["1", "3", "2"]));
+        assert_eq!(run.recent_values["id"], expected, "the same text with another kind is another value");
+    }
+
+    #[test]
+    fn recent_values_keep_at_most_five() {
+        let (_dir, _, store) = store();
+        let saved = save_query(&store, None, input("Orders", None)).unwrap();
+        let mut run = saved.clone();
+        for text in ["1", "2", "3", "4", "5", "6", "7"] {
+            run = run_with(&store, &saved.id, &[("id", value(ParamKind::Number, text))]);
+        }
+        assert_eq!(crate::saved_queries::RECENT_VALUES, 5);
+        assert_eq!(run.recent_values["id"], numbers(&["7", "6", "5", "4", "3"]));
+    }
+
+    #[test]
+    fn each_parameter_keeps_its_own_recent_values() {
+        let (_dir, _, store) = store();
+        let saved = save_query(&store, None, input("Orders", None)).unwrap();
+        run_with(
+            &store,
+            &saved.id,
+            &[("id", value(ParamKind::Number, "1")), ("day", value(ParamKind::Date, "2024-01-05"))],
+        );
+        let run = run_with(&store, &saved.id, &[("id", value(ParamKind::Number, "2"))]);
+        assert_eq!(run.recent_values["id"], numbers(&["2", "1"]));
+        assert_eq!(run.recent_values["day"], [value(ParamKind::Date, "2024-01-05")]);
+    }
+
+    #[test]
+    fn a_run_without_values_leaves_recent_values_untouched() {
+        let (_dir, _, store) = store();
+        let saved = save_query(&store, None, input("Orders", None)).unwrap();
+        let run = run_with(&store, &saved.id, &[("id", value(ParamKind::Number, "1"))]);
+        let again = mark_saved_query_run(&store, &saved.id, None).unwrap();
+        assert_eq!(again.recent_values, run.recent_values);
+        assert_eq!(again.last_values, run.last_values);
+    }
+
+    #[test]
+    fn duplicating_keeps_recent_values() {
+        let (_dir, _, store) = store();
+        let saved = save_query(&store, None, input("Orders", None)).unwrap();
+        let run = run_with(&store, &saved.id, &[("id", value(ParamKind::Number, "1"))]);
+        let copy = duplicate_saved_query(&store, &saved.id).unwrap();
+        assert_eq!(copy.recent_values, run.recent_values);
+        assert_eq!(copy.last_values, run.last_values);
+    }
+
+    #[test]
+    fn a_file_without_recent_values_loads_with_none() {
+        let (_dir, file, _) = store();
+        fs::write(
+            &file,
+            r#"[{"id":"q1","name":"Orders","sql":"select :id","scope":{"kind":"engine"},"engine":"postgres",
+                "createdAt":1,"updatedAt":1,"lastValues":{"id":{"kind":"number","value":"7"}}}]"#,
+        )
+        .unwrap();
+        let store = SavedQueries::load(file).unwrap();
+        let loaded = store.get("q1").unwrap();
+        assert!(loaded.recent_values.is_empty());
+        assert_eq!(loaded.last_values["id"], value(ParamKind::Number, "7"));
+        assert!(store.set_aside().is_none());
+    }
+
     #[test]
     fn reloading_from_disk_keeps_everything() {
         let (_dir, file, store) = store();
@@ -199,6 +294,7 @@ mod tests {
         assert!(json.contains("\"createdAt\""), "{json}");
         assert!(json.contains("\"kind\": \"connection\"") && json.contains("\"connectionId\": \"c1\""), "{json}");
         assert!(json.contains("\"lastValues\""), "{json}");
+        assert!(json.contains("\"recentValues\""), "{json}");
     }
 
     #[test]

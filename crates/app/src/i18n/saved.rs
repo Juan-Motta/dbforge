@@ -93,6 +93,10 @@ pub struct SavedMessages {
     pub preview: &'static str,
     pub preview_note: &'static str,
     pub remember_values: &'static str,
+    /// The button listing a parameter's last values.
+    pub recent_values: &'static str,
+    /// How an empty remembered value is listed.
+    pub empty_value: &'static str,
     // Why a value can't be written
     pub missing_value: fn(&str) -> String,
     pub not_a_number: fn(&str) -> String,
