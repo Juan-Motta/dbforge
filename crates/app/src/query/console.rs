@@ -41,9 +41,9 @@ use dbforge_core::saved_queries::params::parameters;
 use dbforge_core::saved_queries::{SavedQuery, SavedQueryInput};
 use gpui::{
     AnyElement, AnyView, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, StatefulInteractiveElement,
-    Styled, Subscription, Window, actions, deferred, div, linear_color_stop, linear_gradient, point,
-    prelude::FluentBuilder, px,
+    HighlightStyle, InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
+    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, actions, deferred, div, linear_color_stop,
+    linear_gradient, point, prelude::FluentBuilder, px,
 };
 
 use super::plan::parse_plan;
@@ -1170,7 +1170,9 @@ impl QueryConsole {
                 .id("transaction")
                 .h(px(34.))
                 .min_w_0()
+                .flex_shrink()
                 .max_w(px(560.))
+                .overflow_hidden()
                 .pl(px(13.))
                 .pr(px(4.))
                 .flex()
@@ -1182,9 +1184,21 @@ impl QueryConsole {
                 .border_color(tint.opacity(if warning { 0.8 } else { 0.48 }))
                 .text_size(px(12.5))
                 .child(marker)
-                .child(div().flex_none().font_weight(FontWeight::SEMIBOLD).text_color(tint).child(shown.title))
-                .child(div().flex_none().text_color(theme.text3).child("·"))
-                .child(div().min_w_0().ellipsis().text_color(theme.text).child(shown.detail))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .ellipsis()
+                        .child(StyledText::new(format!("{} · {}", shown.title, shown.detail)).with_highlights([(
+                            0..shown.title.len(),
+                            HighlightStyle {
+                                color: Some(tint),
+                                font_weight: Some(FontWeight::SEMIBOLD),
+                                ..Default::default()
+                            },
+                        )]))
+                        .text_color(theme.text),
+                )
                 .child(
                     enabled(ghost_button(&theme, rollback).h(px(26.)).px(px(12.)).text_size(px(12.5)), idle)
                         .id("rollback")
@@ -1236,8 +1250,6 @@ impl QueryConsole {
             .gap(px(8.))
             .child(self.database_picker(cx))
             .children(self.container_picker(cx))
-            // After the pickers, in the room the spacer gives up: nothing else moves when it shows.
-            .children(self.transaction_capsule(cx))
             .child(div().flex_1())
             // The cancel error keeps to one line, cut short, so nothing moves.
             .children(self.cancel_error.as_ref().map(|error| {
@@ -1280,7 +1292,9 @@ impl QueryConsole {
                     ),
             )
             .child(self.explain_button(cx))
-            .children(self.mode_choice(cx))
+            // An open transaction takes the mode choice's place (the mode can't change while it
+            // is open) and the room the spacer gives up; it shrinks before it overlaps anything.
+            .children(self.transaction_capsule(cx).or_else(|| self.mode_choice(cx)))
             .child(self.run_slot(cx))
             .into_any_element()
     }
