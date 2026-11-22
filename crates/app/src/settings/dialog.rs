@@ -28,7 +28,7 @@ const CONTEXT: &str = "SettingsDialog";
 
 /// The dialog's size, the same for every section; a smaller window shrinks it to fit.
 const WIDTH: f32 = 1000.;
-const HEIGHT: f32 = 680.;
+const HEIGHT: f32 = 760.;
 
 /// The themes, in the order the former web UI shows them.
 const THEMES: [ThemePreference; 3] = [ThemePreference::Dark, ThemePreference::Light, ThemePreference::System];
