@@ -23,6 +23,7 @@ use dbforge_core::mcp::{
     ApprovalRequest, ApprovalSecrets, ApprovalSubject, ConnectionChange, ConnectionField, DraftScope, DumpAction,
     DumpApproval, SavedQueryChange, SavedQueryDraft, SavedQueryField,
 };
+use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding,
     ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window, actions, div, px,
@@ -35,8 +36,8 @@ use crate::theme::{ActiveTheme, Theme};
 use crate::ui::code_editor::LINE_HEIGHT;
 use crate::ui::field::{Tooltip, label as field_label, text_box};
 use crate::ui::{
-    CodeEditor, TextInput, TextInputEvent, button, glass, icon, icon_button, pill, primary_button, segment_face,
-    segmented,
+    CodeEditor, TextInput, TextInputEvent, button, enabled, glass, icon, icon_button, pill, primary_button,
+    segment_face, segmented,
 };
 
 actions!(approval_dialog, [Decline, Press, SwitchButton, SwitchBack]);
@@ -69,11 +70,22 @@ struct ConnectionInputs {
     ssh_secret: Option<Entity<TextInput>>,
     /// A new connection's agent access: Read only until the user changes it.
     access: Option<AgentAccess>,
+    /// The fields Approve waits for: an edit pointing the connection
+    /// elsewhere carries no saved secret there, so it must be typed again.
+    password_required: bool,
+    ssh_required: bool,
 }
 
 impl ConnectionInputs {
     fn fields(&self) -> impl Iterator<Item = &Entity<TextInput>> {
         [&self.password, &self.ssh_secret].into_iter().flatten()
+    }
+
+    /// Whether every field that must be typed is.
+    fn complete(&self, cx: &App) -> bool {
+        let typed =
+            |field: &Option<Entity<TextInput>>| field.as_ref().is_some_and(|field| !field.read(cx).text().is_empty());
+        (!self.password_required || typed(&self.password)) && (!self.ssh_required || typed(&self.ssh_secret))
     }
 }
 
@@ -176,16 +188,21 @@ impl ApprovalDialog {
         self.answer(false, cx);
     }
 
-    /// Runs the agent's change: Approve and run, pressed.
+    /// Runs the agent's change: Approve and run, pressed. Does nothing while a
+    /// secret that must be typed isn't.
     pub fn approve(&mut self, cx: &mut Context<Self>) {
-        self.answer(true, cx);
+        if self.inputs.complete(cx) {
+            self.answer(true, cx);
+        }
     }
 
     /// Enter or Space: the focused button. Approves only while Approve has
     /// the keyboard; anything else declines, as Decline has it by default.
     fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let approved = self.approve.is_focused(window);
-        self.answer(approved, cx);
+        match self.approve.is_focused(window) {
+            true => self.approve(cx),
+            false => self.answer(false, cx),
+        }
     }
 
     /// Tab (`forward`) or Shift-Tab: the next or previous of the secrets'
@@ -418,13 +435,15 @@ fn connection_inputs(
     cx: &mut Context<ApprovalDialog>,
 ) -> (ConnectionInputs, Vec<Subscription>) {
     let m = &cx.messages().mcp;
-    let placeholder = match change {
-        ConnectionChange::Update { .. } => m.conn_keep_secret,
+    let secrets = change.secrets();
+    // Empty keeps the saved one on an edit, unless the edit drops it.
+    let placeholder = |required: bool, dropped: bool| match change {
+        _ if required => m.conn_retype_secret,
+        ConnectionChange::Update { .. } if !dropped => m.conn_keep_secret,
         _ => m.conn_optional,
     };
-    let secrets = change.secrets();
     let mut subscriptions = Vec::new();
-    let mut field = |wanted: bool, cx: &mut Context<ApprovalDialog>| {
+    let mut field = |wanted: bool, placeholder: &'static str, cx: &mut Context<ApprovalDialog>| {
         wanted.then(|| {
             let field = cx.new(|cx| TextInput::new(placeholder, cx).masked());
             subscriptions.push(cx.subscribe(&field, |this, _, event: &TextInputEvent, cx| match event {
@@ -436,10 +455,13 @@ fn connection_inputs(
             field
         })
     };
-    let password = field(secrets.password, cx);
-    let ssh_secret = field(secrets.ssh.is_some(), cx);
+    let password_placeholder = placeholder(secrets.password_required(), secrets.password_dropped);
+    let password = field(secrets.password, password_placeholder, cx);
+    let ssh_placeholder = placeholder(secrets.ssh_required(), secrets.ssh_dropped);
+    let ssh_secret = field(secrets.ssh.is_some(), ssh_placeholder, cx);
     let access = matches!(change, ConnectionChange::Create { .. }).then_some(AgentAccess::Read);
-    (ConnectionInputs { password, ssh_secret, access }, subscriptions)
+    let (password_required, ssh_required) = (secrets.password_required(), secrets.ssh_required());
+    (ConnectionInputs { password, ssh_secret, access, password_required, ssh_required }, subscriptions)
 }
 
 /// The fields a new or deleted connection lists: where it is and how it is reached.
@@ -764,6 +786,7 @@ impl Render for ApprovalDialog {
         };
         let decline_focused = self.decline.is_focused(window);
         let approve_focused = self.approve.is_focused(window);
+        let ready = self.inputs.complete(cx);
         glass(&theme)
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &Decline, _, cx| this.decline(cx)))
@@ -822,11 +845,10 @@ impl Render for ApprovalDialog {
                         decline_focused,
                     ))
                     .child(focus_ring(
-                        primary_button(&theme, approve)
+                        enabled(primary_button(&theme, approve), ready)
                             .id("approval-approve")
                             .track_focus(&self.approve)
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _, _, cx| this.approve(cx))),
+                            .when(ready, |approve| approve.on_click(cx.listener(|this, _, _, cx| this.approve(cx)))),
                         &theme,
                         approve_focused,
                     )),
@@ -1262,6 +1284,71 @@ mod tests {
         assert_eq!(secrets.agent_access, Some(AgentAccess::Write));
         dialog.update(cx, |dialog, cx| {
             assert!(dialog.inputs.password.as_ref().unwrap().read(cx).text().is_empty(), "nothing typed stays");
+        });
+    }
+
+    #[gpui::test]
+    fn an_edit_pointing_elsewhere_approves_only_with_the_password_typed_again(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        cx.update(|cx| {
+            cx.bind_keys(key_bindings());
+            cx.bind_keys(crate::ui::text_input::key_bindings());
+        });
+        let events: Arc<ChannelEvents> = cx.update(|cx| {
+            let (events, received) = channel();
+            EventHub::start(received, cx);
+            Approvals::start(cx);
+            Arc::new(events)
+        });
+        let core = cx.update(|cx| Backend::global(cx).core().clone());
+        // The port changes: the saved password isn't carried to the new place.
+        let request = connection_request(edit());
+        let asking =
+            runtime().spawn(async move { core.mcp_approvals().ask_for_answer(events.as_ref(), request).await });
+        let shown = loop {
+            cx.run_until_parked();
+            if let Some(shown) = cx.update(|cx| Approvals::global(cx).read(cx).current().cloned()) {
+                break shown;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        let (dialog, cx) = cx.add_window_view(|_, cx| ApprovalDialog::new(shown, None, cx));
+        dialog.update_in(cx, |dialog, window, _| dialog.focus(window));
+        draw(cx);
+        dialog.update(cx, |dialog, _| {
+            assert!(dialog.inputs.password_required, "the password must be typed again");
+            assert!(!dialog.inputs.ssh_required, "a key may have no passphrase");
+        });
+
+        // Decline → Approve, pressed with nothing typed: nothing answered.
+        cx.simulate_keystrokes("tab enter");
+        dialog.update(cx, |dialog, cx| dialog.approve(cx));
+        cx.run_until_parked();
+        assert!(!asking.is_finished(), "Approve waits for the password");
+        assert!(cx.update(|_, cx| Approvals::global(cx).read(cx).current().is_some()), "still asked");
+
+        // Approve → Decline → the SSH passphrase → the password.
+        cx.simulate_keystrokes("shift-tab shift-tab shift-tab");
+        cx.simulate_input("new pw");
+        dialog.update(cx, |dialog, cx| dialog.approve(cx));
+        cx.run_until_parked();
+        let answer = runtime().block_on(asking).expect("the request's answer");
+        assert!(answer.approved);
+        let mut secrets = answer.secrets.expect("what the user typed");
+        assert_eq!(secrets.take_password().as_deref(), Some("new pw"));
+        assert_eq!(secrets.take_ssh_secret(), None);
+    }
+
+    #[gpui::test]
+    fn an_edit_staying_in_place_approves_with_nothing_typed(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let before = shop();
+        let after = Connection { name: "Shop EU".into(), ..before.clone() };
+        let rename = connection_request(ConnectionChange::Update { before, after, tag: None });
+        let (dialog, cx) = shown_dump(rename, cx);
+        dialog.update(cx, |dialog, cx| {
+            assert!(!dialog.inputs.password_required && !dialog.inputs.ssh_required);
+            assert!(dialog.inputs.complete(cx), "empty keeps the saved secrets");
         });
     }
 }

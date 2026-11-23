@@ -1175,6 +1175,7 @@ pub(super) const MESSAGES: Messages = Messages {
         conn_delete_who: |agent, name| format!("{agent} quiere eliminar la conexión “{name}”:"),
         conn_keep_secret: "Vacío conserva el actual",
         conn_optional: "Opcional",
+        conn_retype_secret: "Obligatorio: ahora apunta a otro sitio",
         conn_ssh_port: "Puerto SSH",
         conn_yes: "Sí",
         conn_no: "No",

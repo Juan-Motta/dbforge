@@ -19,6 +19,7 @@ mod extensions;
 mod mongodb;
 mod mysql;
 mod postgres;
+mod records;
 mod secret_file;
 mod sqlite;
 mod tool_paths;
@@ -31,10 +32,13 @@ pub use exports::{
 pub use mongodb::MongodbOptions;
 pub use mysql::MysqlOptions;
 pub use postgres::PostgresOptions;
+pub use records::{ExportRecord, ExportRecords};
 pub use sqlite::{SqliteFormat, SqliteOptions};
 pub use tool_paths::ToolPaths;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -250,12 +254,16 @@ pub async fn export(
         )));
     }
     let started = Instant::now();
+    // Held until the export ends: another one to the same file waits for none and refuses.
+    let _writing = Writing::claim(path)?;
+    let unwritable = |error: std::io::Error| AppError::Invalid(format!("Could not write {}: {error}", path.display()));
     // The default export folder may not exist yet.
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        std::fs::create_dir_all(dir).map_err(unwritable)?;
     }
     let partial = partial_path(path);
-    // One left by a run that couldn't clean up would be in the way of tools that won't overwrite.
+    // No run of this DBForge writes it (it holds no claim): one left by a run
+    // that couldn't clean up, in the way of tools that won't overwrite.
     let _ = std::fs::remove_file(&partial);
     let outcome = match options {
         DumpOptions::Postgres(options) => {
@@ -273,9 +281,37 @@ pub async fn export(
         let _ = std::fs::remove_file(&partial);
         return Err(error);
     }
-    std::fs::rename(&partial, path)?;
+    if let Err(error) = std::fs::rename(&partial, path) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(unwritable(error));
+    }
     let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or_default();
     Ok(Exported { bytes, elapsed_ms: started.elapsed().as_millis() as u64 })
+}
+
+/// The exports being written now, by path: two to one file would share its partial file.
+static WRITING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// An export's claim on its file, given up when dropped.
+struct Writing(PathBuf);
+
+impl Writing {
+    fn claim(path: &Path) -> Result<Self> {
+        let mut writing = WRITING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !writing.insert(path.to_owned()) {
+            return Err(AppError::Invalid(format!(
+                "A backup with this name is already being written: {}. Try again once it has finished.",
+                path.display()
+            )));
+        }
+        Ok(Self(path.to_owned()))
+    }
+}
+
+impl Drop for Writing {
+    fn drop(&mut self) {
+        WRITING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&self.0);
+    }
 }
 
 /// Restores the file at `path` into `database` (for SQLite, the file to
@@ -356,12 +392,15 @@ async fn tool_for(name: Option<&str>, chosen: &ToolPaths, connection: &Connectio
     Ok(Some(tools::resolve(name, chosen.get(name).as_deref(), flavour).await?))
 }
 
+/// Runs `request` as the app's and the agents' exports do, and records which
+/// connection made the file once it is written ([`ExportRecords`]).
 pub async fn export_database(
     events: &dyn Events,
     store: &ConnectionStore,
     jobs: &Jobs,
     chosen: &ToolPaths,
     log: &StatementLog,
+    records: &ExportRecords,
     request: ExportRequest,
 ) -> Result<Exported> {
     let opened = store.open(&request.connection_id)?;
@@ -376,11 +415,14 @@ pub async fn export_database(
     };
     let path = Path::new(&request.path);
     let run = Run { tool: tool.as_ref(), cancel: job.token() };
-    opened
+    let exported = opened
         .run(log, Origin::Dump, async |connection, password| {
             export(connection, password, &request.database, path, &request.options, run, report).await
         })
-        .await
+        .await?;
+    // The export is written either way: without a record, agents just aren't offered it.
+    let _ = records.record(path, &request.connection_id, &request.database);
+    Ok(exported)
 }
 
 pub async fn import_database(

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::connections::store::ConnectionStore;
 use crate::connections::tags::TagStore;
 use crate::credentials::Credentials;
-use crate::dump::{ExportFolder, ToolPaths};
+use crate::dump::{ExportFolder, ExportRecords, ToolPaths};
 use crate::error::{AppError, Result};
 use crate::events::Events;
 use crate::files::SetAside;
@@ -29,6 +29,8 @@ pub const IDENTIFIER: &str = "dev.dbforge.app";
 pub const CONNECTIONS_FILE: &str = "connections.json";
 pub const TAGS_FILE: &str = "tags.json";
 pub const TOOLS_FILE: &str = "tools.json";
+/// Which connection made each export ([`ExportRecords`]).
+pub const EXPORTS_FILE: &str = "exports.json";
 pub const MCP_SETTINGS_FILE: &str = "mcp.json";
 pub const MCP_SESSIONS_FILE: &str = "mcp-sessions.json";
 pub const SAVED_QUERIES_FILE: &str = "saved_queries.json";
@@ -72,6 +74,7 @@ pub struct Core {
     tags: TagStore,
     tool_paths: ToolPaths,
     export_folder: ExportFolder,
+    export_records: ExportRecords,
     saved_queries: SavedQueries,
     query_sessions: QuerySessions,
     jobs: Jobs,
@@ -100,6 +103,7 @@ impl Core {
         tunnel::init(config.join(KNOWN_HOSTS_FILE), Box::new(move |id| secrets.credentials().get(id)));
         let tags = TagStore::load(config.join(TAGS_FILE))?;
         let tool_paths = ToolPaths::load(config.join(TOOLS_FILE))?;
+        let export_records = ExportRecords::load(config.join(EXPORTS_FILE))?;
         let saved_queries = SavedQueries::load(config.join(SAVED_QUERIES_FILE))?;
         let mcp_settings = SettingsFile::load(config.join(MCP_SETTINGS_FILE))?;
         let mcp_sessions = Arc::new(SessionFile::load(config.join(MCP_SESSIONS_FILE))?);
@@ -109,6 +113,7 @@ impl Core {
             connections.set_aside(),
             tags.set_aside(),
             tool_paths.set_aside(),
+            export_records.set_aside(),
             saved_queries.set_aside(),
             mcp_settings.set_aside(),
             mcp_sessions.set_aside(),
@@ -125,6 +130,7 @@ impl Core {
             tags,
             tool_paths,
             export_folder: ExportFolder::default(),
+            export_records,
             saved_queries,
             query_sessions: QuerySessions::default(),
             jobs: Jobs::default(),
@@ -168,6 +174,11 @@ impl Core {
     /// Where exports go: the app keeps it as its preference says, for the MCP tools.
     pub fn export_folder(&self) -> &ExportFolder {
         &self.export_folder
+    }
+
+    /// Which connection made each export, for the MCP tools to offer agents only their own.
+    pub fn export_records(&self) -> &ExportRecords {
+        &self.export_records
     }
 
     /// The queries the user saved with a name.

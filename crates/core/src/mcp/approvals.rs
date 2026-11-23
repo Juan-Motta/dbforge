@@ -100,6 +100,12 @@ pub struct SecretFields {
     pub password: bool,
     /// Its SSH password (`SshAuth::Password`) or key passphrase (`SshAuth::Key`).
     pub ssh: Option<SshAuth>,
+    /// An update can't keep the saved password: the connection would point
+    /// elsewhere ([`ConnectionField::DESTINATION`]), and the password isn't carried there unseen.
+    pub password_dropped: bool,
+    /// An update can't keep the saved SSH password or passphrase: the
+    /// connection would point elsewhere, or its tunnel stops signing in the way it was for.
+    pub ssh_dropped: bool,
 }
 
 impl SecretFields {
@@ -111,7 +117,20 @@ impl SecretFields {
         Self {
             password: connection.engine != Engine::Sqlite,
             ssh: (tunneled && connection.ssh.auth != SshAuth::Agent).then_some(connection.ssh.auth),
+            password_dropped: false,
+            ssh_dropped: false,
         }
+    }
+
+    /// The password must be typed: the saved one isn't kept, and the connection signs in with one.
+    pub fn password_required(&self) -> bool {
+        self.password && self.password_dropped
+    }
+
+    /// The SSH password must be typed: the saved one isn't kept. A key's
+    /// passphrase never must, as a key may have none: left empty, there is none.
+    pub fn ssh_required(&self) -> bool {
+        self.ssh_dropped && self.ssh == Some(SshAuth::Password)
     }
 }
 
@@ -146,10 +165,20 @@ impl ConnectionChange {
     }
 
     /// The secrets the user may type: none for a delete. On an update they
-    /// are the new connection's, and one left empty keeps the saved one.
+    /// are the new connection's, and one left empty keeps the saved one,
+    /// unless the update drops it (see [`SecretFields::password_dropped`]).
     pub fn secrets(&self) -> SecretFields {
         match self {
-            Self::Create { connection } | Self::Update { after: connection, .. } => SecretFields::of(connection),
+            Self::Create { connection } => SecretFields::of(connection),
+            Self::Update { before, after, .. } => {
+                let elsewhere = ConnectionField::DESTINATION.iter().any(|field| field.differs(before, after));
+                let switched = before.ssh.auth != after.ssh.auth && before.ssh.auth != SshAuth::Agent;
+                SecretFields {
+                    password_dropped: elsewhere,
+                    ssh_dropped: elsewhere || switched,
+                    ..SecretFields::of(after)
+                }
+            }
             Self::Delete { .. } => SecretFields::default(),
         }
     }
@@ -198,6 +227,11 @@ impl ConnectionField {
         Self::SshAuth,
         Self::SshKeyFile,
     ];
+
+    /// The fields that say where a connection points: a change to any of them
+    /// takes it to another server (or through another tunnel).
+    pub const DESTINATION: [ConnectionField; 8] =
+        [Self::Engine, Self::Host, Self::Port, Self::Srv, Self::Ssh, Self::SshHost, Self::SshPort, Self::SshUser];
 
     /// Whether `before` and `after` differ in this field.
     fn differs(self, before: &Connection, after: &Connection) -> bool {

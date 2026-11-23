@@ -56,6 +56,8 @@ pub struct McpMessages {
     pub conn_keep_secret: &'static str,
     /// A secret field of a new connection, which may stay empty.
     pub conn_optional: &'static str,
+    /// A secret an edit pointing the connection elsewhere needs typed again: the saved one isn't carried there.
+    pub conn_retype_secret: &'static str,
     pub conn_ssh_port: &'static str,
     pub conn_yes: &'static str,
     pub conn_no: &'static str,

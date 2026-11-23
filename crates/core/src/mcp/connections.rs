@@ -27,7 +27,7 @@ use crate::query::open_transactions;
 const DECLINED: &str = "The user declined this change in DBForge, or didn't answer in time. Nothing was changed.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectionDetailsRequest {
     /// From `list_connections`.
     pub connection_id: String,
@@ -226,7 +226,7 @@ pub struct SaveConnectionRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeleteConnectionRequest {
     /// From `list_connections`.
     pub id: String,
@@ -244,6 +244,19 @@ fn changed_meanwhile(name: &str) -> String {
 
 fn deleted_meanwhile(name: &str) -> String {
     format!("The connection {name} was deleted while waiting for approval, so nothing was changed.")
+}
+
+/// Why an approved update that would point the connection elsewhere saves nothing without its secrets typed again.
+fn retype(name: &str) -> String {
+    format!(
+        "The connection {name} would point elsewhere, so its saved password isn't carried there: the user types it again when approving. Nothing was changed."
+    )
+}
+
+/// What became of a connection while its approval waited.
+pub(super) enum Meanwhile {
+    Deleted,
+    Changed,
 }
 
 /// The app's own refusal, for a connection with a console's transaction open.
@@ -382,7 +395,7 @@ fn refuse_forbidden(request: &SaveConnectionRequest) -> Result<(), String> {
 
 impl Tools {
     /// Connection `id` when agents may use it; otherwise it reads as unknown.
-    fn reachable_connection(&self, id: &str) -> Result<Connection, String> {
+    pub(super) fn reachable_connection(&self, id: &str) -> Result<Connection, String> {
         self.core
             .connections()
             .get(id)
@@ -418,12 +431,22 @@ impl Tools {
         }
     }
 
-    /// Re-reads connection `before` once approved: still as the dialog showed it, and free of transactions.
-    fn unchanged_since(&self, before: &Connection) -> Result<(), String> {
-        let now = self.core.connections().get(&before.id).map_err(|_| deleted_meanwhile(&before.name))?;
+    /// Re-reads connection `before` once approved: still saved exactly as the
+    /// dialog showed it, what agents may do with it included.
+    pub(super) fn still_as(&self, before: &Connection) -> Result<(), Meanwhile> {
+        let now = self.core.connections().get(&before.id).map_err(|_| Meanwhile::Deleted)?;
         if &now != before {
-            return Err(changed_meanwhile(&before.name));
+            return Err(Meanwhile::Changed);
         }
+        Ok(())
+    }
+
+    /// [`Tools::still_as`], and free of transactions.
+    fn unchanged_since(&self, before: &Connection) -> Result<(), String> {
+        self.still_as(before).map_err(|meanwhile| match meanwhile {
+            Meanwhile::Deleted => deleted_meanwhile(&before.name),
+            Meanwhile::Changed => changed_meanwhile(&before.name),
+        })?;
         self.refuse_while_open(before)
     }
 
@@ -492,13 +515,16 @@ impl Tools {
     ) -> Result<ConnectionDetails, String> {
         let before = self.reachable_connection(id)?;
         let tag = self.tag_name(&before);
+        let engine = request.engine.map_or(before.engine, Into::into);
+        // Another engine's server listens on its own port, unless one is given.
+        let port = if engine == before.engine { before.port } else { engine.default_port() };
         let input = ConnectionInput {
             id: Some(before.id.clone()),
             name: request.name.unwrap_or_else(|| before.name.clone()),
-            engine: request.engine.map_or(before.engine, Into::into),
+            engine,
             environment: before.environment.clone(),
             host: request.host.unwrap_or_else(|| before.host.clone()),
-            port: request.port.unwrap_or(before.port),
+            port: request.port.unwrap_or(port),
             database: request.database.unwrap_or_else(|| before.database.clone()),
             username: request.username.unwrap_or_else(|| before.username.clone()),
             password: None,
@@ -515,16 +541,29 @@ impl Tools {
         }
         self.refuse_while_open(&before)?;
         let change = ConnectionChange::Update { before: before.clone(), after: after.clone(), tag: tag.clone() };
+        let asked = change.secrets();
         let mut secrets = self.approve_connection(agent, change).await?;
         self.unchanged_since(&before)?;
-        let asked = SecretFields::of(&after);
-        let parts = ConnectionParts {
-            password: secrets.take_password().filter(|_| asked.password),
-            ssh_secret: secrets.take_ssh_secret().filter(|_| asked.ssh.is_some()),
-            connection: after,
-        };
+        let password = secrets.take_password().filter(|_| asked.password);
+        let ssh_secret = secrets.take_ssh_secret().filter(|_| asked.ssh.is_some());
         drop(secrets);
-        let saved = self.core.connections().save(parts).map_err(|error| error.to_string())?;
+        // The dialog doesn't approve without them; an answer that would keep them anyway saves nothing.
+        if (asked.password_required() && password.is_none()) || (asked.ssh_required() && ssh_secret.is_none()) {
+            return Err(retype(&before.name));
+        }
+        // Saved secrets the update drops and nothing replaces go, rather than staying for the new place.
+        let forget_password = asked.password_dropped && password.is_none();
+        let forget_ssh = asked.ssh_dropped && ssh_secret.is_none();
+        let parts = ConnectionParts { password, ssh_secret, connection: after };
+        let store = self.core.connections();
+        let saved = store.save(parts).map_err(|error| error.to_string())?;
+        let credentials = store.credentials();
+        if forget_password {
+            credentials.delete(&saved.id).map_err(|error| error.to_string())?;
+        }
+        if forget_ssh {
+            credentials.delete(&Connection::ssh_credential_id(&saved.id)).map_err(|error| error.to_string())?;
+        }
         // A tunnel opened with the old settings or secret is not reused.
         crate::tunnel::close(&saved.id).await;
         self.core.events().emit(Event::ConnectionsChanged { id: saved.id.clone(), deleted: false });
@@ -681,7 +720,7 @@ mod tests {
         let ApprovalSubject::Connection(change) = &request.subject else { panic!("{request:?}") };
         let ConnectionChange::Create { connection } = change.as_ref() else { panic!("{change:?}") };
         assert_eq!(connection.agent_access, AgentAccess::Read, "the dialog starts on Read only");
-        assert_eq!(change.secrets(), SecretFields { password: true, ssh: None });
+        assert_eq!(change.secrets(), SecretFields { password: true, ssh: None, ..SecretFields::default() });
 
         let saved = s.core().connections().get(&created.id).unwrap();
         assert_eq!(saved.agent_access, AgentAccess::Write, "as the user chose");
@@ -753,21 +792,120 @@ mod tests {
         let [asked] = asked.as_slice() else { panic!("{asked:?}") };
         let ApprovalSubject::Connection(change) = &asked.subject else { panic!() };
         assert_eq!(change.changed_fields(), [crate::mcp::ConnectionField::Name]);
-        assert_eq!(change.secrets(), SecretFields { password: true, ssh: Some(SshAuth::Key) });
+        assert_eq!(
+            change.secrets(),
+            SecretFields { password: true, ssh: Some(SshAuth::Key), ..SecretFields::default() }
+        );
         let store = s.core().connections();
         assert_eq!(store.get("shop").unwrap(), Connection { name: "Shop EU".into(), ..shop.clone() });
         assert_eq!(store.password("shop").unwrap().as_deref(), Some("pg-s3cret"), "kept");
         assert_eq!(store.ssh_secret("shop").unwrap().as_deref(), Some("key-passphrase"), "kept");
 
-        let port = SaveConnectionRequest { port: Some(6543), ..request(Some("shop")) };
-        let (moved, _) =
-            answering(&mut s, |_| (true, Some(typed("new-pw", "", None))), tools.save_conn(None, port)).await;
-        assert_eq!(moved.unwrap().port, 6543);
+        let database = SaveConnectionRequest { database: Some("shop_eu".into()), ..request(Some("shop")) };
+        let (other, _) =
+            answering(&mut s, |_| (true, Some(typed("new-pw", "", None))), tools.save_conn(None, database)).await;
+        assert_eq!(other.unwrap().database, "shop_eu");
         let store = s.core().connections();
         assert_eq!(store.password("shop").unwrap().as_deref(), Some("new-pw"), "typed");
         assert_eq!(store.ssh_secret("shop").unwrap().as_deref(), Some("key-passphrase"), "empty keeps it");
         assert_eq!(store.get("shop").unwrap().agent_access, AgentAccess::Read, "an update keeps the access");
         assert_eq!(changed(&s), [("shop".into(), false), ("shop".into(), false)]);
+    }
+
+    #[tokio::test]
+    async fn an_update_pointing_elsewhere_carries_no_saved_secret_there() {
+        let mut s = setup();
+        let shop = with_secrets(&s, "shop", AgentAccess::Read);
+        let tools = s.tools();
+        let port = || SaveConnectionRequest { port: Some(6543), ..request(Some("shop")) };
+
+        // Approved with nothing typed (the dialog wouldn't): nothing saved, nothing forgotten.
+        let (refused, asked) = answering(&mut s, |_| (true, None), tools.save_conn(None, port())).await;
+        assert_eq!(refused.unwrap_err(), retype("shop"));
+        let [asked] = asked.as_slice() else { panic!("{asked:?}") };
+        let ApprovalSubject::Connection(change) = &asked.subject else { panic!() };
+        let secrets = change.secrets();
+        assert!(secrets.password_dropped && secrets.ssh_dropped);
+        assert!(secrets.password_required() && !secrets.ssh_required(), "a key may have no passphrase");
+        let store = s.core().connections();
+        assert_eq!(store.get("shop").unwrap(), shop);
+        assert_eq!(store.password("shop").unwrap().as_deref(), Some("pg-s3cret"));
+        assert_eq!(store.ssh_secret("shop").unwrap().as_deref(), Some("key-passphrase"));
+
+        // The password typed; the key's passphrase left empty: the saved one isn't kept.
+        let (moved, _) =
+            answering(&mut s, |_| (true, Some(typed("new-pw", "", None))), tools.save_conn(None, port())).await;
+        assert_eq!(moved.unwrap().port, 6543);
+        let store = s.core().connections();
+        assert_eq!(store.password("shop").unwrap().as_deref(), Some("new-pw"));
+        assert_eq!(store.ssh_secret("shop").unwrap(), None, "not carried to the new place");
+
+        // A tunnel signing in with a password: it must be typed again too.
+        let ssh = |auth: SshAuthInput, host: &str| SaveConnectionRequest {
+            ssh: Some(SshInput { auth: Some(auth), host: Some(host.into()), ..SshInput::default() }),
+            ..request(Some("shop"))
+        };
+        let (refused, _) = answering(
+            &mut s,
+            |_| (true, Some(typed("pw", "", None))),
+            tools.save_conn(None, ssh(SshAuthInput::Password, "bastion-2")),
+        )
+        .await;
+        assert_eq!(refused.unwrap_err(), retype("shop"));
+        let (saved, _) = answering(
+            &mut s,
+            |_| (true, Some(typed("pw", "ssh-pw", None))),
+            tools.save_conn(None, ssh(SshAuthInput::Password, "bastion-2")),
+        )
+        .await;
+        assert_eq!(saved.unwrap().ssh.host, "bastion-2");
+        assert_eq!(s.core().connections().ssh_secret("shop").unwrap().as_deref(), Some("ssh-pw"));
+    }
+
+    #[tokio::test]
+    async fn switching_how_the_tunnel_signs_in_drops_the_old_ssh_secret() {
+        let mut s = setup();
+        with_secrets(&s, "shop", AgentAccess::Read);
+        let tools = s.tools();
+        let auth = |auth: SshAuthInput| SaveConnectionRequest {
+            ssh: Some(SshInput { auth: Some(auth), ..SshInput::default() }),
+            ..request(Some("shop"))
+        };
+        // From a key to a password: the passphrase isn't the password, which must be typed.
+        let (refused, asked) =
+            answering(&mut s, |_| (true, None), tools.save_conn(None, auth(SshAuthInput::Password))).await;
+        assert_eq!(refused.unwrap_err(), retype("shop"));
+        let ApprovalSubject::Connection(change) = &asked[0].subject else { panic!() };
+        let secrets = change.secrets();
+        assert!(!secrets.password_dropped, "the server is the same");
+        assert!(secrets.ssh_dropped && secrets.ssh_required());
+        assert_eq!(s.core().connections().ssh_secret("shop").unwrap().as_deref(), Some("key-passphrase"));
+
+        // From a key to the system's agent: the passphrase goes, the password stays.
+        let (saved, _) = answering(&mut s, |_| (true, None), tools.save_conn(None, auth(SshAuthInput::Agent))).await;
+        assert_eq!(saved.unwrap().ssh.auth, "agent");
+        let store = s.core().connections();
+        assert_eq!(store.ssh_secret("shop").unwrap(), None);
+        assert_eq!(store.password("shop").unwrap().as_deref(), Some("pg-s3cret"));
+    }
+
+    #[tokio::test]
+    async fn another_engine_without_a_port_takes_its_usual_one() {
+        let mut s = setup();
+        with_secrets(&s, "shop", AgentAccess::Read);
+        let tools = s.tools();
+        let mysql = SaveConnectionRequest { engine: Some(EngineInput::Mysql), ..request(Some("shop")) };
+        let (saved, asked) =
+            answering(&mut s, |_| (true, Some(typed("my-pw", "", None))), tools.save_conn(None, mysql)).await;
+        let saved = saved.unwrap();
+        assert_eq!((saved.engine.as_str(), saved.port), ("mysql", 3306));
+        let ApprovalSubject::Connection(change) = &asked[0].subject else { panic!() };
+        assert!(change.secrets().password_required(), "another server: the password is typed again");
+        assert_eq!(s.core().connections().password("shop").unwrap().as_deref(), Some("my-pw"));
+        let given =
+            SaveConnectionRequest { engine: Some(EngineInput::Mariadb), port: Some(3307), ..request(Some("shop")) };
+        let (saved, _) = answering(&mut s, |_| (true, Some(typed("pw", "", None))), tools.save_conn(None, given)).await;
+        assert_eq!(saved.unwrap().port, 3307, "a port given is kept");
     }
 
     #[tokio::test]

@@ -18,6 +18,7 @@ use rmcp::schemars::{self, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use super::approvals::{ApprovalRequest, ApprovalSubject, DumpAction, DumpApproval};
+use super::connections::Meanwhile;
 use super::tools::Tools;
 use crate::connections::model::{AgentAccess, Connection, Engine};
 use crate::drivers;
@@ -31,11 +32,27 @@ const DECLINED_BACKUP: &str = "The user declined this backup in DBForge, or didn
 /// What the agent hears when the user says no to a restore, or nothing in time.
 const DECLINED_RESTORE: &str = "The user declined this restore in DBForge, or didn't answer in time. Nothing ran.";
 
+/// What the agent hears when it names a database for a SQLite connection.
+const SQLITE_DATABASE: &str =
+    "database is for server engines; a SQLite connection backs up and restores its own file. Leave it out.";
+
+/// What the agent hears when the connection changed while the user was asked.
+fn changed_meanwhile(name: &str) -> String {
+    format!(
+        "The connection {name} changed while waiting for approval, so nothing ran. Call list_connections and try again."
+    )
+}
+
+/// What the agent hears when the connection was deleted while the user was asked.
+fn deleted_meanwhile(name: &str) -> String {
+    format!("The connection {name} was deleted while waiting for approval, so nothing ran.")
+}
+
 /// How long the restore's approval waits to learn whether the target database exists.
 const LOOKUP_LIMIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListExportsRequest {
     /// Only the exports `import_database` can restore into this connection (from `list_connections`).
     pub connection_id: Option<String>,
@@ -115,12 +132,12 @@ pub struct ExportOptionsInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExportDatabaseRequest {
     /// From `list_connections`.
     pub connection_id: String,
-    /// The database to back up; the connection's own when left out. Ignored
-    /// for SQLite, whose connection is one database file.
+    /// The database to back up; the connection's own when left out. Not for
+    /// SQLite, whose connection is one database file.
     pub database: Option<String>,
     pub options: Option<ExportOptionsInput>,
 }
@@ -135,14 +152,14 @@ pub struct ExportedView {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ImportDatabaseRequest {
     /// From `list_connections`; agents need Read and write access to it.
     pub connection_id: String,
     /// The name of an export in DBForge's exports folder, from `list_exports`: no folder, just the name.
     pub file: String,
     /// The database to restore into, created when it doesn't exist; needed
-    /// except for SQLite, which restores into the connection's own file.
+    /// except for SQLite, which restores into the connection's own file and takes none.
     pub database: Option<String>,
     /// MongoDB only: drop each collection the archive holds before restoring it. Default false.
     pub drop_existing: Option<bool>,
@@ -303,6 +320,21 @@ impl Tools {
         self.core.mcp_approvals().ask(self.core.events().as_ref(), request).await
     }
 
+    /// Once approved: `connection` still as the dialog showed it, agents' access included.
+    fn still_as_shown(&self, connection: &Connection) -> Result<(), String> {
+        self.still_as(connection).map_err(|meanwhile| match meanwhile {
+            Meanwhile::Deleted => deleted_meanwhile(&connection.name),
+            Meanwhile::Changed => changed_meanwhile(&connection.name),
+        })
+    }
+
+    /// Whether agents may be offered the export at `path`: DBForge made it,
+    /// from a connection agents may reach.
+    fn offered(&self, path: &Path) -> bool {
+        let record = self.core.export_records().of(path);
+        record.is_some_and(|record| self.reachable_connection(&record.connection_id).is_ok())
+    }
+
     pub(super) fn exports(&self, request: ListExportsRequest) -> Result<ExportList, String> {
         let engine = match &request.connection_id {
             Some(id) => Some(engine_of(&self.open(id)?.0)?),
@@ -313,6 +345,7 @@ impl Tools {
             .map_err(|error| error.to_string())?
             .into_iter()
             .filter(|file| engine.is_none_or(|engine| file.extension == engine.restore_extension()))
+            .filter(|file| self.offered(&folder.join(&file.name)))
             .map(|file| {
                 let (kind, restores_into) = kind_of(file.extension);
                 ExportView {
@@ -339,6 +372,7 @@ impl Tools {
         let options = options_for(engine, connection.engine.label(), request.options)?;
         // What the file is named after and the dialog calls it: a SQLite connection's file, by its name.
         let (database, shown) = match engine {
+            DumpEngine::Sqlite if request.database.is_some() => return Err(SQLITE_DATABASE.into()),
             DumpEngine::Sqlite => (connection.database.clone(), sqlite_name(&connection.database)),
             _ => {
                 let database = request
@@ -380,6 +414,7 @@ impl Tools {
         if !self.approve_dump(agent, approval).await {
             return Err(DECLINED_BACKUP.into());
         }
+        self.still_as_shown(&connection)?;
         // Made meanwhile, by the user or another backup: left as it is.
         if let Some(taken) = taken() {
             return Err(taken);
@@ -394,7 +429,8 @@ impl Tools {
         };
         let exported = tokio::spawn(async move {
             let (events, store, jobs) = (core.events().as_ref(), core.connections(), core.jobs());
-            dump::export_database(events, store, jobs, core.tool_paths(), core.statement_log(), request).await
+            let (tools, log, records) = (core.tool_paths(), core.statement_log(), core.export_records());
+            dump::export_database(events, store, jobs, tools, log, records, request).await
         })
         .await
         .map_err(|error| error.to_string())?
@@ -429,6 +465,7 @@ impl Tools {
             return Err(format!("dropExisting is for MongoDB restores; leave it out for a {label} connection."));
         }
         let (database, shown) = match engine {
+            DumpEngine::Sqlite if request.database.is_some() => return Err(SQLITE_DATABASE.into()),
             DumpEngine::Sqlite => (connection.database.clone(), sqlite_name(&connection.database)),
             _ => {
                 let database = request
@@ -442,8 +479,10 @@ impl Tools {
         let folder = self.exports_folder()?;
         let path = folder.join(&request.file);
         let missing = || {
-            // Not followed: a link named like an export is not one DBForge wrote.
-            (!path.symlink_metadata().is_ok_and(|metadata| metadata.is_file())).then(|| {
+            // Not followed: a link named like an export is not one DBForge wrote. One
+            // DBForge has no record of, or of a connection agents may not reach, reads as missing.
+            let file = path.symlink_metadata().is_ok_and(|metadata| metadata.is_file());
+            (!file || !self.offered(&path)).then(|| {
                 format!(
                     "There's no export named {} in DBForge's exports folder. Call list_exports to see them.",
                     request.file
@@ -470,6 +509,7 @@ impl Tools {
         if !self.approve_dump(agent, approval).await {
             return Err(DECLINED_RESTORE.into());
         }
+        self.still_as_shown(&connection)?;
         if let Some(missing) = missing() {
             return Err(missing);
         }
@@ -534,6 +574,13 @@ mod tests {
             database: None,
             drop_existing: None,
         }
+    }
+
+    /// An export `name` in `folder` holding `text`, recorded as made from connection `by`.
+    fn made(s: &Setup, folder: &Path, name: &str, by: &str, text: &str) {
+        std::fs::create_dir_all(folder).unwrap();
+        std::fs::write(folder.join(name), text).unwrap();
+        s.core().export_records().record(&folder.join(name), by, by).unwrap();
     }
 
     fn dump_of(request: &ApprovalRequest) -> &DumpApproval {
@@ -603,6 +650,8 @@ mod tests {
         assert_eq!(beside, before, "nothing else written beside it");
         let script = std::fs::read_to_string(folder.join(&backup.file)).unwrap();
         assert!(script.contains("CREATE TABLE items"), "{script}");
+        let record = s.core().export_records().of(&folder.join(&backup.file)).expect("recorded");
+        assert_eq!(record.connection_id, "shop", "who made it is recorded");
 
         // A second one the same minute would take its name: refused, the first left as it is.
         let (again, asked) = s.answering(true, tools.backup(None, export("shop"))).await;
@@ -626,9 +675,8 @@ mod tests {
         assert_eq!(asked.len(), 1);
         assert!(files(&folder).is_empty(), "no file written");
 
-        std::fs::create_dir_all(&folder).unwrap();
         let file = "other-2026-11-10-1432.sql";
-        std::fs::write(folder.join(file), "DELETE FROM items;").unwrap();
+        made(&s, &folder, file, "shop", "DELETE FROM items;");
         let (declined, asked) = s.answering(false, tools.restore(None, import("shop", file))).await;
         assert_eq!(declined.unwrap_err(), DECLINED_RESTORE);
         let [asked] = asked.as_slice() else { panic!("{asked:?}") };
@@ -787,6 +835,166 @@ mod tests {
         assert_eq!((dump.file.as_str(), dump.database.as_str()), (backup.file.as_str(), "copy"));
         assert_eq!(count(&copy).await, "2");
         assert_eq!(count(&shop).await, "2", "the source is untouched");
+    }
+
+    #[tokio::test]
+    async fn a_sqlite_connection_takes_no_database() {
+        let (mut s, folder) = exporting();
+        let shop = s.connection("shop", Engine::Sqlite, AgentAccess::Write, None);
+        items(&shop).await;
+        made(&s, &folder, "shop-2026-11-10-1432.sql", "shop", "DELETE FROM items;");
+        let tools = s.tools();
+        let expected =
+            "database is for server engines; a SQLite connection backs up and restores its own file. Leave it out.";
+
+        let request = ExportDatabaseRequest { database: Some("main".into()), ..export("shop") };
+        let (error, asked) = s.answering(true, tools.backup(None, request)).await;
+        assert_eq!(error.unwrap_err(), expected);
+        assert!(asked.is_empty(), "refused before asking");
+        let request =
+            ImportDatabaseRequest { database: Some("other".into()), ..import("shop", "shop-2026-11-10-1432.sql") };
+        let (error, asked) = s.answering(true, tools.restore(None, request)).await;
+        assert_eq!(error.unwrap_err(), expected);
+        assert!(asked.is_empty(), "refused before asking");
+        assert_eq!(files(&folder), ["shop-2026-11-10-1432.sql"], "nothing written");
+        assert_eq!(count(&shop).await, "2", "nothing restored");
+    }
+
+    #[test]
+    fn requests_with_a_field_the_tools_don_t_know_are_refused() {
+        use serde_json::{Value, from_value, json};
+        fn refused<T: serde::de::DeserializeOwned>(value: Value) -> bool {
+            from_value::<T>(value).is_err()
+        }
+        assert!(refused::<ExportDatabaseRequest>(json!({ "connectionId": "shop", "path": "/tmp/x.sql" })));
+        assert!(refused::<ImportDatabaseRequest>(
+            json!({ "connectionId": "shop", "file": "f", "drop_existing": true })
+        ));
+        assert!(refused::<ListExportsRequest>(json!({ "connection": "shop" })));
+        assert!(refused::<super::super::connections::ConnectionDetailsRequest>(
+            json!({ "connectionId": "shop", "secrets": true })
+        ));
+        assert!(refused::<super::super::connections::DeleteConnectionRequest>(json!({ "id": "shop", "force": true })));
+
+        assert!(from_value::<ExportDatabaseRequest>(json!({ "connectionId": "shop", "database": "d" })).is_ok());
+        let import: ImportDatabaseRequest =
+            from_value(json!({ "connectionId": "shop", "file": "f", "dropExisting": true })).unwrap();
+        assert_eq!(import.drop_existing, Some(true));
+        assert!(from_value::<ListExportsRequest>(json!({})).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_connection_changed_while_the_user_was_asked_runs_nothing() {
+        let (mut s, folder) = exporting();
+        let shop = s.connection("shop", Engine::Sqlite, AgentAccess::Write, None);
+        items(&shop).await;
+        let file = "shop-2026-11-10-1432.sql";
+        made(&s, &folder, file, "shop", "DELETE FROM items;");
+        let tools = s.tools();
+        let store = s.tools();
+        let changed = "The connection shop changed while waiting for approval, so nothing ran. Call list_connections and try again.";
+
+        // Made read-only for agents while the backup waited.
+        let read_only = Connection { agent_access: AgentAccess::Read, ..shop.clone() };
+        let (error, asked) = s
+            .answering_with(
+                |_| {
+                    store.core.connections().upsert(read_only.clone()).unwrap();
+                    (true, None)
+                },
+                tools.restore(None, import("shop", file)),
+            )
+            .await;
+        assert_eq!(error.unwrap_err(), changed);
+        assert_eq!(asked.len(), 1);
+        assert_eq!(count(&shop).await, "2", "nothing restored");
+
+        // Pointed at another file while the backup waited.
+        let moved = Connection { database: s.dir.join("other.db").to_string_lossy().into_owned(), ..read_only.clone() };
+        let (error, _) = s
+            .answering_with(
+                |_| {
+                    store.core.connections().upsert(moved.clone()).unwrap();
+                    (true, None)
+                },
+                tools.backup(None, export("shop")),
+            )
+            .await;
+        assert_eq!(error.unwrap_err(), changed);
+        assert_eq!(files(&folder), [file], "no backup written");
+
+        let (error, _) = s
+            .answering_with(
+                |_| {
+                    store.core.connections().remove("shop").unwrap();
+                    (true, None)
+                },
+                tools.backup(None, export("shop")),
+            )
+            .await;
+        assert_eq!(error.unwrap_err(), "The connection shop was deleted while waiting for approval, so nothing ran.");
+        assert_eq!(files(&folder), [file], "no backup written");
+    }
+
+    #[tokio::test]
+    async fn two_exports_to_one_file_at_once_leave_the_first_to_finish() {
+        let (s, folder) = exporting();
+        let shop = s.connection("shop", Engine::Sqlite, AgentAccess::Read, None);
+        items(&shop).await;
+        let core = s.core();
+        let path = folder.join("shop-2026-11-10-1432.sql").to_string_lossy().into_owned();
+        let request = |job: &str| ExportRequest {
+            job_id: job.into(),
+            connection_id: "shop".into(),
+            database: shop.database.clone(),
+            path: path.clone(),
+            options: DumpOptions::defaults(DumpEngine::Sqlite),
+        };
+        let run = |job: &'static str| {
+            let (events, store, jobs) = (core.events().as_ref(), core.connections(), core.jobs());
+            let (tools, log, records) = (core.tool_paths(), core.statement_log(), core.export_records());
+            dump::export_database(events, store, jobs, tools, log, records, request(job))
+        };
+        let (first, second) = tokio::join!(run("first"), run("second"));
+        let mut outcomes =
+            [first.map(|_| ()).map_err(|e| e.to_string()), second.map(|_| ()).map_err(|e| e.to_string())];
+        outcomes.sort_by_key(Result::is_err);
+        assert!(outcomes[0].is_ok(), "{outcomes:?}");
+        let refused = outcomes[1].as_ref().unwrap_err();
+        assert!(refused.starts_with("A backup with this name is already being written"), "{refused}");
+        assert_eq!(files(&folder), ["shop-2026-11-10-1432.sql"], "the first finished, no partial file left");
+        let script = std::fs::read_to_string(&path).unwrap();
+        assert!(script.contains("CREATE TABLE items"), "{script}");
+    }
+
+    #[tokio::test]
+    async fn agents_are_offered_only_exports_dbforge_made_from_connections_they_reach() {
+        let (mut s, folder) = exporting();
+        let shop = s.connection("shop", Engine::Sqlite, AgentAccess::Write, None);
+        items(&shop).await;
+        s.connection("hidden", Engine::Sqlite, AgentAccess::None, None);
+        made(&s, &folder, "shop-2026-11-10-1432.sql", "shop", "SELECT 1;");
+        made(&s, &folder, "hidden-2026-11-10-1432.sql", "hidden", "DELETE FROM items;");
+        made(&s, &folder, "gone-2026-11-10-1432.sql", "gone", "DELETE FROM items;");
+        // Made outside DBForge, or before it kept records.
+        std::fs::write(folder.join("outside-2026-11-10-1432.sql"), "DELETE FROM items;").unwrap();
+        let tools = s.tools();
+
+        for connection_id in [None, Some("shop".to_owned())] {
+            let listed = tools.exports(ListExportsRequest { connection_id }).unwrap();
+            let names: Vec<&str> = listed.exports.iter().map(|export| export.name.as_str()).collect();
+            assert_eq!(names, ["shop-2026-11-10-1432.sql"]);
+        }
+        for file in ["hidden-2026-11-10-1432.sql", "gone-2026-11-10-1432.sql", "outside-2026-11-10-1432.sql"] {
+            let (error, asked) = s.answering(true, tools.restore(None, import("shop", file))).await;
+            let expected =
+                format!("There's no export named {file} in DBForge's exports folder. Call list_exports to see them.");
+            assert_eq!(error.unwrap_err(), expected);
+            assert!(asked.is_empty(), "{file}: refused before asking");
+        }
+        assert_eq!(count(&shop).await, "2", "nothing restored");
+        let (restored, _) = s.answering(true, tools.restore(None, import("shop", "shop-2026-11-10-1432.sql"))).await;
+        restored.unwrap();
     }
 
     /// Saves `connection` with `password` in the setup's own credential file.

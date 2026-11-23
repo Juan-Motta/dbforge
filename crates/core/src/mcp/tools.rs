@@ -478,7 +478,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Lists the backups (exports) in DBForge's exports folder that import_database can restore: each with its kind, the engines it restores into, its size and when it was written. Give connectionId to list only the ones that restore into that connection."
+        description = "Lists the backups (exports) in DBForge's exports folder that import_database can restore: those DBForge made from connections you can use, each with its kind, the engines it restores into, its size and when it was written. Give connectionId to list only the ones that restore into that connection."
     )]
     async fn list_exports(
         &self,
@@ -502,7 +502,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Restores an export from DBForge's exports folder (a name from list_exports) into a database of a connection you may write to, creating the database when it doesn't exist; SQLite restores into the connection's own file. It changes data, and objects already there may be replaced. The user approves every restore in DBForge first; a declined one runs nothing. A failed restore removes a database it created."
+        description = "Restores an export DBForge made into its exports folder from a connection you can use (a name from list_exports) into a database of a connection you may write to, creating the database when it doesn't exist; SQLite restores into the connection's own file. It changes data, and objects already there may be replaced. The user approves every restore in DBForge first; a declined one runs nothing. A failed restore removes a database it created."
     )]
     async fn import_database(
         &self,

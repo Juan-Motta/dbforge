@@ -331,7 +331,7 @@ impl ExportDatabaseDialog {
         let exporting = Backend::global(cx).spawn(cx, move |core| async move {
             let (events, store, jobs, tools, log) =
                 (core.events().as_ref(), core.connections(), core.jobs(), core.tool_paths(), core.statement_log());
-            export_database(events, store, jobs, tools, log, request).await
+            export_database(events, store, jobs, tools, log, core.export_records(), request).await
         });
         cx.spawn_in(window, async move |this, cx| {
             let exported = exporting.await;
