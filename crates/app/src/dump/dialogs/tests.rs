@@ -96,6 +96,8 @@ fn a_mongodb_export_writes_a_gzipped_archive_of_the_chosen_collections(cx: &mut 
     let name = file_name(&dialog, cx);
     assert!(name.starts_with("shop-") && name.ends_with(".archive.gz"), "{name}");
     dialog.update_in(cx, |dialog, _, cx| {
+        // Its own folder: Linux runners have no Documents folder for the default one.
+        dialog.folder = Some("/out".into());
         assert_eq!(dialog.tool.as_ref().map(|tool| tool.read(cx).name()), Some("mongodump"));
         dialog.collections = Listing::Listed(vec!["orders".into(), "users".into()]);
         dialog.change(cx, |choices| {
