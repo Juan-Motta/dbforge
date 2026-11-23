@@ -238,7 +238,9 @@ impl QuerySession {
     /// Counts what a run in the open transaction did. A failure there leaves a
     /// PostgreSQL transaction aborted; a deadlock on MySQL, MariaDB or SQL
     /// Server rolls the whole transaction back, which the run's error then says.
-    fn record_run(&self, outcome: Result<QueryOutcome>) -> Result<QueryOutcome> {
+    /// `recovered`: the run failed but was undone back to its savepoint (PostgreSQL), so the
+    /// transaction is still usable.
+    fn record_run(&self, outcome: Result<QueryOutcome>, recovered: bool) -> Result<QueryOutcome> {
         let mut guard = self.transaction.lock().unwrap();
         let Some(transaction) = guard.as_mut() else { return outcome };
         transaction.last_activity_ms = now_ms();
@@ -255,7 +257,7 @@ impl QuerySession {
         let Some(error) = error else { return outcome };
         let engine = self.connection.engine;
         if engine == Engine::Postgres {
-            transaction.aborted = true;
+            transaction.aborted = !recovered;
             return outcome;
         }
         if !rolled_back_by(engine, &error) {
@@ -316,6 +318,20 @@ async fn sqlserver_in_transaction(driver: &mut drivers::Session) -> Option<bool>
 }
 
 /// Runs one statement the console sends itself (BEGIN, COMMIT, ROLLBACK).
+/// The savepoint each PostgreSQL run in an open transaction starts from.
+const RUN_SAVEPOINT: &str = "SAVEPOINT dbforge_run";
+
+/// Ends a run's savepoint: rolled back to it when the run `failed` (true when that worked,
+/// the transaction then usable again), released otherwise.
+async fn finish_savepoint(driver: &mut drivers::Session, failed: bool) -> bool {
+    if failed {
+        run_statement(driver, "ROLLBACK TO SAVEPOINT dbforge_run").await.is_ok()
+    } else {
+        let _ = run_statement(driver, "RELEASE SAVEPOINT dbforge_run").await;
+        false
+    }
+}
+
 async fn run_statement(driver: &mut drivers::Session, sql: &str) -> Result<()> {
     // Boxed, like every run here: a session's run future is large for the stack.
     match Box::pin(driver.run(sql, ROW_LIMIT)).await?.error {
@@ -547,6 +563,11 @@ async fn run_in_session(
         }
         session.set_transaction(OpenTransaction::new(now_ms()));
     }
+    // PostgreSQL fails a whole transaction on one failed statement: each run in an open one
+    // gets a savepoint, so a failed run undoes only itself and the transaction carries on.
+    let savepoint = engine == Engine::Postgres
+        && session.transaction().is_some_and(|transaction| !transaction.aborted)
+        && run_statement(&mut driver, RUN_SAVEPOINT).await.is_ok();
     let outcome = Box::pin(driver.run(sql, ROW_LIMIT)).await;
     // A dropped connection can't be reused; the next run opens a new one.
     let failed = outcome.as_ref().map_or(true, |outcome| outcome.error.is_some());
@@ -564,8 +585,9 @@ async fn run_in_session(
         }
         return outcome;
     }
+    let recovered = savepoint && finish_savepoint(&mut driver, failed).await;
     let was_open = session.transaction().is_some();
-    let outcome = session.record_run(outcome);
+    let outcome = session.record_run(outcome, recovered);
     if was_open
         && session.transaction().is_none()
         && let Some(restore) = Dialect::of(engine).and_then(|dialect| dialect.restore)
@@ -983,21 +1005,20 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs a local PostgreSQL on port 55432"]
-    async fn a_failed_statement_leaves_a_postgres_transaction_aborted_until_rollback() {
+    async fn a_failed_run_undoes_only_itself_and_the_postgres_transaction_carries_on() {
         let fx = postgres();
         fx.manual("c1");
-        fx.run("c1", "SELECT 1").await.unwrap();
-        assert!(fx.run("c1", "SELECT 1 / 0").await.is_err());
-        assert!(fx.state("c1").unwrap().aborted);
-        // Still aborted: PostgreSQL refuses everything until the transaction ends.
-        assert!(fx.run("c1", "SELECT 1").await.is_err());
-        let error = commit_transaction(&fx.sessions, &fx.log, "c1".into()).await.unwrap_err();
-        assert_eq!(error.to_string(), "A statement failed in this transaction, so it can only be rolled back.");
-
-        rollback_transaction(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
+        fx.run("c1", "CREATE TEMP TABLE kept (n int)").await.unwrap();
+        fx.run("c1", "INSERT INTO kept VALUES (1)").await.unwrap();
+        assert!(fx.run("c1", "INSERT INTO kept VALUES (2); SELECT 1 / 0").await.is_err());
+        let open = fx.state("c1").expect("still open");
+        assert!(!open.aborted, "the failed run was rolled back to its savepoint");
+        // The transaction carries on with what came before the failed run, and nothing of it.
+        let outcome = fx.run("c1", "SELECT count(*)::text FROM kept").await.unwrap();
+        assert_eq!(outcome.results[0].rows[0][0].as_deref(), Some("1"));
+        assert!(fx.logged().iter().any(|(_, text)| text == "ROLLBACK TO SAVEPOINT dbforge_run"));
+        commit_transaction(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
         assert_eq!(fx.state("c1"), None);
-        fx.run("c1", "SELECT 1").await.unwrap();
-        assert!(!fx.state("c1").unwrap().aborted);
         close_session(&fx.sessions, &fx.log, "c1".into()).await.unwrap();
     }
 
