@@ -9,10 +9,13 @@
 
 use rmcp::RoleServer;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
+use rmcp::model::{
+    Implementation, ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ServerCapabilities, ServerConfig,
+};
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::service::RequestContext;
-use rmcp::{tool, tool_handler, tool_router};
+use rmcp::{ErrorData, tool, tool_handler, tool_router};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +25,7 @@ use super::connections::{ConnectionDetails, ConnectionDetailsRequest, DeleteConn
 use super::dumps::{
     ExportDatabaseRequest, ExportList, ExportedView, ImportDatabaseRequest, ImportedView, ListExportsRequest,
 };
+use super::guide;
 use super::saved::{
     DeleteSavedRequest, ListSavedRequest, RunSavedRequest, SaveQueryRequest, SavedQueryList, SavedQueryView,
 };
@@ -220,6 +224,14 @@ pub struct RunRequest {
     pub limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GuideRequest {
+    /// The section to read: `overview`, `queries`, `saved-queries`, `backups`,
+    /// `connections` or `engines`. Left out, the overview and the list of sections.
+    pub section: Option<String>,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResultSet {
@@ -326,6 +338,18 @@ impl Tools {
             })
             .collect();
         Json(ConnectionList { connections })
+    }
+
+    #[tool(
+        description = "DBForge's guide for agents: how approvals, queries, saved queries, backups and connections work. Without section, the overview and the list of sections; with section, that section. Read it before your first change. Needs no connection and is always available."
+    )]
+    async fn dbforge_guide(
+        &self,
+        Parameters(request): Parameters<GuideRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<String, String> {
+        self.note_agent(&context);
+        guide::read(request.section.as_deref())
     }
 
     #[tool(description = "Lists what a connection holds at a path: databases, then schemas, then tables and views.")]
@@ -515,11 +539,11 @@ impl Tools {
 }
 
 /// What the agent is told about the server, the same from the app and from the stdio bridge.
-const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. The user's saved queries are there too: list_saved_queries and run_saved_query run them with values for their :name parameters, and save_query and delete_saved_query change them once the user approves. export_database backs up a whole database into DBForge's exports folder and import_database restores one of those exports (list_exports lists them); the user approves every backup and restore first. connection_details shows a connection's settings without its secrets, and save_connection and delete_connection create, change or delete connections once the user approves; you never send or see a password, which the user types in DBForge.";
+const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. You can also run and edit the user's saved queries, back up and restore databases, and manage connections; changes to those wait for the user's approval, and you never send or see a password. Read dbforge_guide (or the dbforge://guide resource) before your first change; it explains approvals, saved queries, backups and connections.";
 
 /// How DBForge's MCP server introduces itself, wherever the agent reaches it.
 pub(crate) fn server_info() -> ServerConfig {
-    ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+    ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
         .with_server_info(Implementation::new("DBForge", env!("CARGO_PKG_VERSION")))
         .with_instructions(INSTRUCTIONS.to_owned())
 }
@@ -528,5 +552,21 @@ pub(crate) fn server_info() -> ServerConfig {
 impl rmcp::ServerHandler for Tools {
     fn get_info(&self) -> ServerConfig {
         server_info()
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(guide::resources())
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        guide::resource(&request.uri).map(Into::into)
     }
 }

@@ -11,6 +11,7 @@ pub mod bridge;
 pub mod commands;
 mod connections;
 mod dumps;
+mod guide;
 mod saved;
 mod server;
 mod sessions;
