@@ -3,7 +3,9 @@
 //! server is there even while the app is closed or restarting. It lists the
 //! tools on its own and hands each call to the app's HTTP server on
 //! 127.0.0.1; with the app closed, or its agent server off, the call answers
-//! what to do instead of the agent losing DBForge until it restarts.
+//! what to do instead of the agent losing DBForge until it restarts. The guide
+//! (`dbforge_guide` and the `dbforge://guide` resources) is static, so the
+//! bridge serves it itself: always readable, app or not.
 //!
 //! It reads what it needs where the app keeps it (the port in `mcp.json`, the
 //! token in the credential store), so the agent's configuration holds no
@@ -15,7 +17,8 @@ use std::sync::Arc;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ClientCapabilities, ClientConfig, ContentBlock, Implementation,
-    ListToolsResult, PaginatedRequestParams, ServerConfig,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ServerConfig,
 };
 use rmcp::service::{RequestContext, RunningService};
 use rmcp::transport::StreamableHttpClientTransport;
@@ -23,10 +26,11 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::{ErrorData, Peer, RoleClient, RoleServer, ServerHandler, ServiceError, ServiceExt};
 use tokio::sync::Mutex;
 
+use super::guide;
 use super::server::PATH;
 use super::settings::McpSettings;
 use super::token;
-use super::tools::{self, Tools};
+use super::tools::{self, GuideRequest, Tools};
 use crate::core::Dirs;
 use crate::credentials::Credentials;
 
@@ -167,11 +171,30 @@ impl ServerHandler for Bridge {
         Ok(ListToolsResult::with_all_items(Tools::tool_router().list_all()))
     }
 
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(guide::resources())
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        guide::resource(&request.uri).map(Into::into)
+    }
+
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if request.name == GUIDE {
+            return read_guide(request);
+        }
         let agent = context
             .peer
             .peer_info()
@@ -193,6 +216,20 @@ impl ServerHandler for Bridge {
     }
 }
 
+/// The guide's tool, answered here rather than by the app.
+const GUIDE: &str = "dbforge_guide";
+
+/// `dbforge_guide`, answered as the app answers it.
+fn read_guide(request: CallToolRequestParams) -> Result<CallToolResponse, ErrorData> {
+    let arguments = serde_json::Value::Object(request.arguments.unwrap_or_default());
+    let GuideRequest { section } = serde_json::from_value(arguments)
+        .map_err(|error| ErrorData::invalid_params(format!("failed to deserialize parameters: {error}"), None))?;
+    Ok(match guide::read(section.as_deref()) {
+        Ok(text) => CallToolResponse::Complete(rmcp::model::CallToolResult::success(vec![ContentBlock::text(text)])),
+        Err(message) => failed(message),
+    })
+}
+
 /// Whether the app listens on `port`: a refused connection is the app being
 /// closed, told apart from a server that answers badly.
 async fn listening(port: u16) -> bool {
@@ -209,7 +246,7 @@ mod tests {
     use std::net::Ipv4Addr;
     use std::sync::RwLock;
 
-    use rmcp::model::CallToolRequestParams;
+    use rmcp::model::{CallToolRequestParams, ReadResourceRequestParams};
     use rmcp::{ServiceExt, tool, tool_handler, tool_router};
     use tokio::net::TcpListener;
     use tokio_util::sync::CancellationToken;
@@ -270,6 +307,7 @@ mod tests {
         let names: Vec<String> = agent.list_all_tools().await.unwrap().into_iter().map(|t| t.name.into()).collect();
         assert_eq!(names.len(), Tools::tool_router().list_all().len());
         assert!(names.contains(&"list_connections".to_owned()) && names.contains(&"execute".to_owned()));
+        assert!(names.contains(&"dbforge_guide".to_owned()));
         assert_eq!(agent.peer_info().unwrap().server_info.as_ref().map(|s| s.name.as_str()), Some("DBForge"));
     }
 
@@ -285,6 +323,42 @@ mod tests {
         settings(config.path(), true, port);
         let closed = call(&agent, "list_connections").await;
         assert_eq!((closed.is_error, text(&closed)), (Some(true), CLOSED.to_owned()));
+    }
+
+    fn guide_call(section: Option<&str>) -> CallToolRequestParams {
+        let arguments = section.map(|section| serde_json::json!({ "section": section }).as_object().unwrap().clone());
+        let call = CallToolRequestParams::new("dbforge_guide");
+        match arguments {
+            Some(arguments) => call.with_arguments(arguments),
+            None => call,
+        }
+    }
+
+    #[tokio::test]
+    async fn serves_the_guide_while_the_app_is_closed_or_its_server_off() {
+        let config = tempfile::tempdir().unwrap();
+        let agent = agent(config.path().to_owned()).await;
+        let advertised = agent.peer_info().unwrap().capabilities.resources.is_some();
+        assert!(advertised, "the bridge says it has resources");
+
+        // Off, then on with nothing listening: the guide answers either way.
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap().local_addr().unwrap().port();
+        for on in [false, true] {
+            settings(config.path(), on, port);
+            let start = agent.call_tool(guide_call(None)).await.unwrap();
+            assert_eq!((start.is_error, text(&start)), (Some(false), guide::read(None).unwrap()));
+            let section = agent.call_tool(guide_call(Some("backups"))).await.unwrap();
+            assert_eq!((section.is_error, text(&section)), (Some(false), guide::read(Some("backups")).unwrap()));
+            let unknown = agent.call_tool(guide_call(Some("nope"))).await.unwrap();
+            assert_eq!((unknown.is_error, text(&unknown)), (Some(true), guide::read(Some("nope")).unwrap_err()));
+
+            let listed = agent.list_all_resources().await.unwrap();
+            assert_eq!(listed, guide::resources().resources);
+            for resource in listed {
+                let read = agent.read_resource(ReadResourceRequestParams::new(resource.uri.clone())).await.unwrap();
+                assert_eq!(read.contents, guide::resource(&resource.uri).unwrap().contents);
+            }
+        }
     }
 
     #[tokio::test]
