@@ -1,4 +1,4 @@
-//! Which pg_dump or psql runs, as the former web UI's `ToolRow.tsx`: its version
+//! Which client tool runs (pg_dump, mysql, mongorestore…), as the former web UI's `ToolRow.tsx`: its version
 //! and path, a way to choose another when the one found isn't right, and
 //! back to the one found. The core finds the tool and checks a chosen one
 //! before keeping it (`tools.json`).
@@ -6,8 +6,8 @@
 use crate::ui::Ellipsis;
 use dbforge_core::dump::{ToolInfo, dump_tool, set_dump_tool};
 use gpui::{
-    Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled,
-    Window, div, prelude::FluentBuilder, px,
+    Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 use crate::backend::Backend;
@@ -47,7 +47,7 @@ pub struct ToolRow {
 }
 
 impl ToolRow {
-    /// The row of `name`, `pg_dump` or `psql`.
+    /// The row of `name`, one of the tools [`dbforge_core::dump::dump_tools`] names.
     pub fn new(name: &'static str, cx: &mut Context<Self>) -> Self {
         let finding = Backend::global(cx)
             .spawn(cx, move |core| async move { dump_tool(core.tool_paths(), name.to_owned()).await });
@@ -63,6 +63,10 @@ impl ToolRow {
         })
         .detach();
         Self { name, state: State::Loading, refused: None, disabled: false }
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 
     /// Its buttons take no clicks while a run uses the tool.
@@ -165,7 +169,7 @@ impl Render for ToolRow {
             .when(custom, |row| {
                 row.child(
                     enabled(ghost_button(&theme, m.tool_use_found), !self.disabled)
-                        .id(("tool-use-found", self.name.len()))
+                        .id(SharedString::from(format!("tool-use-found-{}", self.name)))
                         .when(!self.disabled, |back| {
                             back.on_click(cx.listener(|this, _, _, cx| this.change(None, cx)))
                         }),
@@ -173,7 +177,7 @@ impl Render for ToolRow {
             })
             .child(
                 enabled(button(&theme, None, &choose_label), can_choose)
-                    .id(("tool-choose", self.name.len()))
+                    .id(SharedString::from(format!("tool-choose-{}", self.name)))
                     .when(can_choose, |choose| choose.on_click(cx.listener(|this, _, _, cx| this.choose(cx)))),
             )
     }

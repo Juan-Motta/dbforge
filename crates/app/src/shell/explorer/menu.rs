@@ -11,17 +11,18 @@
 //! statement (a view's definition). A connection's server objects
 //! it can create follow its new query under a "New" heading; a database
 //! that can be dropped offers it last. A table's or view's export, and a
-//! table's import of a file's rows, follow its new query; a PostgreSQL
-//! database's export to a .sql file and import of one come before its drop.
+//! table's import of a file's rows, follow its new query; a database's export
+//! to a file and import of one come before its drop, where its engine has
+//! dumps (a SQLite connection's, before duplicating it: the file is its database).
 
 use dbforge_core::connections::model::Engine;
 use dbforge_core::drivers::TableStructure;
+use dbforge_core::dump::supports_dumps;
 
 use super::tree::{Node, NodeKind};
 use crate::admin::NewObjectKind;
 use crate::admin::new_object::{drops_databases, menu_icon_of, menu_label_of, new_objects};
 use crate::connections::engine::is_relational;
-use crate::dump::dumps;
 use crate::i18n::Messages;
 use crate::workspace::has_query_console;
 
@@ -59,10 +60,10 @@ pub enum NodeCommand {
     ExportTable,
     /// Imports a file's rows into a table (a view can't take them).
     ImportRows,
-    /// Writes the database to a .sql file with pg_dump.
+    /// Writes the database to a file with its engine's dump tool (SQLite's built in).
     ExportDatabase,
-    /// Restores a .sql file into the database with psql.
-    ImportSqlFile,
+    /// Restores such a file into the database.
+    ImportDatabase,
 }
 
 /// What a table's or view's Copy menu puts on the clipboard.
@@ -150,7 +151,7 @@ impl NodeCommand {
             Self::ExportTable => m.export_menu,
             Self::ImportRows => m.import_menu,
             Self::ExportDatabase => m.export_database,
-            Self::ImportSqlFile => m.import_sql_file,
+            Self::ImportDatabase => m.import_database,
         }
     }
 
@@ -178,7 +179,7 @@ impl NodeCommand {
             Self::DeleteConnection | Self::DropDatabase => "trash",
             Self::NewObject(kind) => menu_icon_of(kind),
             Self::ExportTable | Self::ExportDatabase => "export",
-            Self::ImportRows | Self::ImportSqlFile => "upload",
+            Self::ImportRows | Self::ImportDatabase => "upload",
         }
     }
 }
@@ -207,13 +208,19 @@ pub fn commands(node: &Node) -> Vec<NodeCommand> {
     commands.extend(match node.kind {
         // A connection's own refresh is its whole connection already.
         NodeKind::Connection => {
-            vec![Refresh, CopyName, CopyConnectionUrl, DuplicateConnection, EditConnection, DeleteConnection]
+            let mut connection = vec![Refresh, CopyName, CopyConnectionUrl];
+            // A SQLite connection is one database, with no node of its own.
+            if node.engine == Engine::Sqlite {
+                connection.extend([ExportDatabase, ImportDatabase]);
+            }
+            connection.extend([DuplicateConnection, EditConnection, DeleteConnection]);
+            connection
         }
         NodeKind::Folder => vec![Refresh, RefreshConnection],
-        NodeKind::Database if dumps(node.engine) || drops_databases(node.engine) => {
+        NodeKind::Database if supports_dumps(node.engine) || drops_databases(node.engine) => {
             let mut database = vec![Refresh, RefreshConnection, CopyName];
-            if dumps(node.engine) {
-                database.extend([ExportDatabase, ImportSqlFile]);
+            if supports_dumps(node.engine) {
+                database.extend([ExportDatabase, ImportDatabase]);
             }
             if drops_databases(node.engine) {
                 database.push(DropDatabase);
@@ -299,7 +306,7 @@ mod tests {
         assert_eq!(commands(&sql_node(NodeKind::Schema)), [NewQuery, Refresh, RefreshConnection, CopyName]);
         assert_eq!(
             commands(&sql_node(NodeKind::Database)),
-            [NewQuery, Refresh, RefreshConnection, CopyName, ExportDatabase, ImportSqlFile, DropDatabase]
+            [NewQuery, Refresh, RefreshConnection, CopyName, ExportDatabase, ImportDatabase, DropDatabase]
         );
         assert_eq!(commands(&sql_node(NodeKind::Folder)), [Refresh, RefreshConnection]);
         for engine in [Engine::Mongodb, Engine::Cosmosdb] {
@@ -533,15 +540,35 @@ mod tests {
     }
 
     #[test]
-    fn offers_a_postgresql_database_s_export_and_import_before_its_drop_and_names_them() {
+    fn offers_a_database_s_export_and_import_before_its_drop_where_its_engine_has_dumps_and_names_them() {
         use NodeCommand::*;
-        let mysql = at(NodeKind::Database, Engine::Mysql, &["app"]);
-        assert!(!commands(&mysql).contains(&ExportDatabase), "only PostgreSQL has pg_dump and psql");
+        for engine in [Engine::Postgres, Engine::Mysql, Engine::Mariadb, Engine::Mongodb] {
+            let database = commands(&at(NodeKind::Database, engine, &["app"]));
+            let export = database.iter().position(|command| *command == ExportDatabase);
+            assert!(export.is_some(), "{engine:?} exports its databases");
+            assert_eq!(database.get(export.unwrap() + 1), Some(&ImportDatabase), "{engine:?} imports after");
+            if let Some(drop) = database.iter().position(|command| *command == DropDatabase) {
+                assert!(drop > export.unwrap(), "{engine:?} drops last");
+            }
+        }
+        for engine in [Engine::Sqlserver, Engine::Redis, Engine::Cosmosdb] {
+            let database = commands(&at(NodeKind::Database, engine, &["app"]));
+            assert!(
+                !database.contains(&ExportDatabase) && !database.contains(&ImportDatabase),
+                "{engine:?} has no dumps"
+            );
+        }
+        let sqlite = Node { engine: Engine::Sqlite, ..sql_node(NodeKind::Connection) };
+        let connection = commands(&sqlite);
+        let export = connection.iter().position(|command| *command == ExportDatabase).expect("SQLite exports its file");
+        assert_eq!(&connection[export..export + 3], [ExportDatabase, ImportDatabase, DuplicateConnection]);
+        assert!(!commands(&sql_node(NodeKind::Connection)).contains(&ExportDatabase), "a server's are its databases'");
         let m = Language::En.messages();
         assert_eq!(ExportTable.label(m), "Export…");
         assert_eq!(ImportRows.label(m), "Import rows…");
         assert_eq!(ExportDatabase.label(m), "Export database…");
-        assert_eq!(ImportSqlFile.label(Language::Es.messages()), "Importar archivo SQL…");
+        assert_eq!(ImportDatabase.label(m), "Import…");
+        assert_eq!(ImportDatabase.label(Language::Es.messages()), "Importar…");
         assert_eq!(ExportTable.icon(), "export");
         assert_eq!(ImportRows.icon(), "upload");
     }

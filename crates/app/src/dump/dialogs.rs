@@ -1,17 +1,23 @@
 //! A database's two dialogs, as the former web UI's `DumpDialogs.tsx`.
 //!
-//! Export writes the whole database with pg_dump to a .sql file in the
-//! export folder (or one picked for this export only): what it holds,
-//! whether it drops objects first or keeps owners, and the file's name. A
-//! file already there is replaced only on a second press, after saying so.
+//! Export writes the whole database to a file in the export folder (or one
+//! picked for this export only), with what its engine offers: PostgreSQL what
+//! it holds, whether it drops objects first or keeps owners; MySQL and
+//! MariaDB what it holds, DROP TABLE statements, one consistent snapshot and
+//! routines; MongoDB the whole database or chosen collections; SQLite a SQL
+//! script or a copy of the file. The file is named with the engine's
+//! extension. A file already there is replaced only on a second press, after
+//! saying so.
 //!
-//! Import restores a .sql file with psql into a database, creating it when
-//! it doesn't exist, in one transaction. On a connection whose tag asks
-//! first (PROD) the first press only warns, naming the connection and the
-//! tag; the second restores. Changing the file or the database asks again.
+//! Import restores a file into a database, creating it when it doesn't
+//! exist (MongoDB can drop the archive's collections first), or for SQLite
+//! into the connection's own file or a new one. On a connection whose tag
+//! asks first (PROD) the first press only warns, naming the connection and
+//! the tag; the second restores. Changing the file or the target asks again.
 //!
-//! Both show the tool's last line and the time while they run, can be
-//! stopped, and say how they ended. Enter presses the main button; Escape
+//! Each engine's sections are fixed, so changing an option never resizes the
+//! dialog. Both show the tool's last line and the time while they run, can
+//! be stopped, and say how they ended. Enter presses the main button; Escape
 //! stops a run and closes.
 
 use crate::ui::Ellipsis;
@@ -19,16 +25,23 @@ use std::path::Path;
 
 use chrono::Local;
 use dbforge_core::connections::model::Connection;
-use dbforge_core::dump::{Content, DumpOptions, ExportRequest, ImportRequest, export_database, import_database};
+use dbforge_core::dump::{
+    Content, DumpEngine, ExportRequest, ImportRequest, MysqlOptions, RestoreOptions, SqliteFormat, export_database,
+    import_database,
+};
 use dbforge_core::explorer::list_objects;
 use gpui::{
-    AnyElement, App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    AnyElement, App, AppContext, Context, DismissEvent, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, StatefulInteractiveElement, Styled,
     Subscription, Window, actions, div, prelude::FluentBuilder, px,
 };
 
+use super::choices::{Collections, ExportChoices, sqlite_name, sqlite_target, swap_extension};
 use super::job::DumpJob;
-use super::{ExportFolder, Outcome, ToolRow, contents, ended, export_file_name, file_name_of, join_path, target_note};
+use super::{
+    ExportFolder, Outcome, ToolRow, contents, ended, export_file_name, file_name_of, file_placeholder, join_path,
+    target_note,
+};
 use crate::backend::Backend;
 use crate::i18n::{DumpMessages, Translate};
 use crate::query::plan::format_ms;
@@ -36,15 +49,20 @@ use crate::structure::format::format_bytes;
 use crate::tags::confirming_tag_of;
 use crate::theme::{ActiveTheme, MONO, Theme};
 use crate::ui::callout::{Tone, tick_while};
+use crate::ui::checkbox::Checkbox;
 use crate::ui::field::{field, help, label, text_box};
-use crate::ui::file_prompt::{pick_file, pick_folder};
+use crate::ui::file_prompt::{documents_dir, pick_file, pick_folder, pick_new_path};
 use crate::ui::modal::{form_section, modal, modal_body, modal_footer, modal_status, note, path_tail};
 use crate::ui::option_list::{Mark, OptionItem, option_list};
-use crate::ui::{TextInput, TextInputEvent, button, enabled, icon, primary_button};
+use crate::ui::segmented::segmented;
+use crate::ui::{TextInput, TextInputEvent, any, button, enabled, icon, primary_button, segment_face};
 
 actions!(dump_dialog, [Submit, Dismiss]);
 
 const CONTEXT: &str = "DumpDialog";
+
+/// How tall MongoDB's collection list is, whatever it holds, so choosing never resizes the dialog.
+const COLLECTION_LIST_HEIGHT: f32 = 132.;
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     vec![KeyBinding::new("enter", Submit, Some(CONTEXT)), KeyBinding::new("escape", Dismiss, Some(CONTEXT))]
@@ -55,6 +73,17 @@ pub fn key_bindings() -> Vec<KeyBinding> {
 pub enum DumpEvent {
     /// A restore finished: the explorer shows the database, created or changed.
     Imported,
+}
+
+/// How `connection`'s databases are dumped. The menus open these dialogs
+/// only where the engine has dumps; elsewhere the core refuses the run.
+fn engine_of(connection: &Connection) -> DumpEngine {
+    DumpEngine::of(connection.engine).unwrap_or(DumpEngine::Postgres)
+}
+
+/// The row of the tool at `index` of `engine`'s (export's first), or none when it needs none (SQLite).
+fn tool_row<T>(engine: DumpEngine, index: usize, cx: &mut Context<T>) -> Option<Entity<ToolRow>> {
+    engine.tools().get(index).map(|&name| cx.new(|cx| ToolRow::new(name, cx)))
 }
 
 /// The source line: the database and its connection.
@@ -82,12 +111,52 @@ fn path_line(theme: &Theme, text: String, muted: bool) -> gpui::Div {
         .child(path_tail(&text, 56))
 }
 
+/// One choice of a few, as segments, `chosen` raised; each picks its value
+/// with `pick` unless `disabled`. Its note below stays one line high.
+fn choice<V: Copy + PartialEq + 'static, T: 'static>(
+    theme: &Theme,
+    id: &'static str,
+    items: &[(V, &'static str)],
+    chosen: V,
+    disabled: bool,
+    pick: fn(&mut T, V, &mut Context<T>),
+    cx: &mut Context<T>,
+) -> Div {
+    let segments = items
+        .iter()
+        .enumerate()
+        .map(|(index, &(value, text))| {
+            any(segment_face(theme, None, text, value == chosen).id((id, index)).when(!disabled, |segment| {
+                segment.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| pick(this, value, cx)))
+            }))
+        })
+        .collect();
+    let selected = items.iter().position(|(value, _)| *value == chosen);
+    div().flex().when(disabled, |row| row.opacity(0.7)).child(segmented(theme, id, selected, segments))
+}
+
+/// One of mysqldump's options as a checkbox: what it sets in [`MysqlOptions`].
+struct MysqlFlag {
+    id: &'static str,
+    title: &'static str,
+    help: &'static str,
+    checked: bool,
+    disabled: bool,
+    set: fn(&mut MysqlOptions, bool),
+}
+
+/// A note that keeps one line's room, so a shorter one never moves what follows.
+fn one_line_note(theme: &Theme, text: impl Into<gpui::SharedString>) -> Div {
+    note(theme, text).min_h(px(17.))
+}
+
 pub struct ExportDatabaseDialog {
     connection: Connection,
+    /// The database's name; a SQLite connection's file's, without its extension.
     database: String,
-    content: Content,
-    clean: bool,
-    keep_owners: bool,
+    choices: ExportChoices,
+    /// MongoDB: the database's collections to choose from.
+    collections: Listing,
     /// A folder picked for this export only; the settings keep the default.
     folder: Option<String>,
     file_name: Entity<TextInput>,
@@ -95,9 +164,18 @@ pub struct ExportDatabaseDialog {
     replacing: bool,
     outcome: Option<Outcome>,
     job: DumpJob,
-    tool: Entity<ToolRow>,
+    /// The tool that writes the file; SQLite needs none.
+    tool: Option<Entity<ToolRow>>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
+}
+
+/// A list read from the server for a dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Listing {
+    Loading,
+    Listed(Vec<String>),
+    Failed(String),
 }
 
 impl EventEmitter<DismissEvent> for ExportDatabaseDialog {}
@@ -110,9 +188,13 @@ impl Focusable for ExportDatabaseDialog {
 
 impl ExportDatabaseDialog {
     pub fn new(connection: Connection, database: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let engine = engine_of(&connection);
+        // A SQLite connection is one database: its file.
+        let database = if engine == DumpEngine::Sqlite { sqlite_name(&connection.database) } else { database };
+        let choices = ExportChoices::new(engine);
         let file_name = cx.new(|cx| {
             let mut input = TextInput::new("", cx);
-            input.set_text(&export_file_name(&database, Local::now().naive_local()), cx);
+            input.set_text(&export_file_name(&database, Local::now().naive_local(), choices.extension()), cx);
             input
         });
         let subscriptions =
@@ -125,21 +207,24 @@ impl ExportDatabaseDialog {
                 TextInputEvent::Cancelled => this.close(cx),
                 TextInputEvent::Pasted(_) => {}
             })];
-        Self {
+        let mut dialog = Self {
             connection,
             database,
-            content: Content::All,
-            clean: false,
-            keep_owners: false,
+            choices,
+            collections: Listing::Loading,
             folder: None,
             file_name,
             replacing: false,
             outcome: None,
             job: DumpJob::default(),
-            tool: cx.new(|cx| ToolRow::new("pg_dump", cx)),
+            tool: tool_row(engine, 0, cx),
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
+        };
+        if engine == DumpEngine::Mongodb {
+            dialog.list_collections(cx);
         }
+        dialog
     }
 
     pub fn focus(&self, window: &mut Window) {
@@ -148,6 +233,24 @@ impl ExportDatabaseDialog {
 
     fn job(this: &mut Self) -> &mut DumpJob {
         &mut this.job
+    }
+
+    fn list_collections(&mut self, cx: &mut Context<Self>) {
+        let (connection, database) = (self.connection.id.clone(), self.database.clone());
+        let listing = Backend::global(cx).spawn(cx, move |core| async move {
+            list_objects(core.connections(), core.statement_log(), connection, vec![database]).await
+        });
+        cx.spawn(async move |this, cx| {
+            let listed = listing.await;
+            let _ = this.update(cx, |this, cx| {
+                this.collections = match listed {
+                    Ok(objects) => Listing::Listed(objects.into_iter().map(|object| object.name).collect()),
+                    Err(error) => Listing::Failed(error.to_string()),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn target(&self, cx: &App) -> Option<String> {
@@ -160,12 +263,43 @@ impl ExportDatabaseDialog {
         (!name.is_empty()).then(|| join_path(&folder, &name))
     }
 
+    fn ready(&self, cx: &App) -> bool {
+        !self.job.running() && self.choices.ready() && self.path(cx).is_some()
+    }
+
+    /// Changes the choices; a file name ending with the old extension takes the new one.
+    fn change(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut ExportChoices)) {
+        let before = self.choices.extension();
+        change(&mut self.choices);
+        let after = self.choices.extension();
+        if before != after {
+            let name = self.file_name.read(cx).text().to_owned();
+            let renamed = swap_extension(&name, before, after);
+            if renamed != name {
+                self.file_name.update(cx, |input, cx| input.set_text(&renamed, cx));
+            }
+            self.replacing = false;
+        }
+        cx.notify();
+    }
+
+    /// What the core is asked to export, as `job_id`, to `path`.
+    fn request(&self, job_id: String, path: String) -> ExportRequest {
+        ExportRequest {
+            job_id,
+            connection_id: self.connection.id.clone(),
+            database: self.database.clone(),
+            path,
+            options: self.choices.options(),
+        }
+    }
+
     /// The first press on a file already there says so; the next replaces it.
     pub(crate) fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = self.path(cx) else { return };
-        if self.job.running() {
+        if !self.ready(cx) {
             return;
         }
+        let Some(path) = self.path(cx) else { return };
         if self.replacing {
             self.replacing = false;
             return self.run(path, window, cx);
@@ -193,17 +327,11 @@ impl ExportDatabaseDialog {
         let job_id = self.job.start(Self::job, cx);
         self.set_busy(true, window, cx);
         tick_while(cx, |this: &Self| this.job.running());
-        let request = ExportRequest {
-            job_id,
-            connection_id: self.connection.id.clone(),
-            database: self.database.clone(),
-            path: path.clone(),
-            options: DumpOptions { content: self.content, clean: self.clean, keep_owners: self.keep_owners },
-        };
+        let request = self.request(job_id, path.clone());
         let exporting = Backend::global(cx).spawn(cx, move |core| async move {
             let (events, store, jobs, tools, log) =
                 (core.events().as_ref(), core.connections(), core.jobs(), core.tool_paths(), core.statement_log());
-            export_database(events, store, jobs, tools, log, request).await
+            export_database(events, store, jobs, tools, log, core.export_records(), request).await
         });
         cx.spawn_in(window, async move |this, cx| {
             let exported = exporting.await;
@@ -232,7 +360,9 @@ impl ExportDatabaseDialog {
 
     fn set_busy(&mut self, busy: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.file_name.update(cx, |input, cx| input.set_disabled(busy, window, cx));
-        self.tool.update(cx, |tool, cx| tool.set_disabled(busy, cx));
+        if let Some(tool) = &self.tool {
+            tool.update(cx, |tool, cx| tool.set_disabled(busy, cx));
+        }
         if !busy {
             self.focus(window);
         }
@@ -257,19 +387,127 @@ impl ExportDatabaseDialog {
         cx.emit(DismissEvent);
     }
 
-    fn render_content(&self, theme: &Theme, m: &DumpMessages, cx: &mut Context<Self>) -> AnyElement {
+    /// The sections of the engine's options, fixed for the engine.
+    fn render_choices(&self, theme: &Theme, m: &DumpMessages, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        match &self.choices {
+            ExportChoices::Postgres(options) => vec![
+                self.render_postgres_content(theme, m, options.content, cx),
+                self.render_postgres_options(theme, m, options.content, options.clean, options.keep_owners, cx),
+            ],
+            ExportChoices::Mysql(options) => self.render_mysql(theme, m, options, cx),
+            ExportChoices::Mongodb(collections) => vec![self.render_collections(theme, m, collections, cx)],
+            ExportChoices::Sqlite(format) => {
+                let items = [(SqliteFormat::Script, m.sqlite_script), (SqliteFormat::File, m.sqlite_file)];
+                let pick: fn(&mut Self, SqliteFormat, &mut Context<Self>) =
+                    |this, format, cx| this.change(cx, |choices| *choices = ExportChoices::Sqlite(format));
+                let description = match format {
+                    SqliteFormat::Script => m.sqlite_script_description,
+                    SqliteFormat::File => m.sqlite_file_description,
+                };
+                vec![
+                    form_section(theme, m.format)
+                        .child(choice(theme, "dump-sqlite-format", &items, *format, self.job.running(), pick, cx))
+                        .child(one_line_note(theme, description))
+                        .into_any_element(),
+                ]
+            }
+        }
+    }
+
+    /// MySQL and MariaDB: what the file holds, then mysqldump's options.
+    fn render_mysql(
+        &self,
+        theme: &Theme,
+        m: &DumpMessages,
+        options: &MysqlOptions,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let running = self.job.running();
+        let content = options.content;
+        let items: Vec<(Content, &'static str)> =
+            contents(m).iter().map(|(content, title, _, _)| (*content, *title)).collect();
+        let description = match content {
+            Content::All => m.all_description,
+            Content::Structure => m.mysql_structure_description,
+            Content::Data => m.data_description,
+        };
+        let pick: fn(&mut Self, Content, &mut Context<Self>) =
+            |this, content, cx| this.change_mysql(cx, |options| options.content = content);
+        let content_section = form_section(theme, m.content)
+            .child(choice(theme, "dump-mysql-content", &items, content, running, pick, cx))
+            .child(one_line_note(theme, description));
+        // Data only creates no tables, so there are none to drop first.
+        let data_only = content == Content::Data;
+        let flags = [
+            MysqlFlag {
+                id: "dump-add-drop-table",
+                title: m.add_drop_table,
+                help: m.add_drop_table_description,
+                checked: options.add_drop_table && !data_only,
+                disabled: running || data_only,
+                set: |options, on| options.add_drop_table = on,
+            },
+            MysqlFlag {
+                id: "dump-single-transaction",
+                title: m.single_transaction,
+                help: m.single_transaction_description,
+                checked: options.single_transaction,
+                disabled: running,
+                set: |options, on| options.single_transaction = on,
+            },
+            MysqlFlag {
+                id: "dump-routines",
+                title: m.routines,
+                help: m.routines_description,
+                checked: options.routines,
+                disabled: running,
+                set: |options, on| options.routines = on,
+            },
+        ];
+        let rows = flags.into_iter().map(|flag| {
+            let set = flag.set;
+            Checkbox::new(flag.id, flag.title, flag.checked).help(flag.help, None).disabled(flag.disabled).on_change(
+                cx.listener(move |this, on: &bool, _, cx| {
+                    let on = *on;
+                    this.change_mysql(cx, |options| set(options, on));
+                }),
+            )
+        });
+        let options_section = form_section(theme, m.options).child(div().flex().flex_col().gap(px(10.)).children(rows));
+        vec![content_section.into_any_element(), options_section.into_any_element()]
+    }
+
+    /// Changes MySQL's options, when the export is MySQL's.
+    fn change_mysql(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut MysqlOptions)) {
+        self.change(cx, |choices| {
+            if let ExportChoices::Mysql(options) = choices {
+                change(options);
+            }
+        });
+    }
+
+    fn render_postgres_content(
+        &self,
+        theme: &Theme,
+        m: &DumpMessages,
+        chosen: Content,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let running = self.job.running();
         let rows = contents(m)
             .into_iter()
             .enumerate()
             .map(|(index, (content, title, text, icon_name))| {
-                OptionItem::new(("dump-content", index), Mark::Radio, title, self.content == content)
+                OptionItem::new(("dump-content", index), Mark::Radio, title, chosen == content)
                     .icon(icon_name)
                     .description(text)
                     .disabled(running)
                     .on_select(cx.listener(move |this, _, _, cx| {
-                        this.content = content;
-                        cx.notify();
+                        this.change(cx, |choices| {
+                            if let ExportChoices::Postgres(options) = choices {
+                                options.content = content;
+                            }
+                        })
                     }))
                     .into_any_element()
             })
@@ -277,29 +515,103 @@ impl ExportDatabaseDialog {
         form_section(theme, m.content).child(option_list(theme, rows)).into_any_element()
     }
 
-    fn render_options(&self, theme: &Theme, m: &DumpMessages, cx: &mut Context<Self>) -> AnyElement {
+    fn render_postgres_options(
+        &self,
+        theme: &Theme,
+        m: &DumpMessages,
+        content: Content,
+        clean: bool,
+        keep_owners: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let running = self.job.running();
-        let data_only = self.content == Content::Data;
-        let (clean, keep_owners) = (self.clean, self.keep_owners);
+        let data_only = content == Content::Data;
         let rows = vec![
             OptionItem::new("dump-clean", Mark::Check, m.clean, clean && !data_only)
                 .description(m.clean_description)
                 .disabled(running || data_only)
                 .on_select(cx.listener(move |this, _, _, cx| {
-                    this.clean = !clean;
-                    cx.notify();
+                    this.change(cx, |choices| {
+                        if let ExportChoices::Postgres(options) = choices {
+                            options.clean = !clean;
+                        }
+                    })
                 }))
                 .into_any_element(),
             OptionItem::new("dump-owners", Mark::Check, m.keep_owners, keep_owners)
                 .description(m.keep_owners_description)
                 .disabled(running)
                 .on_select(cx.listener(move |this, _, _, cx| {
-                    this.keep_owners = !keep_owners;
-                    cx.notify();
+                    this.change(cx, |choices| {
+                        if let ExportChoices::Postgres(options) = choices {
+                            options.keep_owners = !keep_owners;
+                        }
+                    })
                 }))
                 .into_any_element(),
         ];
         form_section(theme, m.options).child(option_list(theme, rows)).into_any_element()
+    }
+
+    /// MongoDB: the whole database, or the collections ticked in a list of fixed height.
+    fn render_collections(
+        &self,
+        theme: &Theme,
+        m: &DumpMessages,
+        collections: &Collections,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let running = self.job.running();
+        let whole = collections.whole;
+        let pick: fn(&mut Self, bool, &mut Context<Self>) = |this, whole, cx| {
+            this.change(cx, |choices| {
+                if let ExportChoices::Mongodb(collections) = choices {
+                    collections.whole = whole;
+                }
+            })
+        };
+        let items = [(true, m.whole_database), (false, m.chosen_collections)];
+        let list = div()
+            .id("dump-collection-list")
+            .h(px(COLLECTION_LIST_HEIGHT))
+            .overflow_y_scroll()
+            .px(px(12.))
+            .py(px(8.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(theme.line);
+        let list = match &self.collections {
+            Listing::Loading => list.child(note(theme, m.loading_collections)),
+            Listing::Failed(error) => list.child(note(theme, error.clone()).text_color(theme.err)),
+            Listing::Listed(names) if names.is_empty() => list.child(note(theme, m.no_collections)),
+            Listing::Listed(names) => list.child(div().grid().grid_cols(2).gap_x(px(12.)).gap_y(px(4.)).children(
+                names.iter().enumerate().map(|(index, name)| {
+                    let checked = whole || collections.chosen.contains(name);
+                    let name = name.clone();
+                    Checkbox::new(("dump-collection", index), name.clone(), checked)
+                        .icon("table")
+                        .disabled(running || whole)
+                        .on_change(cx.listener(move |this, on: &bool, _, cx| {
+                            let on = *on;
+                            this.change(cx, |choices| {
+                                if let ExportChoices::Mongodb(collections) = choices {
+                                    collections.toggle(&name, on);
+                                }
+                            })
+                        }))
+                }),
+            )),
+        };
+        let summary = if whole {
+            m.whole_database_note.to_owned()
+        } else {
+            (m.chosen_collections_note)(collections.chosen.len())
+        };
+        form_section(theme, m.collections)
+            .child(choice(theme, "dump-collections", &items, whole, running, pick, cx))
+            .child(list)
+            .child(one_line_note(theme, summary))
+            .into_any_element()
     }
 }
 
@@ -309,7 +621,6 @@ impl Render for ExportDatabaseDialog {
         let m = &cx.messages().dump;
         let running = self.job.running();
         let target = self.target(cx);
-        let path = self.path(cx);
         let name = self.file_name.read(cx).text().trim().to_owned();
         let folder_row = div()
             .flex()
@@ -336,10 +647,9 @@ impl Render for ExportDatabaseDialog {
         let status = self.job.status((m.exporting_into)(&self.database), replacing.as_ref().or(self.outcome.as_ref()));
         let body = modal_body("dump-export-body")
             .child(source(&theme, &self.database, &self.connection.name))
-            .child(self.render_content(&theme, m, cx))
-            .child(self.render_options(&theme, m, cx))
+            .children(self.render_choices(&theme, m, cx))
             .child(save_to)
-            .child(self.tool.clone());
+            .children(self.tool.clone());
         let done = matches!(&self.outcome, Some(outcome) if outcome.tone == Tone::Done);
         let leading = if running {
             button(&theme, Some("stop"), m.stop)
@@ -352,7 +662,7 @@ impl Render for ExportDatabaseDialog {
                 .cursor_pointer()
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
         };
-        let ready = !running && path.is_some();
+        let ready = self.ready(cx);
         let label = if running {
             m.exporting
         } else if self.replacing {
@@ -376,16 +686,23 @@ impl Render for ExportDatabaseDialog {
 
 pub struct ImportDatabaseDialog {
     connection: Connection,
+    engine: DumpEngine,
     path: Option<String>,
     /// The database the file goes into: the one the menu was opened on unless another is typed.
     target: Entity<TextInput>,
     /// The server's databases, read again after each import (which may have created one).
     databases: Option<Vec<String>>,
+    /// MongoDB: drops the archive's collections before restoring them.
+    drop_existing: bool,
+    /// SQLite: restores into a new file (`new_file`, once picked) instead of the connection's.
+    into_new_file: bool,
+    new_file: Option<String>,
     /// On a connection whose tag asks first: the first press warned, the next restores.
     confirming: bool,
     outcome: Option<Outcome>,
     job: DumpJob,
-    tool: Entity<ToolRow>,
+    /// The tool that restores; SQLite needs none.
+    tool: Option<Entity<ToolRow>>,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -401,6 +718,7 @@ impl Focusable for ImportDatabaseDialog {
 
 impl ImportDatabaseDialog {
     pub fn new(connection: Connection, database: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let engine = engine_of(&connection);
         let target = cx.new(|cx| {
             let mut input = TextInput::new("", cx);
             input.set_text(&database, cx);
@@ -408,28 +726,30 @@ impl ImportDatabaseDialog {
         });
         let subscriptions =
             vec![cx.subscribe_in(&target, window, |this, _, event: &TextInputEvent, window, cx| match event {
-                TextInputEvent::Changed => {
-                    this.outcome = None;
-                    this.confirming = false;
-                    cx.notify();
-                }
+                TextInputEvent::Changed => this.target_changed(cx),
                 TextInputEvent::Submitted => this.start(window, cx),
                 TextInputEvent::Cancelled => this.close(cx),
                 TextInputEvent::Pasted(_) => {}
             })];
         let mut dialog = Self {
             connection,
+            engine,
             path: None,
             target,
             databases: None,
+            drop_existing: false,
+            into_new_file: false,
+            new_file: None,
             confirming: false,
             outcome: None,
             job: DumpJob::default(),
-            tool: cx.new(|cx| ToolRow::new("psql", cx)),
+            tool: tool_row(engine, 1, cx),
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
-        dialog.list_databases(cx);
+        if engine != DumpEngine::Sqlite {
+            dialog.list_databases(cx);
+        }
         dialog
     }
 
@@ -457,8 +777,30 @@ impl ImportDatabaseDialog {
         .detach();
     }
 
+    /// Another target: the last outcome no longer applies, and a tag asks again.
+    fn target_changed(&mut self, cx: &mut Context<Self>) {
+        self.outcome = None;
+        self.confirming = false;
+        cx.notify();
+    }
+
+    /// The typed database's name.
     fn name(&self, cx: &App) -> String {
         self.target.read(cx).text().trim().to_owned()
+    }
+
+    /// Where the file goes: the typed database, or for SQLite the file restored into.
+    fn database(&self, cx: &App) -> Option<String> {
+        if self.engine == DumpEngine::Sqlite {
+            sqlite_target(&self.connection.database, self.into_new_file, self.new_file.as_deref())
+        } else {
+            Some(self.name(cx)).filter(|name| !name.is_empty())
+        }
+    }
+
+    /// The target as the dialog's lines name it: a SQLite file by its name.
+    fn shown(&self, database: &str) -> String {
+        if self.engine == DumpEngine::Sqlite { file_name_of(database).to_owned() } else { database.to_owned() }
     }
 
     /// Development only: whether Import can be pressed.
@@ -468,7 +810,18 @@ impl ImportDatabaseDialog {
     }
 
     fn ready(&self, cx: &App) -> bool {
-        !self.job.running() && self.path.is_some() && !self.name(cx).is_empty()
+        !self.job.running() && self.path.is_some() && self.database(cx).is_some()
+    }
+
+    /// What the core is asked to restore, as `job_id`; `None` until a file and a target are chosen.
+    fn request(&self, job_id: String, cx: &App) -> Option<ImportRequest> {
+        Some(ImportRequest {
+            job_id,
+            connection_id: self.connection.id.clone(),
+            database: self.database(cx)?,
+            path: self.path.clone()?,
+            options: RestoreOptions { drop_existing: self.engine == DumpEngine::Mongodb && self.drop_existing },
+        })
     }
 
     pub(crate) fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -477,10 +830,25 @@ impl ImportDatabaseDialog {
             let Some(path) = picked.await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
                 this.path = Some(path.to_string_lossy().into_owned());
-                this.outcome = None;
-                this.confirming = false;
                 this.focus(window);
-                cx.notify();
+                this.target_changed(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// SQLite: where the new file goes, starting beside the connection's.
+    fn choose_new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let own = Path::new(&self.connection.database);
+        let folder = own.parent().filter(|folder| folder.is_dir()).map_or_else(documents_dir, Path::to_path_buf);
+        let suggested = format!("{}-restored.db", sqlite_name(&self.connection.database));
+        let picked = pick_new_path(&folder, &suggested, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(path) = picked.await else { return };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.new_file = Some(path.to_string_lossy().into_owned());
+                this.focus(window);
+                this.target_changed(cx);
             });
         })
         .detach();
@@ -497,19 +865,14 @@ impl ImportDatabaseDialog {
             cx.notify();
             return;
         }
-        let Some(path) = self.path.clone() else { return };
+        let Some(request) = self.request(String::new(), cx) else { return };
         self.confirming = false;
         self.outcome = None;
-        let name = self.name(cx);
+        let (name, path) = (self.shown(&request.database), request.path.clone());
         let job_id = self.job.start(Self::job, cx);
+        let request = ImportRequest { job_id, ..request };
         self.set_busy(true, window, cx);
         tick_while(cx, |this: &Self| this.job.running());
-        let request = ImportRequest {
-            job_id,
-            connection_id: self.connection.id.clone(),
-            database: name.clone(),
-            path: path.clone(),
-        };
         let importing = Backend::global(cx).spawn(cx, move |core| async move {
             let (events, store, jobs, tools, log) =
                 (core.events().as_ref(), core.connections(), core.jobs(), core.tool_paths(), core.statement_log());
@@ -533,11 +896,22 @@ impl ImportDatabaseDialog {
                         } else {
                             ((m.skipped_extensions)(&done.skipped_extensions.join(", ")), false)
                         };
-                        this.list_databases(cx);
+                        if this.engine != DumpEngine::Sqlite {
+                            this.list_databases(cx);
+                        }
                         cx.emit(DumpEvent::Imported);
                         Outcome { tone: Tone::Done, title, detail: Some(detail), mono }
                     }
-                    Err(error) => ended(&error.to_string(), m.import_stopped, m.import_failed),
+                    Err(error) => {
+                        // MySQL's and MongoDB's restores aren't one transaction: what ran stays.
+                        let (stopped, failed) = match this.engine {
+                            DumpEngine::Mysql | DumpEngine::Mongodb => {
+                                (m.import_stopped_partial, m.import_failed_partial)
+                            }
+                            DumpEngine::Postgres | DumpEngine::Sqlite => (m.import_stopped, m.import_failed),
+                        };
+                        ended(&error.to_string(), stopped, failed)
+                    }
                 });
                 this.job.end();
                 this.set_busy(false, window, cx);
@@ -549,7 +923,9 @@ impl ImportDatabaseDialog {
 
     fn set_busy(&mut self, busy: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.target.update(cx, |input, cx| input.set_disabled(busy, window, cx));
-        self.tool.update(cx, |tool, cx| tool.set_disabled(busy, cx));
+        if let Some(tool) = &self.tool {
+            tool.update(cx, |tool, cx| tool.set_disabled(busy, cx));
+        }
         if !busy {
             self.focus(window);
         }
@@ -560,6 +936,77 @@ impl ImportDatabaseDialog {
         self.job.cancel(cx);
         cx.emit(DismissEvent);
     }
+
+    /// Where the file goes: a database typed on the server, or SQLite's file.
+    fn render_target(
+        &self,
+        theme: &Theme,
+        m: &DumpMessages,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let running = self.job.running();
+        if self.engine == DumpEngine::Sqlite {
+            let pick: fn(&mut Self, bool, &mut Context<Self>) = |this, into_new_file, cx| {
+                this.into_new_file = into_new_file;
+                this.target_changed(cx);
+            };
+            let items = [(false, m.into_this_file), (true, m.into_new_file)];
+            let (shown, muted) = match (self.into_new_file, &self.new_file) {
+                (false, _) => (self.connection.database.clone(), false),
+                (true, Some(file)) => (file.clone(), false),
+                (true, None) => (m.new_file_placeholder.to_owned(), true),
+            };
+            let can_choose = self.into_new_file && !running;
+            let file_row = div().flex().items_center().gap(px(10.)).child(path_line(theme, shown, muted)).child(
+                enabled(button(theme, None, m.choose), can_choose)
+                    .id("dump-choose-new-file")
+                    .when(can_choose, |choose| {
+                        choose.on_click(cx.listener(|this, _, window, cx| this.choose_new_file(window, cx)))
+                    }),
+            );
+            let text = if self.into_new_file { m.into_new_file_note } else { m.into_this_file_note };
+            return form_section(theme, m.restore_into)
+                .child(choice(theme, "dump-sqlite-target", &items, self.into_new_file, running, pick, cx))
+                .child(file_row)
+                .child(one_line_note(theme, text))
+                .into_any_element();
+        }
+        let name = self.name(cx);
+        let target = field(
+            label(theme, "dump-target", (m.database_on)(&self.connection.name), None),
+            text_box(&self.target, false, true, window, cx),
+            Some(help(theme, target_note(&name, self.databases.as_deref(), m), None)),
+        );
+        if self.engine != DumpEngine::Mongodb {
+            return target.into_any_element();
+        }
+        let drop_existing = Checkbox::new("dump-drop-existing", m.drop_existing, self.drop_existing)
+            .help(m.drop_existing_description, None)
+            .disabled(running)
+            .on_change(cx.listener(|this, on: &bool, _, cx| {
+                this.drop_existing = *on;
+                this.target_changed(cx);
+            }));
+        div().flex().flex_col().gap(px(14.)).child(target).child(drop_existing).into_any_element()
+    }
+
+    /// What restoring can do, and to trust the file: psql's runs shell commands with `\!`.
+    fn render_safety(&self, theme: &Theme, m: &DumpMessages) -> Div {
+        let text = match self.engine {
+            DumpEngine::Postgres => format!("{}\\!{}", m.import_note_before, m.import_note_after),
+            DumpEngine::Mysql => m.import_note_mysql.to_owned(),
+            DumpEngine::Mongodb => m.import_note_mongodb.to_owned(),
+            DumpEngine::Sqlite => m.import_note_sqlite.to_owned(),
+        };
+        // One paragraph, wrapping in the dialog's width.
+        div()
+            .flex()
+            .items_start()
+            .gap(px(8.))
+            .child(div().mt(px(2.)).child(icon("info", theme.text3, 13.)))
+            .child(note(theme, text).flex_1().min_w_0())
+    }
 }
 
 impl Render for ImportDatabaseDialog {
@@ -567,7 +1014,7 @@ impl Render for ImportDatabaseDialog {
         let theme = *cx.theme();
         let m = &cx.messages().dump;
         let running = self.job.running();
-        let name = self.name(cx);
+        let shown = self.database(cx).map(|database| self.shown(&database)).unwrap_or_default();
         let tag = confirming_tag_of(cx, &self.connection.id);
         let file = form_section(&theme, m.file).child(
             div()
@@ -576,7 +1023,7 @@ impl Render for ImportDatabaseDialog {
                 .gap(px(10.))
                 .child(path_line(
                     &theme,
-                    self.path.clone().unwrap_or_else(|| m.file_placeholder.into()),
+                    self.path.clone().unwrap_or_else(|| file_placeholder(self.engine, m).into()),
                     self.path.is_none(),
                 ))
                 .child(
@@ -585,26 +1032,18 @@ impl Render for ImportDatabaseDialog {
                     }),
                 ),
         );
-        let target = field(
-            label(&theme, "dump-target", (m.database_on)(&self.connection.name), None),
-            text_box(&self.target, false, true, window, cx),
-            Some(help(&theme, target_note(&name, self.databases.as_deref(), m), None)),
-        );
-        // One paragraph, wrapping in the dialog's width; `\!` is what psql runs shell commands with.
-        let safety = div()
-            .flex()
-            .items_start()
-            .gap(px(8.))
-            .child(div().mt(px(2.)).child(icon("info", theme.text3, 13.)))
-            .child(note(&theme, format!("{}\\!{}", m.import_note_before, m.import_note_after)).flex_1().min_w_0());
         let confirming = (self.confirming && tag.is_some()).then(|| Outcome {
             tone: Tone::Warning,
             title: (m.confirm_import)(&self.connection.name, tag.as_deref().unwrap_or_default()),
             detail: Some((m.confirm_import_detail)(tag.as_deref().unwrap_or_default())),
             mono: false,
         });
-        let status = self.job.status((m.importing_into)(&name), confirming.as_ref().or(self.outcome.as_ref()));
-        let body = modal_body("dump-import-body").child(file).child(target).child(safety).child(self.tool.clone());
+        let status = self.job.status((m.importing_into)(&shown), confirming.as_ref().or(self.outcome.as_ref()));
+        let body = modal_body("dump-import-body")
+            .child(file)
+            .child(self.render_target(&theme, m, window, cx))
+            .child(self.render_safety(&theme, m))
+            .children(self.tool.clone());
         let done = matches!(&self.outcome, Some(outcome) if outcome.tone == Tone::Done);
         let leading = if running {
             button(&theme, Some("stop"), m.stop)
@@ -638,54 +1077,4 @@ impl Render for ImportDatabaseDialog {
 }
 
 #[cfg(test)]
-mod tests {
-    use dbforge_core::connections::model::ConnectionInput;
-    use gpui::TestAppContext;
-
-    use super::*;
-    use crate::test_support::{draw, setup};
-
-    fn postgres(environment: &str, cx: &mut TestAppContext) -> Connection {
-        cx.update(|cx| {
-            let input: ConnectionInput = serde_json::from_value(serde_json::json!({
-                "name": "Shop", "engine": "postgres", "environment": environment, "host": "127.0.0.1",
-                "port": 1, "database": "shop", "username": "nobody",
-            }))
-            .expect("an input");
-            Backend::global(cx).core().connections().save(input.into_parts().expect("valid")).expect("saved")
-        })
-    }
-
-    #[gpui::test]
-    fn a_restore_on_a_connection_whose_tag_asks_first_only_warns_on_the_first_press(cx: &mut TestAppContext) {
-        let _dir = setup(cx);
-        let connection = postgres("production", cx);
-        let (dialog, cx) =
-            cx.add_window_view(|window, cx| ImportDatabaseDialog::new(connection, "shop".into(), window, cx));
-        dialog.update_in(cx, |dialog, window, cx| {
-            dialog.start(window, cx);
-            assert!(!dialog.confirming && !dialog.job.running(), "no file chosen: nothing happens");
-            dialog.path = Some("/nowhere/shop.sql".into());
-            dialog.start(window, cx);
-            assert!(dialog.confirming, "the first press only warns");
-            assert!(!dialog.job.running(), "and runs nothing");
-            dialog.target.update(cx, |input, cx| input.insert("_copy", cx));
-        });
-        cx.run_until_parked();
-        dialog.read_with(cx, |dialog, _| assert!(!dialog.confirming, "another database asks again"));
-        draw(cx);
-    }
-
-    #[gpui::test]
-    fn an_export_names_its_file_after_the_database_and_the_minute(cx: &mut TestAppContext) {
-        let _dir = setup(cx);
-        let connection = postgres("development", cx);
-        let (dialog, cx) =
-            cx.add_window_view(|window, cx| ExportDatabaseDialog::new(connection, "shop".into(), window, cx));
-        dialog.read_with(cx, |dialog, cx| {
-            let name = dialog.file_name.read(cx).text().to_owned();
-            assert!(name.starts_with("shop-") && name.ends_with(".sql"), "{name}");
-        });
-        draw(cx);
-    }
-}
+mod tests;

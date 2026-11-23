@@ -3,7 +3,7 @@
 mod cosmos;
 mod edit_sql;
 mod logged;
-mod mongodb;
+pub(crate) mod mongodb;
 mod row_filter;
 
 pub use row_filter::RowFilter;

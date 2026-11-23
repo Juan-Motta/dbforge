@@ -108,8 +108,9 @@ pub struct ImportMessages {
     pub done: &'static str,
 }
 
-/// The texts of a database's export with pg_dump and restore with psql,
-/// and of the settings' export folder and client tools, in one language.
+/// The texts of a database's export and restore (PostgreSQL, MySQL and
+/// MariaDB, MongoDB, SQLite), and of the settings' export folder and client
+/// tools, in one language.
 pub struct DumpMessages {
     pub content: &'static str,
     pub default_folder: &'static str,
@@ -124,6 +125,8 @@ pub struct DumpMessages {
     pub cleared: fn(u64, &str) -> String,
     pub client_tools: &'static str,
     pub client_tools_help: &'static str,
+    /// The settings' group of mysqldump and mysql.
+    pub mysql_tools: &'static str,
     pub options: &'static str,
     pub save_to: &'static str,
     pub file_name: &'static str,
@@ -148,6 +151,28 @@ pub struct DumpMessages {
     pub clean_description: &'static str,
     pub keep_owners: &'static str,
     pub keep_owners_description: &'static str,
+    /// MySQL's and MariaDB's export.
+    pub mysql_structure_description: &'static str,
+    pub add_drop_table: &'static str,
+    pub add_drop_table_description: &'static str,
+    pub single_transaction: &'static str,
+    pub single_transaction_description: &'static str,
+    pub routines: &'static str,
+    pub routines_description: &'static str,
+    /// MongoDB's export: the whole database or chosen collections.
+    pub collections: &'static str,
+    pub whole_database: &'static str,
+    pub chosen_collections: &'static str,
+    pub whole_database_note: &'static str,
+    pub chosen_collections_note: fn(usize) -> String,
+    pub loading_collections: &'static str,
+    pub no_collections: &'static str,
+    /// SQLite's export: a script or a copy of the file.
+    pub format: &'static str,
+    pub sqlite_script: &'static str,
+    pub sqlite_script_description: &'static str,
+    pub sqlite_file: &'static str,
+    pub sqlite_file_description: &'static str,
     pub exporting_into: fn(&str) -> String,
     pub exported: fn(&str, &str, &str) -> String,
     pub export_stopped: &'static str,
@@ -159,12 +184,30 @@ pub struct DumpMessages {
     pub export: &'static str,
     pub import_title: &'static str,
     pub file: &'static str,
+    /// The file to restore, before one is chosen: PostgreSQL's, then the other engines'.
     pub file_placeholder: &'static str,
+    pub file_placeholder_mysql: &'static str,
+    pub file_placeholder_mongodb: &'static str,
+    pub file_placeholder_sqlite: &'static str,
     pub choose: &'static str,
     pub database_on: fn(&str) -> String,
-    /// The restore's safety note, around the `\!` it names.
+    /// PostgreSQL's restore safety note, around the `\!` it names.
     pub import_note_before: &'static str,
     pub import_note_after: &'static str,
+    /// The other engines' restore notes.
+    pub import_note_mysql: &'static str,
+    pub import_note_mongodb: &'static str,
+    pub import_note_sqlite: &'static str,
+    /// MongoDB's restore: drop the archive's collections first.
+    pub drop_existing: &'static str,
+    pub drop_existing_description: &'static str,
+    /// SQLite's restore: into the connection's file or a new one.
+    pub restore_into: &'static str,
+    pub into_this_file: &'static str,
+    pub into_new_file: &'static str,
+    pub new_file_placeholder: &'static str,
+    pub into_this_file_note: &'static str,
+    pub into_new_file_note: &'static str,
     /// A connection whose tag asks first: the warning after the first press.
     pub confirm_import: fn(&str, &str) -> String,
     pub confirm_import_detail: fn(&str) -> String,
@@ -174,6 +217,9 @@ pub struct DumpMessages {
     pub skipped_extensions: fn(&str) -> String,
     pub import_stopped: &'static str,
     pub import_failed: &'static str,
+    /// Where a failed restore keeps what ran before it (MySQL, MongoDB).
+    pub import_stopped_partial: &'static str,
+    pub import_failed_partial: &'static str,
     pub importing: &'static str,
     pub import_into: fn(&str) -> String,
     pub import: &'static str,

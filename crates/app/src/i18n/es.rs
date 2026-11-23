@@ -32,7 +32,7 @@ pub(super) const MESSAGES: Messages = Messages {
     export_menu: "Exportar…",
     import_menu: "Importar filas…",
     export_database: "Exportar base de datos…",
-    import_sql_file: "Importar archivo SQL…",
+    import_database: "Importar…",
     no_connection: "Ninguna conexión seleccionada",
     search_everywhere: "Buscar en todo…",
     settings: "Configuración",
@@ -963,7 +963,8 @@ pub(super) const MESSAGES: Messages = Messages {
                 format!("{count} {} · {size}", if count == 1 { "export" } else { "exports" })
             }
         },
-        export_files_help: "Solo cuentan y se borran los archivos que nombró DBForge, como shop-2026-11-10-1432.sql.",
+        export_files_help: "Solo cuentan y se borran los archivos que nombró DBForge, como \
+                            shop-2026-11-10-1432.sql o shop-2026-11-10-1432.archive.gz.",
         measuring: "Midiendo…",
         clear_folder: "Borrar exports…",
         confirm_clear: |count, size| {
@@ -973,9 +974,10 @@ pub(super) const MESSAGES: Messages = Messages {
         cleared: |count, size| {
             format!("Se borraron {count} {} y se liberaron {size}.", if count == 1 { "export" } else { "exports" })
         },
-        client_tools: "Herramientas cliente de PostgreSQL",
-        client_tools_help: "DBForge encuentra el pg_dump y el psql más nuevos instalados. Elige otro si toma la \
-                            versión equivocada.",
+        client_tools: "Herramientas cliente",
+        client_tools_help: "DBForge encuentra la versión más nueva instalada de cada herramienta. Elige otra si \
+                            toma la versión equivocada. SQLite no necesita ninguna.",
+        mysql_tools: "MySQL y MariaDB",
         options: "Opciones",
         save_to: "Guardar en",
         file_name: "Nombre del archivo",
@@ -1000,6 +1002,29 @@ pub(super) const MESSAGES: Messages = Messages {
         clean_description: "Para que el archivo se restaure sobre una base de datos existente.",
         keep_owners: "Conservar propietarios y privilegios",
         keep_owners_description: "Al restaurar, ese servidor necesita los mismos roles.",
+        mysql_structure_description: "Tablas, vistas, rutinas, triggers…",
+        add_drop_table: "Agregar sentencias DROP TABLE",
+        add_drop_table_description: "Para que el archivo se restaure sobre una base de datos existente.",
+        single_transaction: "Instantánea consistente (una sola transacción, InnoDB)",
+        single_transaction_description: "Lee las tablas InnoDB tal como están en un momento, sin bloquearlas.",
+        routines: "Rutinas, triggers y eventos",
+        routines_description: "Procedimientos y funciones almacenados, triggers y eventos programados.",
+        collections: "Colecciones",
+        whole_database: "Toda la base de datos",
+        chosen_collections: "Colecciones elegidas",
+        whole_database_note: "Todas las colecciones y vistas, con sus índices.",
+        chosen_collections_note: |count| match count {
+            0 => "Marca las colecciones que quieres exportar.".to_owned(),
+            1 => "1 colección elegida.".to_owned(),
+            count => format!("{count} colecciones elegidas."),
+        },
+        loading_collections: "Cargando colecciones…",
+        no_collections: "Esta base de datos no tiene colecciones.",
+        format: "Formato",
+        sqlite_script: "Script SQL",
+        sqlite_script_description: "El esquema y los datos, como sentencias que cualquier SQLite ejecuta.",
+        sqlite_file: "Copia del archivo de la base de datos",
+        sqlite_file_description: "El archivo mismo, tal como está ahora; ábrelo como una conexión.",
         exporting_into: |database| format!("Exportando {database}…"),
         exported: |database, size, time| format!("{database} exportada: {size} en {time}"),
         export_stopped: "Exportación detenida. No se escribió ningún archivo.",
@@ -1009,14 +1034,33 @@ pub(super) const MESSAGES: Messages = Messages {
         cancel: "Cancelar",
         exporting: "Exportando…",
         export: "Exportar",
-        import_title: "Importar archivo SQL",
+        import_title: "Importar base de datos",
         file: "Archivo",
         file_placeholder: "Un archivo .sql, como lo escribe pg_dump",
+        file_placeholder_mysql: "Un archivo .sql, como lo escribe mysqldump",
+        file_placeholder_mongodb: "Un archivo .archive.gz, como lo escribe mongodump",
+        file_placeholder_sqlite: "Un script .sql de sentencias de SQLite",
         choose: "Elegir…",
         database_on: |connection| format!("Base de datos en {connection}"),
         import_note_before: "Se ejecuta en una sola transacción: si una sentencia falla, no cambia nada. Importa \
                              solo archivos de confianza, porque psql también puede ejecutar comandos de la shell con ",
         import_note_after: ".",
+        import_note_mysql: "Se detiene en la primera sentencia que falla; una base de datos que creó se elimina. \
+                            Importa solo archivos de confianza: pueden cambiar todo lo que puede el usuario de la \
+                            conexión.",
+        import_note_mongodb: "Restaura las colecciones del archivo en esta base de datos; si la restauración falla, \
+                              una base de datos que creó se elimina. Importa solo archivos de confianza.",
+        import_note_sqlite: "Se ejecuta en una sola transacción: si una sentencia falla, no cambia nada. Importa \
+                             solo archivos de confianza.",
+        drop_existing: "Eliminar primero las colecciones que ya existen",
+        drop_existing_description: "Si no, la restauración se detiene en el primer documento cuyo _id ya existe, \
+             y no se restaura nada de lo que viene después.",
+        restore_into: "Restaurar en",
+        into_this_file: "En el archivo de esta conexión",
+        into_new_file: "En un archivo nuevo",
+        new_file_placeholder: "Elige dónde crear el archivo nuevo",
+        into_this_file_note: "Agrega las tablas y filas del script a la base de datos que abre esta conexión.",
+        into_new_file_note: "Crea un archivo de base de datos nuevo; si la restauración falla, no queda nada.",
         confirm_import: |connection, tag| format!("{connection} tiene la etiqueta {tag}"),
         confirm_import_detail: |tag| {
             format!("El archivo va a cambiar datos ahí. Pulsa Importar en {tag} para continuar.")
@@ -1027,6 +1071,10 @@ pub(super) const MESSAGES: Messages = Messages {
         skipped_extensions: |names| format!("Se omitieron extensiones que este servidor no tiene: {names}"),
         import_stopped: "Importación detenida. No se cambió nada.",
         import_failed: "La importación falló. No se cambió nada.",
+        import_stopped_partial: "Importación detenida. Una base de datos que creó se eliminó; una existente \
+                                 conserva lo que se ejecutó antes.",
+        import_failed_partial: "La importación falló. Una base de datos que creó se eliminó; una existente \
+                                conserva lo que se ejecutó antes del error.",
         importing: "Importando…",
         import_into: |tag| format!("Importar en {tag}"),
         import: "Importar",
@@ -1069,7 +1117,7 @@ pub(super) const MESSAGES: Messages = Messages {
                 if token { ", con su token" } else { "" }
             )
         },
-        part_tools: "pg_dump y psql",
+        part_tools: "Herramientas cliente de bases de datos",
         part_tools_detail: |count| format!("{count} elegidos; solo se conservan los que existen en este equipo"),
         not_in_file: "No viene en este archivo",
         import_button: "Importar",
@@ -1098,6 +1146,42 @@ pub(super) const MESSAGES: Messages = Messages {
         saved_approval_note: "No cambia nada hasta que lo apruebes. Si lo rechazas, el agente sabrá que no se \
                               cambió nada.",
         approve_change: "Aprobar",
+        dump_export_title: "¿Aprobar la copia de seguridad de un agente?",
+        dump_import_title: "¿Aprobar la restauración de un agente?",
+        dump_export_who: |agent, database, connection| {
+            format!("{agent} quiere hacer una copia de seguridad de {database} en {connection}:")
+        },
+        dump_import_who: |agent, file, database, connection| {
+            format!("{agent} quiere restaurar {file} en {database} de {connection}:")
+        },
+        dump_file: "Archivo",
+        dump_in_exports_folder: |file| format!("{file}, en tu carpeta de exportaciones"),
+        dump_options: "Opciones",
+        dump_collections: |names| format!("Colecciones: {names}"),
+        dump_restore_existing: |database| {
+            format!("Esto cambia datos en {database}, que ya existe: los objetos que tiene pueden reemplazarse.")
+        },
+        dump_restore_new: |database| format!("{database} aún no existe: la restauración la crea."),
+        dump_restore_unknown: |database| {
+            format!("Esto cambia datos en {database}. Si ya existe, los objetos que tiene pueden reemplazarse.")
+        },
+        dump_export_note: "No se ejecuta nada hasta que lo apruebes. La copia contiene cada fila que abarca. Si \
+                           la rechazas, el agente sabrá que no se ejecutó nada.",
+        dump_import_note: "No se ejecuta nada hasta que lo apruebes. Si la rechazas, el agente sabrá que no se \
+                           ejecutó nada.",
+        conn_approval_title: "¿Aprobar el cambio de un agente en tus conexiones?",
+        conn_create_who: |agent, name| format!("{agent} quiere crear la conexión “{name}”:"),
+        conn_update_who: |agent, name| format!("{agent} quiere editar la conexión “{name}”:"),
+        conn_delete_who: |agent, name| format!("{agent} quiere eliminar la conexión “{name}”:"),
+        conn_keep_secret: "Vacío conserva el actual",
+        conn_optional: "Opcional",
+        conn_retype_secret: "Obligatorio: ahora apunta a otro sitio",
+        conn_ssh_port: "Puerto SSH",
+        conn_yes: "Sí",
+        conn_no: "No",
+        conn_approval_note: "No cambia nada hasta que lo apruebes. Lo que escribas aquí se queda en DBForge: el \
+                             agente nunca lo ve.",
+        conn_delete_note: "No se elimina nada hasta que lo apruebes. Su contraseña guardada se elimina con ella.",
         decline: "Rechazar",
         close: "Cerrar",
         enable: "Permitir que agentes de IA usen DBForge",

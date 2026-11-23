@@ -27,6 +27,42 @@ pub struct McpMessages {
     pub saved_approval_note: &'static str,
     /// Approves a change to the saved queries, which runs nothing.
     pub approve_change: &'static str,
+    // The approval dialog, for a backup or restore of a database
+    pub dump_export_title: &'static str,
+    pub dump_import_title: &'static str,
+    /// The agent, the database, then the connection's name.
+    pub dump_export_who: fn(&str, &str, &str) -> String,
+    /// The agent, the export's file, the database, then the connection's name.
+    pub dump_import_who: fn(&str, &str, &str, &str) -> String,
+    pub dump_file: &'static str,
+    /// Where the file is: the exports folder.
+    pub dump_in_exports_folder: fn(&str) -> String,
+    pub dump_options: &'static str,
+    /// MongoDB: chosen collections, by name.
+    pub dump_collections: fn(&str) -> String,
+    /// A restore's warning: the database exists, doesn't, or couldn't be told.
+    pub dump_restore_existing: fn(&str) -> String,
+    pub dump_restore_new: fn(&str) -> String,
+    pub dump_restore_unknown: fn(&str) -> String,
+    pub dump_export_note: &'static str,
+    pub dump_import_note: &'static str,
+    // The approval dialog, for a change to the saved connections
+    pub conn_approval_title: &'static str,
+    /// The agent, then the connection's name.
+    pub conn_create_who: fn(&str, &str) -> String,
+    pub conn_update_who: fn(&str, &str) -> String,
+    pub conn_delete_who: fn(&str, &str) -> String,
+    /// What a secret field left empty does on an update.
+    pub conn_keep_secret: &'static str,
+    /// A secret field of a new connection, which may stay empty.
+    pub conn_optional: &'static str,
+    /// A secret an edit pointing the connection elsewhere needs typed again: the saved one isn't carried there.
+    pub conn_retype_secret: &'static str,
+    pub conn_ssh_port: &'static str,
+    pub conn_yes: &'static str,
+    pub conn_no: &'static str,
+    pub conn_approval_note: &'static str,
+    pub conn_delete_note: &'static str,
     pub decline: &'static str,
     /// The dialog's close button, which declines.
     pub close: &'static str,

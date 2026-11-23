@@ -135,9 +135,9 @@ pub struct Messages {
     pub export_menu: &'static str,
     /// A table's menu: import a file's rows into it.
     pub import_menu: &'static str,
-    /// A database's menu, where the engine has pg_dump and psql: dump it to a file, and restore one.
+    /// A database's menu (a SQLite connection's), where the engine has dumps: write it to a file, and restore one.
     pub export_database: &'static str,
-    pub import_sql_file: &'static str,
+    pub import_database: &'static str,
     // Toolbar
     pub no_connection: &'static str,
     pub search_everywhere: &'static str,
@@ -183,7 +183,7 @@ pub struct Messages {
     pub export: ExportMessages,
     /// Importing a file's rows into a table.
     pub import: ImportMessages,
-    /// A whole database to a .sql file with pg_dump and back with psql, and where exports go.
+    /// A whole database to a file and back, and where exports go.
     pub dump: DumpMessages,
     /// The settings' backup of DBForge's configuration.
     pub backup: BackupMessages,

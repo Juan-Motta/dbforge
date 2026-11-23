@@ -1,6 +1,6 @@
 //! What the core tells the UI while it works: progress of long jobs, each
 //! statement as it is logged, the MCP approvals waiting on the user, and the
-//! agents' changes to the saved queries. The UI implements [`Events`] and gets
+//! agents' changes to the saved queries and connections. The UI implements [`Events`] and gets
 //! each one as it happens, from any thread.
 
 use crate::credentials::SwitchProgress;
@@ -32,6 +32,10 @@ pub enum Event {
     /// An agent created, changed, deleted or ran a saved query: the list
     /// ([`crate::saved_queries::commands::list_saved_queries`]) has changed.
     SavedQueriesChanged,
+    /// An agent created, changed or deleted (`deleted`) connection `id`
+    /// once the user approved: the list of connections has changed, and a
+    /// deleted one's tabs close.
+    ConnectionsChanged { id: String, deleted: bool },
 }
 
 /// Where the core sends its events: the UI.

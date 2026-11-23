@@ -71,9 +71,17 @@ pub fn mcp_agents(registry: &AgentRegistry, sessions: &SessionFile) -> Vec<Agent
     agents::merge(registry.seen(), sessions.agents())
 }
 
-/// The user's answer to an agent's change; false when it had already timed out.
-pub fn answer_mcp_approval(approvals: &super::approvals::Approvals, id: String, approved: bool) -> bool {
-    approvals.answer(&id, approved)
+/// The user's answer to an agent's change; false when it had already timed
+/// out. `secrets` are what the user typed approving a connection's change
+/// (its password, SSH secret, a new one's agent access); they go to the tool
+/// that asked only, never to the agent, and any other request drops them.
+pub fn answer_mcp_approval(
+    approvals: &super::approvals::Approvals,
+    id: String,
+    approved: bool,
+    secrets: Option<super::approvals::ApprovalSecrets>,
+) -> bool {
+    approvals.answer_with(&id, approved, secrets)
 }
 
 #[cfg(test)]

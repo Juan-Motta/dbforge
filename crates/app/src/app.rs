@@ -60,6 +60,7 @@ pub fn run() -> i32 {
     Application::new().with_assets(Assets).run(move |cx: &mut App| {
         cx.set_global(Backend::new(core));
         cx.set_global(preferences);
+        crate::dump::ExportFolder::keep_core_in_sync(cx);
         EventHub::start(received, cx);
         // Before the hub forwards anything, so an agent's request sent while the window opens waits for it.
         Approvals::start(cx);

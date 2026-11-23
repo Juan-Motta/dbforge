@@ -9,6 +9,8 @@ mod agents;
 mod approvals;
 pub mod bridge;
 pub mod commands;
+mod connections;
+mod dumps;
 mod saved;
 mod server;
 mod sessions;
@@ -18,7 +20,8 @@ mod tools;
 
 pub use agents::{AgentRegistry, AgentSeen};
 pub use approvals::{
-    ApprovalRequest, ApprovalSubject, Approvals, DraftScope, SavedQueryChange, SavedQueryDraft, SavedQueryField,
+    Answer, ApprovalRequest, ApprovalSecrets, ApprovalSubject, Approvals, ConnectionChange, ConnectionField,
+    DraftScope, DumpAction, DumpApproval, SavedQueryChange, SavedQueryDraft, SavedQueryField, SecretFields,
 };
 pub use server::{McpServer, Status};
 pub use sessions::SessionFile;

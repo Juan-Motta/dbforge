@@ -2,16 +2,16 @@
 //! `ExportFolderUsage.tsx`: where database exports go (and back to the
 //! default), how much the exports there take and deleting them (the first
 //! press asks, with the count and size; the second deletes, only files
-//! DBForge named), and which pg_dump and psql run.
+//! DBForge named), and which client tools run, grouped by engine (SQLite needs none).
 
 use crate::ui::Ellipsis;
-use dbforge_core::dump::{ExportFiles, clear_export_folder, export_folder_usage};
+use dbforge_core::dump::{DumpEngine, ExportFiles, clear_export_folder, export_folder_usage};
 use gpui::{
-    AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
+    AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{ExportFolder, ToolRow};
+use super::{ExportFolder, ToolRow, tools_title};
 use crate::backend::Backend;
 use crate::i18n::{DumpMessages, Translate};
 use crate::preferences::Preferences;
@@ -30,8 +30,14 @@ enum Usage {
     Failed(String),
 }
 
+/// An engine's client tools, export's first.
+struct ToolGroup {
+    engine: DumpEngine,
+    rows: Vec<Entity<ToolRow>>,
+}
+
 pub struct ExportSettings {
-    tools: [Entity<ToolRow>; 2],
+    tools: Vec<ToolGroup>,
     usage: Usage,
     /// The folder the usage is of; a new one is measured afresh.
     measured: Option<String>,
@@ -41,7 +47,14 @@ pub struct ExportSettings {
 
 impl ExportSettings {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let tools = [cx.new(|cx| ToolRow::new("pg_dump", cx)), cx.new(|cx| ToolRow::new("psql", cx))];
+        let tools = DumpEngine::ALL
+            .into_iter()
+            .filter(|engine| !engine.tools().is_empty())
+            .map(|engine| ToolGroup {
+                engine,
+                rows: engine.tools().iter().map(|&name| cx.new(|cx| ToolRow::new(name, cx))).collect(),
+            })
+            .collect();
         let subscriptions = vec![cx.observe_global::<Preferences>(|this, cx| this.measure(false, cx))];
         let mut settings =
             Self { tools, usage: Usage::Measuring, measured: None, request: 0, _subscriptions: subscriptions };
@@ -231,11 +244,53 @@ impl Render for ExportSettings {
                     .children(usage)
                     .child(note(&theme, m.export_files_help)),
             )
-            .child(
-                form_section(&theme, m.client_tools)
-                    .child(self.tools[0].clone())
-                    .child(self.tools[1].clone())
-                    .child(note(&theme, m.client_tools_help)),
-            )
+            .child(form_section(&theme, m.client_tools).child(note(&theme, m.client_tools_help)).children(
+                self.tools.iter().map(|group| {
+                    div()
+                        .mt(px(6.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text3)
+                                .child(tools_title(group.engine, m)),
+                        )
+                        .children(group.rows.iter().cloned())
+                }),
+            ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+    use crate::test_support::{draw, setup};
+
+    #[gpui::test]
+    fn lists_each_engine_s_client_tools_under_its_name_and_none_for_sqlite(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let (settings, cx) = cx.add_window_view(|_, cx| ExportSettings::new(cx));
+        settings.read_with(cx, |settings, cx| {
+            let m = &cx.messages().dump;
+            let groups: Vec<(&str, Vec<&str>)> = settings
+                .tools
+                .iter()
+                .map(|group| (tools_title(group.engine, m), group.rows.iter().map(|row| row.read(cx).name()).collect()))
+                .collect();
+            assert_eq!(
+                groups,
+                [
+                    ("PostgreSQL", vec!["pg_dump", "psql"]),
+                    ("MySQL and MariaDB", vec!["mysqldump", "mysql"]),
+                    ("MongoDB", vec!["mongodump", "mongorestore"]),
+                ]
+            );
+        });
+        draw(cx);
     }
 }

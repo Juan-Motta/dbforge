@@ -1,4 +1,4 @@
-//! A pg_dump or psql run as a dialog follows it: its job id while it runs
+//! An export or restore run as a dialog follows it: its job id while it runs
 //! (Stop cancels it by that id), when it started, and the last line the
 //! tool wrote, from the core's [`Event::DumpProgress`].
 

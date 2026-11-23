@@ -1,7 +1,7 @@
 //! DBForge's configuration as one JSON file, to move it to another
 //! installation or restore it: preferences, connections (with their passwords
 //! when the user includes them), their tags, the MCP server's settings and
-//! token, and the chosen pg_dump and psql. Secrets are in plain text: the user
+//! token, and the chosen dump tools (pg_dump, mysqldump, …). Secrets are in plain text: the user
 //! chose that, and the file is written readable by its owner only.
 //!
 //! Importing merges, never deletes: connections and tags with an id the

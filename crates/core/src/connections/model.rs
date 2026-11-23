@@ -29,6 +29,19 @@ impl Engine {
             Engine::Cosmosdb => "Azure Cosmos DB",
         }
     }
+
+    /// The server's port when none is given; 0 for a file.
+    pub fn default_port(self) -> u16 {
+        match self {
+            Engine::Postgres => 5432,
+            Engine::Mysql | Engine::Mariadb => 3306,
+            Engine::Sqlite => 0,
+            Engine::Sqlserver => 1433,
+            Engine::Mongodb => 27017,
+            Engine::Cosmosdb => 443,
+            Engine::Redis => 6379,
+        }
+    }
 }
 
 /// What an AI agent connected over MCP may do with a connection.

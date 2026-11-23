@@ -15,7 +15,7 @@ mod session;
 mod shell;
 mod structure;
 
-pub use admin::{create_object, drop_database};
+pub use admin::{create_object, database_exists, drop_database};
 pub use edit::{apply_changes, import_rows, preview_changes};
 pub use explain::explain;
 pub use read_only::run_read_only;
@@ -442,7 +442,7 @@ fn pretty(value: &Bson, depth: usize) -> String {
 /// `docker run -d --name dbforge-test-mongo -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=dbforge -p 57017:27017 mongo:8`
 /// Each test creates its own database.
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod tests {
     use crate::connections::transport::{Ssl, SslMode};
     use mongodb::bson::oid::ObjectId;
     use mongodb::bson::{DateTime, Decimal128};

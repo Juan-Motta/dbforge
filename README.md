@@ -50,10 +50,10 @@
 | Database | What you get |
 | --- | --- |
 | **PostgreSQL** | Everything: the console with explain plans, table editing, structure and DDL, the ER diagram, and dumps and restores with `pg_dump` and `psql` |
-| **MySQL** and **MariaDB** | The console, table editing, structure, DDL and the ER diagram |
-| **SQL Server** | The same |
-| **SQLite** | The same, on a database file |
-| **MongoDB** | Collections as rows or as JSON documents, and a console that speaks mongosh |
+| **MySQL** and **MariaDB** | The console, table editing, structure, DDL and the ER diagram, and dumps and restores with `mysqldump` and `mysql` (or `mariadb-dump` and `mariadb`) |
+| **SQL Server** | The console, table editing, structure, DDL and the ER diagram |
+| **SQLite** | The same, on a database file, and dumps to a SQL script or a copy of the file and restores, built in |
+| **MongoDB** | Collections as rows or as JSON documents, a console that speaks mongosh, and dumps and restores with `mongodump` and `mongorestore` |
 | **Cosmos DB** | Containers as rows or as JSON items, and a SQL console per container |
 | **Redis** | A key browser by pattern and type, each type's editor, and a redis-cli console |
 
@@ -115,13 +115,17 @@ Filter and order rows, edit cells in place, add, duplicate and delete rows, and 
   </tr>
 </table>
 
-Query history, a log of every statement DBForge sends, PostgreSQL dumps and restores, a backup of your whole setup, and an MCP server so AI agents can read, or with your approval change, the connections you allow.
+Query history, a log of every statement DBForge sends, dumps and restores of whole databases (PostgreSQL, MySQL, MariaDB, MongoDB and SQLite), a backup of your whole setup, and an MCP server so AI agents can read, or with your approval change, the connections you allow.
 
 ### Use it from an AI agent
 
 Turn on **Settings → Agents (MCP)**, pick your agent and copy its command. By default the agent starts DBForge's own executable with `--mcp-stdio` and keeps it for its whole session: it reconnects by itself when DBForge opens or restarts, works the same on macOS, Windows and Linux, and its settings hold no token. While DBForge is closed, a tool call answers that the app needs to be open. Agents that only take HTTP servers can use `http://127.0.0.1:7419/mcp` with the token instead.
 
 Agents also reach your saved queries on the connections they may use: they list them, run them with values for their `:name` parameters, and create, edit or delete them once you approve each change in DBForge.
+
+They can also back up a whole database (`export_database`) and restore one of those backups (`import_database`, with `list_exports` to see them), for every engine with dumps. Backups go only into DBForge's exports folder, under a name DBForge gives them, and restores read only from there. A backup needs the connection's Read access, a restore Read and write; DBForge asks you to approve every one first, showing the database, the connection, the file and the options.
+
+Agents can manage connections too: `connection_details` shows a connection's settings without any secret, and `save_connection` and `delete_connection` create, edit or delete one, each only after you approve it in DBForge. Agents never send or see a password: the approval dialog has the password fields (and the SSH password or key passphrase when the tunnel needs one) for you to fill in, and on an edit an empty one keeps what is saved. Agents can't change what agents may do with a connection or its tag; for a new one you choose its agent access in the dialog (Read only unless you change it). They reach only the connections they may use, and a connection with a console's transaction open is neither edited nor deleted.
 
 ## Build from source
 

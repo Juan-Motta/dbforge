@@ -45,15 +45,7 @@ pub fn is_account(engine: Engine) -> bool {
 
 /// The server's port when the user gives none; 0 for a file.
 pub fn default_port(engine: Engine) -> u16 {
-    match engine {
-        Engine::Postgres => 5432,
-        Engine::Mysql | Engine::Mariadb => 3306,
-        Engine::Sqlite => 0,
-        Engine::Sqlserver => 1433,
-        Engine::Mongodb => 27017,
-        Engine::Cosmosdb => 443,
-        Engine::Redis => 6379,
-    }
+    engine.default_port()
 }
 
 /// Listed under "Relational" rather than "NoSQL".
