@@ -593,7 +593,7 @@ impl Explorer {
                             });
                         });
                     }
-                    NodeCommand::ExportDatabase | NodeCommand::ImportSqlFile => {
+                    NodeCommand::ExportDatabase | NodeCommand::ImportDatabase => {
                         let _ = this.update(cx, |this, cx| {
                             let Some((connection, _)) = this.connection(&node.connection_id) else { return };
                             let mode = if command == NodeCommand::ExportDatabase {

@@ -50,10 +50,10 @@
 | Database | What you get |
 | --- | --- |
 | **PostgreSQL** | Everything: the console with explain plans, table editing, structure and DDL, the ER diagram, and dumps and restores with `pg_dump` and `psql` |
-| **MySQL** and **MariaDB** | The console, table editing, structure, DDL and the ER diagram |
-| **SQL Server** | The same |
-| **SQLite** | The same, on a database file |
-| **MongoDB** | Collections as rows or as JSON documents, and a console that speaks mongosh |
+| **MySQL** and **MariaDB** | The console, table editing, structure, DDL and the ER diagram, and dumps and restores with `mysqldump` and `mysql` (or `mariadb-dump` and `mariadb`) |
+| **SQL Server** | The console, table editing, structure, DDL and the ER diagram |
+| **SQLite** | The same, on a database file, and dumps to a SQL script or a copy of the file and restores, built in |
+| **MongoDB** | Collections as rows or as JSON documents, a console that speaks mongosh, and dumps and restores with `mongodump` and `mongorestore` |
 | **Cosmos DB** | Containers as rows or as JSON items, and a SQL console per container |
 | **Redis** | A key browser by pattern and type, each type's editor, and a redis-cli console |
 
@@ -115,7 +115,7 @@ Filter and order rows, edit cells in place, add, duplicate and delete rows, and 
   </tr>
 </table>
 
-Query history, a log of every statement DBForge sends, PostgreSQL dumps and restores, a backup of your whole setup, and an MCP server so AI agents can read, or with your approval change, the connections you allow.
+Query history, a log of every statement DBForge sends, dumps and restores of whole databases (PostgreSQL, MySQL, MariaDB, MongoDB and SQLite), a backup of your whole setup, and an MCP server so AI agents can read, or with your approval change, the connections you allow.
 
 ### Use it from an AI agent
 

@@ -32,7 +32,7 @@ pub(super) const MESSAGES: Messages = Messages {
     export_menu: "Export…",
     import_menu: "Import rows…",
     export_database: "Export database…",
-    import_sql_file: "Import SQL file…",
+    import_database: "Import…",
     no_connection: "No connection selected",
     search_everywhere: "Search everywhere…",
     settings: "Settings",
@@ -927,7 +927,8 @@ pub(super) const MESSAGES: Messages = Messages {
                 format!("{count} {} · {size}", if count == 1 { "export" } else { "exports" })
             }
         },
-        export_files_help: "Only files DBForge named, like shop-2026-11-10-1432.sql, count and are deleted.",
+        export_files_help: "Only files DBForge named, like shop-2026-11-10-1432.sql or \
+                            shop-2026-11-10-1432.archive.gz, count and are deleted.",
         measuring: "Measuring…",
         clear_folder: "Delete exports…",
         confirm_clear: |count, size| {
@@ -937,9 +938,10 @@ pub(super) const MESSAGES: Messages = Messages {
         cleared: |count, size| {
             format!("Deleted {count} {}, freeing {size}.", if count == 1 { "export" } else { "exports" })
         },
-        client_tools: "PostgreSQL client tools",
-        client_tools_help: "DBForge finds the newest pg_dump and psql installed. Choose another one when it picks \
-                            the wrong version.",
+        client_tools: "Client tools",
+        client_tools_help: "DBForge finds the newest version of each tool installed. Choose another one when it \
+                            picks the wrong version. SQLite needs none.",
+        mysql_tools: "MySQL and MariaDB",
         options: "Options",
         save_to: "Save to",
         file_name: "File name",
@@ -964,6 +966,29 @@ pub(super) const MESSAGES: Messages = Messages {
         clean_description: "So the file restores over an existing database.",
         keep_owners: "Keep owners and privileges",
         keep_owners_description: "Restoring then needs the same roles on that server.",
+        mysql_structure_description: "Tables, views, routines, triggers…",
+        add_drop_table: "Add DROP TABLE statements",
+        add_drop_table_description: "So the file restores over an existing database.",
+        single_transaction: "Consistent snapshot (single transaction, InnoDB)",
+        single_transaction_description: "Reads InnoDB tables as of one moment, without locking them.",
+        routines: "Routines, triggers and events",
+        routines_description: "Stored procedures and functions, triggers and scheduled events.",
+        collections: "Collections",
+        whole_database: "Whole database",
+        chosen_collections: "Chosen collections",
+        whole_database_note: "Every collection and view, with their indexes.",
+        chosen_collections_note: |count| match count {
+            0 => "Tick the collections to export.".to_owned(),
+            1 => "1 collection chosen.".to_owned(),
+            count => format!("{count} collections chosen."),
+        },
+        loading_collections: "Loading collections…",
+        no_collections: "This database has no collections.",
+        format: "Format",
+        sqlite_script: "SQL script",
+        sqlite_script_description: "The schema and the data, as statements any SQLite runs.",
+        sqlite_file: "Copy of the database file",
+        sqlite_file_description: "The file itself, as it is now; open it as a connection.",
         exporting_into: |database| format!("Exporting {database}…"),
         exported: |database, size, time| format!("Exported {database}: {size} in {time}"),
         export_stopped: "Export stopped. No file was written.",
@@ -973,14 +998,31 @@ pub(super) const MESSAGES: Messages = Messages {
         cancel: "Cancel",
         exporting: "Exporting…",
         export: "Export",
-        import_title: "Import SQL file",
+        import_title: "Import database",
         file: "File",
         file_placeholder: "A .sql file, as pg_dump writes it",
+        file_placeholder_mysql: "A .sql file, as mysqldump writes it",
+        file_placeholder_mongodb: "A .archive.gz file, as mongodump writes it",
+        file_placeholder_sqlite: "A .sql script of SQLite statements",
         choose: "Choose…",
         database_on: |connection| format!("Database on {connection}"),
         import_note_before: "Runs in one transaction: if any statement fails, nothing changes. Import only files you \
                              trust, since psql can also run shell commands with ",
         import_note_after: ".",
+        import_note_mysql: "Stops at the first statement that fails; a database it created is removed again. \
+                            Import only files you trust: they can change anything the connection’s user can.",
+        import_note_mongodb: "Restores the archive’s collections into this database; a database it created is \
+                              removed again if the restore fails. Import only files you trust.",
+        import_note_sqlite: "Runs in one transaction: if any statement fails, nothing changes. Import only files \
+                             you trust.",
+        drop_existing: "Drop collections that already exist first",
+        drop_existing_description: "Otherwise documents whose _id is already there are left as they are.",
+        restore_into: "Restore into",
+        into_this_file: "Into this connection’s file",
+        into_new_file: "Into a new file",
+        new_file_placeholder: "Choose where to create the new file",
+        into_this_file_note: "Adds the script’s tables and rows to the database this connection opens.",
+        into_new_file_note: "Creates a new database file; nothing is left behind if the restore fails.",
         confirm_import: |connection, tag| format!("{connection} is tagged {tag}"),
         confirm_import_detail: |tag| format!("The file will change data there. Press Import into {tag} to go ahead."),
         importing_into: |database| format!("Importing into {database}…"),
@@ -989,6 +1031,10 @@ pub(super) const MESSAGES: Messages = Messages {
         skipped_extensions: |names| format!("Left out extensions this server doesn’t have: {names}"),
         import_stopped: "Import stopped. Nothing was changed.",
         import_failed: "Import failed. Nothing was changed.",
+        import_stopped_partial: "Import stopped. A database it created was removed; an existing one keeps what \
+                                 ran before.",
+        import_failed_partial: "Import failed. A database it created was removed; an existing one keeps what ran \
+                                before the error.",
         importing: "Importing…",
         import_into: |tag| format!("Import into {tag}"),
         import: "Import",
@@ -1032,7 +1078,7 @@ pub(super) const MESSAGES: Messages = Messages {
                 if token { ", with its token" } else { "" }
             )
         },
-        part_tools: "pg_dump and psql",
+        part_tools: "Database client tools",
         part_tools_detail: |count| format!("{count} chosen; only those found on this computer are kept"),
         not_in_file: "Not in this file",
         import_button: "Import",

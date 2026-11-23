@@ -283,8 +283,8 @@ impl Shell {
         self.show_dialog(dialog, vec![imported], window, cx);
     }
 
-    /// A database's export with pg_dump, or a restore into it with psql; a
-    /// restore lists the database's node (`node_id`) again.
+    /// A database's export to a file, or a restore into it, with its engine's
+    /// tools; a restore lists the database's node (`node_id`) again.
     pub fn open_dump_dialog(
         &mut self,
         mode: DumpMode,

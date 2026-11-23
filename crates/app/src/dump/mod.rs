@@ -1,9 +1,12 @@
-//! A whole PostgreSQL database to a .sql file with pg_dump and back with
-//! psql, as the former web UI's `features/dump`: the two dialogs a database's menu
-//! opens, the folder exports go to and the client tools that run, both also
-//! in Settings › Export and import. Restoring into a connection whose tag
-//! asks first (PROD) warns on the first press and runs on the second.
+//! A whole database to a file and back, as the former web UI's `features/dump`:
+//! PostgreSQL with pg_dump and psql, MySQL and MariaDB with mysqldump and
+//! mysql, MongoDB with mongodump and mongorestore, SQLite built in. The two
+//! dialogs a database's menu opens (a SQLite connection's), the folder exports
+//! go to and the client tools that run, both also in Settings › Export and
+//! import. Restoring into a connection whose tag asks first (PROD) warns on
+//! the first press and runs on the second.
 
+mod choices;
 mod dialogs;
 mod folder;
 mod job;
@@ -11,8 +14,7 @@ mod settings;
 mod tool_row;
 
 use chrono::{Datelike, NaiveDateTime, Timelike};
-use dbforge_core::connections::model::Engine;
-pub use dbforge_core::dump::Content;
+pub use dbforge_core::dump::{Content, DumpEngine};
 
 pub use dialogs::{DumpEvent, ExportDatabaseDialog, ImportDatabaseDialog, key_bindings};
 pub use folder::ExportFolder;
@@ -29,11 +31,6 @@ pub enum DumpMode {
     Import,
 }
 
-/// Whether `engine`'s databases are dumped and restored with PostgreSQL's tools.
-pub fn dumps(engine: Engine) -> bool {
-    engine == Engine::Postgres
-}
-
 /// What a dump can hold, as the export dialog offers it, with its icon.
 pub fn contents(m: &DumpMessages) -> [(Content, &'static str, &'static str, &'static str); 3] {
     [
@@ -41,6 +38,24 @@ pub fn contents(m: &DumpMessages) -> [(Content, &'static str, &'static str, &'st
         (Content::Structure, m.structure_label, m.structure_description, "schema"),
         (Content::Data, m.data_label, m.data_description, "table"),
     ]
+}
+
+/// The title settings group `engine`'s tools under.
+pub fn tools_title(engine: DumpEngine, m: &DumpMessages) -> &'static str {
+    match engine {
+        DumpEngine::Mysql => m.mysql_tools,
+        _ => engine.label(),
+    }
+}
+
+/// What the restore dialog says before a file is chosen: the kind of file `engine` restores.
+pub fn file_placeholder(engine: DumpEngine, m: &DumpMessages) -> &'static str {
+    match engine {
+        DumpEngine::Postgres => m.file_placeholder,
+        DumpEngine::Mysql => m.file_placeholder_mysql,
+        DumpEngine::Mongodb => m.file_placeholder_mongodb,
+        DumpEngine::Sqlite => m.file_placeholder_sqlite,
+    }
 }
 
 /// What restoring into `name` will do, given the server's databases (`None` until they are read).
@@ -65,14 +80,15 @@ pub fn default_export_folder(documents: &str) -> String {
     join_path(documents, "DBForge")
 }
 
-/// A file name for a database's export, unique to the minute: `shop-2026-11-10-1432.sql`.
-pub fn export_file_name(database: &str, at: NaiveDateTime) -> String {
+/// A file name for a database's export, unique to the minute, with the
+/// engine's `extension`: `shop-2026-11-10-1432.sql`, `….archive.gz`.
+pub fn export_file_name(database: &str, at: NaiveDateTime, extension: &str) -> String {
     // Characters a file name can't hold on any system become dashes.
     let safe: String = database
         .chars()
         .map(|c| if matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '-' } else { c })
         .collect();
-    format!("{safe}-{}-{:02}-{:02}-{:02}{:02}.sql", at.year(), at.month(), at.day(), at.hour(), at.minute())
+    format!("{safe}-{}-{:02}-{:02}-{:02}{:02}{extension}", at.year(), at.month(), at.day(), at.hour(), at.minute())
 }
 
 /// The last part of a path, for a result line.
@@ -133,8 +149,12 @@ mod tests {
 
     #[test]
     fn names_an_export_after_its_database_and_the_minute_without_characters_files_can_t_hold() {
-        assert_eq!(export_file_name("shop", at(2026, 11, 10, 14, 32)), "shop-2026-11-10-1432.sql");
-        assert_eq!(export_file_name("a/b:c", at(2026, 1, 2, 3, 4)), "a-b-c-2026-01-02-0304.sql");
+        assert_eq!(export_file_name("shop", at(2026, 11, 10, 14, 32), ".sql"), "shop-2026-11-10-1432.sql");
+        assert_eq!(export_file_name("a/b:c", at(2026, 1, 2, 3, 4), ".sql"), "a-b-c-2026-01-02-0304.sql");
+        assert_eq!(
+            export_file_name("shop", at(2026, 11, 10, 14, 32), ".archive.gz"),
+            "shop-2026-11-10-1432.archive.gz"
+        );
     }
 
     #[test]
@@ -150,10 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn dumps_only_postgresql_and_names_the_last_part_of_a_path() {
-        assert!(dumps(Engine::Postgres));
-        assert!(!dumps(Engine::Mysql));
-        assert!(!dumps(Engine::Sqlite));
+    fn names_the_last_part_of_a_path() {
         assert_eq!(file_name_of("/tmp/out/shop.sql"), "shop.sql");
         assert_eq!(file_name_of("C:\\out\\shop.sql"), "shop.sql");
     }
