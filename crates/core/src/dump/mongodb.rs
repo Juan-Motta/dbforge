@@ -559,9 +559,9 @@ mod tests {
         assert!(error.to_string().contains("isn't a MongoDB archive"), "{error}");
 
         // Stopped before mongorestore started: nothing is created.
-        database("dbforge_dump_source", &[("items", vec![doc! { "_id": 1 }])]).await;
+        database("dbforge_dump_stopped_source", &[("items", vec![doc! { "_id": 1 }])]).await;
         let archive = dir.path().join("source.archive.gz");
-        export_to(PASSWORD, "dbforge_dump_source", &[], &archive).await.unwrap();
+        export_to(PASSWORD, "dbforge_dump_stopped_source", &[], &archive).await.unwrap();
         let _ = driver::drop_database(&local(), PASSWORD, "dbforge_dump_twice").await;
         let stopped = CancellationToken::new();
         stopped.cancel();
@@ -570,6 +570,6 @@ mod tests {
             "Cancelled."
         );
         assert!(!driver::database_exists(&local(), PASSWORD, "dbforge_dump_twice").await.unwrap());
-        driver::drop_database(&local(), PASSWORD, "dbforge_dump_source").await.unwrap();
+        driver::drop_database(&local(), PASSWORD, "dbforge_dump_stopped_source").await.unwrap();
     }
 }
