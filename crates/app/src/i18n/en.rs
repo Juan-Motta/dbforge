@@ -1126,6 +1126,18 @@ pub(super) const MESSAGES: Messages = Messages {
         dump_export_note: "Nothing runs until you approve. The backup holds every row it covers. Declining tells \
                            the agent nothing ran.",
         dump_import_note: "Nothing runs until you approve. Declining tells the agent nothing ran.",
+        conn_approval_title: "Approve an agent’s change to your connections?",
+        conn_create_who: |agent, name| format!("{agent} wants to create the connection “{name}”:"),
+        conn_update_who: |agent, name| format!("{agent} wants to edit the connection “{name}”:"),
+        conn_delete_who: |agent, name| format!("{agent} wants to delete the connection “{name}”:"),
+        conn_keep_secret: "Empty keeps the current one",
+        conn_optional: "Optional",
+        conn_ssh_port: "SSH port",
+        conn_yes: "Yes",
+        conn_no: "No",
+        conn_approval_note: "Nothing changes until you approve. What you type here stays in DBForge: the agent never \
+                             sees it.",
+        conn_delete_note: "Nothing is deleted until you approve. Its saved password is deleted with it.",
         decline: "Decline",
         close: "Close",
         enable: "Let AI agents use DBForge",

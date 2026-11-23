@@ -46,6 +46,21 @@ pub struct McpMessages {
     pub dump_restore_unknown: fn(&str) -> String,
     pub dump_export_note: &'static str,
     pub dump_import_note: &'static str,
+    // The approval dialog, for a change to the saved connections
+    pub conn_approval_title: &'static str,
+    /// The agent, then the connection's name.
+    pub conn_create_who: fn(&str, &str) -> String,
+    pub conn_update_who: fn(&str, &str) -> String,
+    pub conn_delete_who: fn(&str, &str) -> String,
+    /// What a secret field left empty does on an update.
+    pub conn_keep_secret: &'static str,
+    /// A secret field of a new connection, which may stay empty.
+    pub conn_optional: &'static str,
+    pub conn_ssh_port: &'static str,
+    pub conn_yes: &'static str,
+    pub conn_no: &'static str,
+    pub conn_approval_note: &'static str,
+    pub conn_delete_note: &'static str,
     pub decline: &'static str,
     /// The dialog's close button, which declines.
     pub close: &'static str,

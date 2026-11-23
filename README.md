@@ -125,6 +125,8 @@ Agents also reach your saved queries on the connections they may use: they list 
 
 They can also back up a whole database (`export_database`) and restore one of those backups (`import_database`, with `list_exports` to see them), for every engine with dumps. Backups go only into DBForge's exports folder, under a name DBForge gives them, and restores read only from there. A backup needs the connection's Read access, a restore Read and write; DBForge asks you to approve every one first, showing the database, the connection, the file and the options.
 
+Agents can manage connections too: `connection_details` shows a connection's settings without any secret, and `save_connection` and `delete_connection` create, edit or delete one, each only after you approve it in DBForge. Agents never send or see a password: the approval dialog has the password fields (and the SSH password or key passphrase when the tunnel needs one) for you to fill in, and on an edit an empty one keeps what is saved. Agents can't change what agents may do with a connection or its tag; for a new one you choose its agent access in the dialog (Read only unless you change it). They reach only the connections they may use, and a connection with a console's transaction open is neither edited nor deleted.
+
 ## Build from source
 
 DBForge is a native Rust app: its window is drawn with [GPUI](https://www.gpui.rs). You need Rust 1.90 or later

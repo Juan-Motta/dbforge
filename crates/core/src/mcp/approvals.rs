@@ -1,8 +1,14 @@
 //! Changes an agent asks to make that wait for the user: a statement on a
 //! connection whose tag asks before changes, every change to the saved
-//! queries, and every backup and restore of a database. The app shows what the change does and waits for the user to
+//! queries, every backup and restore of a database, and every change to the
+//! saved connections. The app shows what the change does and waits for the user to
 //! approve or decline it. Nothing happens until the user says yes; no answer
 //! within the wait is a no.
+//!
+//! A connection's change may need secrets (its password, its SSH password or
+//! key passphrase) that agents never send: the user types them in the dialog,
+//! and they come back with the answer ([`ApprovalSecrets`]) straight to the
+//! tool that asked, never to the agent, an event or the statement log.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -11,7 +17,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
-use crate::connections::model::Engine;
+use crate::connections::model::{AgentAccess, Connection, Engine};
+use crate::connections::transport::SshAuth;
 use crate::dump::DumpOptions;
 use crate::events::{Event, Events};
 
@@ -35,6 +42,7 @@ impl ApprovalRequest {
         match &self.subject {
             ApprovalSubject::Statement { connection_id, .. } => Some(connection_id),
             ApprovalSubject::Dump(dump) => Some(&dump.connection_id),
+            ApprovalSubject::Connection(change) => Some(change.connection_id()),
             ApprovalSubject::SavedQuery(_) => None,
         }
     }
@@ -58,6 +66,221 @@ pub enum ApprovalSubject {
     SavedQuery(Box<SavedQueryChange>),
     /// Backing up a database to the exports folder, or restoring an export into one.
     Dump(Box<DumpApproval>),
+    /// A connection to create, update or delete.
+    Connection(Box<ConnectionChange>),
+}
+
+/// A change an agent wants to make to the saved connections. It never holds
+/// a secret: the connections are as saved, without their passwords.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+// Kept boxed in `ApprovalSubject`, so the larger update costs nothing elsewhere.
+#[allow(clippy::large_enum_variant)]
+pub enum ConnectionChange {
+    /// A new connection; what agents may do with it is the user's choice in the dialog.
+    Create {
+        connection: Connection,
+    },
+    /// Connection `before` becoming `after`; its tag (by name) stays as it is.
+    Update {
+        before: Connection,
+        after: Connection,
+        tag: Option<String>,
+    },
+    Delete {
+        connection: Connection,
+        tag: Option<String>,
+    },
+}
+
+/// The secrets the dialog asks the user for, for a connection being saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SecretFields {
+    /// Its password (an account's key).
+    pub password: bool,
+    /// Its SSH password (`SshAuth::Password`) or key passphrase (`SshAuth::Key`).
+    pub ssh: Option<SshAuth>,
+}
+
+impl SecretFields {
+    /// What `connection` signs in with that DBForge keeps secret: a password
+    /// for every engine but a SQLite file, and the tunnel's password or key
+    /// passphrase when it goes through SSH without the system's agent.
+    pub fn of(connection: &Connection) -> Self {
+        let tunneled = connection.engine.tunnels() && connection.ssh.enabled;
+        Self {
+            password: connection.engine != Engine::Sqlite,
+            ssh: (tunneled && connection.ssh.auth != SshAuth::Agent).then_some(connection.ssh.auth),
+        }
+    }
+}
+
+impl ConnectionChange {
+    /// The connection changed: its id.
+    pub fn connection_id(&self) -> &str {
+        &self.connection().id
+    }
+
+    /// The connection as the dialog names it: as it is now, or as it will be when new.
+    pub fn connection(&self) -> &Connection {
+        match self {
+            Self::Create { connection } | Self::Delete { connection, .. } => connection,
+            Self::Update { before, .. } => before,
+        }
+    }
+
+    /// Its tag's name, if any; a new connection has none.
+    pub fn tag(&self) -> Option<&str> {
+        match self {
+            Self::Create { .. } => None,
+            Self::Update { tag, .. } | Self::Delete { tag, .. } => tag.as_deref(),
+        }
+    }
+
+    /// The fields an update changes, in the order the dialog lists them.
+    pub fn changed_fields(&self) -> Vec<ConnectionField> {
+        let Self::Update { before, after, .. } = self else {
+            return Vec::new();
+        };
+        ConnectionField::ALL.into_iter().filter(|field| field.differs(before, after)).collect()
+    }
+
+    /// The secrets the user may type: none for a delete. On an update they
+    /// are the new connection's, and one left empty keeps the saved one.
+    pub fn secrets(&self) -> SecretFields {
+        match self {
+            Self::Create { connection } | Self::Update { after: connection, .. } => SecretFields::of(connection),
+            Self::Delete { .. } => SecretFields::default(),
+        }
+    }
+}
+
+/// A field of a connection the dialog lists, besides its secrets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionField {
+    Name,
+    Engine,
+    Host,
+    Port,
+    Database,
+    Username,
+    Srv,
+    SslMode,
+    CaFile,
+    CertFile,
+    KeyFile,
+    Ssh,
+    SshHost,
+    SshPort,
+    SshUser,
+    SshAuth,
+    SshKeyFile,
+}
+
+impl ConnectionField {
+    pub const ALL: [ConnectionField; 17] = [
+        Self::Name,
+        Self::Engine,
+        Self::Host,
+        Self::Port,
+        Self::Database,
+        Self::Username,
+        Self::Srv,
+        Self::SslMode,
+        Self::CaFile,
+        Self::CertFile,
+        Self::KeyFile,
+        Self::Ssh,
+        Self::SshHost,
+        Self::SshPort,
+        Self::SshUser,
+        Self::SshAuth,
+        Self::SshKeyFile,
+    ];
+
+    /// Whether `before` and `after` differ in this field.
+    fn differs(self, before: &Connection, after: &Connection) -> bool {
+        match self {
+            Self::Name => before.name != after.name,
+            Self::Engine => before.engine != after.engine,
+            Self::Host => before.host != after.host,
+            Self::Port => before.port != after.port,
+            Self::Database => before.database != after.database,
+            Self::Username => before.username != after.username,
+            Self::Srv => before.srv != after.srv,
+            Self::SslMode => before.ssl.mode != after.ssl.mode,
+            Self::CaFile => before.ssl.ca_file != after.ssl.ca_file,
+            Self::CertFile => before.ssl.cert_file != after.ssl.cert_file,
+            Self::KeyFile => before.ssl.key_file != after.ssl.key_file,
+            Self::Ssh => before.ssh.enabled != after.ssh.enabled,
+            Self::SshHost => before.ssh.host != after.ssh.host,
+            Self::SshPort => before.ssh.port != after.ssh.port,
+            Self::SshUser => before.ssh.username != after.ssh.username,
+            Self::SshAuth => before.ssh.auth != after.ssh.auth,
+            Self::SshKeyFile => before.ssh.key_file != after.ssh.key_file,
+        }
+    }
+}
+
+/// What the user typed in a connection's approval: its secrets and, for a
+/// new connection, what agents may do with it. It reaches only the tool that
+/// asked: it is neither serialized nor printed, and its text is wiped when dropped.
+#[derive(Default)]
+pub struct ApprovalSecrets {
+    /// The password; `None` or empty keeps the saved one (none, for a new connection).
+    pub password: Option<String>,
+    /// The SSH password or key passphrase, kept the same way.
+    pub ssh_secret: Option<String>,
+    /// A new connection's agent access; Read only when not given.
+    pub agent_access: Option<AgentAccess>,
+}
+
+impl ApprovalSecrets {
+    /// The typed password, taken out; `None` when nothing was typed.
+    pub fn take_password(&mut self) -> Option<String> {
+        self.password.take().filter(|password| !password.is_empty())
+    }
+
+    /// The typed SSH password or passphrase, taken out; `None` when nothing was typed.
+    pub fn take_ssh_secret(&mut self) -> Option<String> {
+        self.ssh_secret.take().filter(|secret| !secret.is_empty())
+    }
+}
+
+impl std::fmt::Debug for ApprovalSecrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let typed = |secret: &Option<String>| if secret.is_some() { "<typed>" } else { "<none>" };
+        f.debug_struct("ApprovalSecrets")
+            .field("password", &typed(&self.password))
+            .field("ssh_secret", &typed(&self.ssh_secret))
+            .field("agent_access", &self.agent_access)
+            .finish()
+    }
+}
+
+impl Drop for ApprovalSecrets {
+    fn drop(&mut self) {
+        wipe(&mut self.password);
+        wipe(&mut self.ssh_secret);
+    }
+}
+
+/// Overwrites a secret's text before its memory is freed.
+pub fn wipe(secret: &mut Option<String>) {
+    if let Some(secret) = secret.take() {
+        let mut bytes = secret.into_bytes();
+        bytes.fill(0);
+        std::hint::black_box(&bytes);
+    }
+}
+
+/// The user's answer to a request.
+#[derive(Debug, Default)]
+pub struct Answer {
+    pub approved: bool,
+    /// What the user typed, for an approved connection change only.
+    pub secrets: Option<ApprovalSecrets>,
 }
 
 /// A backup or restore an agent wants to run.
@@ -188,10 +411,17 @@ impl SavedQueryField {
     }
 }
 
+/// A request waiting for its answer.
+struct Waiting {
+    answer: oneshot::Sender<Answer>,
+    /// A connection's change: the answer may bring secrets.
+    takes_secrets: bool,
+}
+
 /// Requests waiting for an answer, by id.
 #[derive(Default)]
 pub struct Approvals {
-    waiting: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    waiting: Mutex<HashMap<String, Waiting>>,
 }
 
 impl Approvals {
@@ -200,19 +430,35 @@ impl Approvals {
     /// agent went away and this future was dropped), the dialog is withdrawn
     /// ([`Event::McpApprovalWithdrawn`]).
     pub async fn ask(&self, events: &dyn Events, request: ApprovalRequest) -> bool {
+        self.ask_for_answer(events, request).await.approved
+    }
+
+    /// As [`Approvals::ask`], with what the user typed along with a
+    /// connection's approval. A decline brings nothing.
+    pub async fn ask_for_answer(&self, events: &dyn Events, request: ApprovalRequest) -> Answer {
         let (answer, answered) = oneshot::channel();
-        self.lock().insert(request.id.clone(), answer);
+        let takes_secrets = matches!(request.subject, ApprovalSubject::Connection(_));
+        self.lock().insert(request.id.clone(), Waiting { answer, takes_secrets });
         let _pending = Pending { approvals: self, events, id: &request.id };
         events.emit(Event::McpApprovalAsked(request.clone()));
-        tokio::time::timeout(WAIT, answered).await.ok().and_then(Result::ok).unwrap_or(false)
+        tokio::time::timeout(WAIT, answered).await.ok().and_then(Result::ok).unwrap_or_default()
     }
 
     /// The user's answer to request `id`; false when nothing waits under it any more.
     pub fn answer(&self, id: &str, approved: bool) -> bool {
-        self.lock().remove(id).is_some_and(|waiting| waiting.send(approved).is_ok())
+        self.answer_with(id, approved, None)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, oneshot::Sender<bool>>> {
+    /// The user's answer to request `id`, with what they typed for a
+    /// connection's change. Secrets reach only an approved connection's
+    /// request; any other drops them unread.
+    pub fn answer_with(&self, id: &str, approved: bool, secrets: Option<ApprovalSecrets>) -> bool {
+        let Some(waiting) = self.lock().remove(id) else { return false };
+        let secrets = secrets.filter(|_| approved && waiting.takes_secrets);
+        waiting.answer.send(Answer { approved, secrets }).is_ok()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Waiting>> {
         self.waiting.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
@@ -240,13 +486,46 @@ mod tests {
     #[test]
     fn an_answer_reaches_only_a_request_still_waiting() {
         let approvals = Approvals::default();
-        let (sender, mut receiver) = oneshot::channel();
-        approvals.lock().insert("a".into(), sender);
+        let (answer, mut receiver) = oneshot::channel();
+        approvals.lock().insert("a".into(), Waiting { answer, takes_secrets: false });
 
         assert!(!approvals.answer("unknown", true));
         assert!(approvals.answer("a", true));
-        assert_eq!(receiver.try_recv(), Ok(true));
+        assert!(receiver.try_recv().unwrap().approved);
         assert!(!approvals.answer("a", false), "answered once only");
+    }
+
+    fn typed() -> ApprovalSecrets {
+        ApprovalSecrets { password: Some("s3cret".into()), ssh_secret: None, agent_access: Some(AgentAccess::Write) }
+    }
+
+    #[test]
+    fn secrets_reach_only_an_approved_connection_change() {
+        let approvals = Approvals::default();
+        let mut receivers = Vec::new();
+        for (id, takes_secrets) in [("statement", false), ("declined", true), ("approved", true)] {
+            let (answer, receiver) = oneshot::channel();
+            approvals.lock().insert(id.into(), Waiting { answer, takes_secrets });
+            receivers.push(receiver);
+        }
+        assert!(approvals.answer_with("statement", true, Some(typed())));
+        assert!(approvals.answer_with("declined", false, Some(typed())));
+        assert!(approvals.answer_with("approved", true, Some(typed())));
+        let answers: Vec<Answer> = receivers.iter_mut().map(|receiver| receiver.try_recv().unwrap()).collect();
+        assert!(answers[0].approved && answers[0].secrets.is_none(), "a statement takes no secrets");
+        assert!(!answers[1].approved && answers[1].secrets.is_none(), "a decline brings nothing");
+        let mut secrets = answers.into_iter().nth(2).unwrap().secrets.expect("the typed secrets");
+        assert_eq!(secrets.take_password().as_deref(), Some("s3cret"));
+        assert_eq!(secrets.agent_access, Some(AgentAccess::Write));
+    }
+
+    #[test]
+    fn typed_secrets_never_print() {
+        let shown = format!("{:?}", typed());
+        assert!(!shown.contains("s3cret"), "{shown}");
+        assert!(shown.contains("<typed>"));
+        let mut empty = ApprovalSecrets { password: Some(String::new()), ssh_secret: None, agent_access: None };
+        assert_eq!(empty.take_password(), None, "an empty password keeps the saved one");
     }
 
     /// The events the UI would hear, in order.

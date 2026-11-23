@@ -7,8 +7,8 @@
 //! decline, so a request left alone never runs.
 
 use dbforge_core::Event;
-use dbforge_core::mcp::ApprovalRequest;
 use dbforge_core::mcp::commands::answer_mcp_approval;
+use dbforge_core::mcp::{ApprovalRequest, ApprovalSecrets};
 use gpui::{App, AppContext, Context, Entity, Global, Subscription};
 
 use super::queue::ApprovalQueue;
@@ -60,12 +60,20 @@ impl Approvals {
     }
 
     /// The user's answer to request `id`, from the approval dialog's buttons
-    /// only. It leaves the queue whatever the core says, as in the former web UI;
-    /// false when the core had nothing waiting under it any more.
-    pub fn answer(&mut self, id: &str, approved: bool, cx: &mut Context<Self>) -> bool {
+    /// only, with what they typed for a connection's change (straight to the
+    /// core's waiting tool, never kept here). It leaves the queue whatever the
+    /// core says, as in the former web UI; false when the core had nothing
+    /// waiting under it any more.
+    pub fn answer(
+        &mut self,
+        id: &str,
+        approved: bool,
+        secrets: Option<ApprovalSecrets>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.queue.take(id);
         cx.notify();
-        answer_mcp_approval(Backend::global(cx).core().mcp_approvals(), id.to_owned(), approved)
+        answer_mcp_approval(Backend::global(cx).core().mcp_approvals(), id.to_owned(), approved, secrets)
     }
 
     /// Development only: shows `request` as if an agent had asked; answering
@@ -133,7 +141,7 @@ mod tests {
         assert!(!asking.is_finished(), "nothing runs before the user answers");
 
         let answered =
-            cx.update(|cx| Approvals::global(cx).update(cx, |approvals, cx| approvals.answer("a", false, cx)));
+            cx.update(|cx| Approvals::global(cx).update(cx, |approvals, cx| approvals.answer("a", false, None, cx)));
         assert!(answered);
         assert!(!runtime().block_on(asking).unwrap(), "declined");
         assert_eq!(current(cx), None);
@@ -154,7 +162,7 @@ mod tests {
         assert_eq!(current(cx).as_deref(), Some("b"));
         // Answering a request the core no longer waits on still takes it off the queue.
         let answered =
-            cx.update(|cx| Approvals::global(cx).update(cx, |approvals, cx| approvals.answer("b", true, cx)));
+            cx.update(|cx| Approvals::global(cx).update(cx, |approvals, cx| approvals.answer("b", true, None, cx)));
         assert!(!answered, "the core had nothing waiting under it");
         assert_eq!(current(cx).as_deref(), Some("c"));
         assert_eq!(cx.update(|cx| Approvals::global(cx).read(cx).waiting()), 1);

@@ -4,6 +4,8 @@
 //!
 //! Tools never return a password or anything the app keeps secret: agents
 //! name a connection by its id, and the app opens it with its own credentials.
+//! Nor do they take one: a connection an agent creates or changes gets its
+//! secrets from the user, typed in the approval dialog.
 
 use rmcp::RoleServer;
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -16,6 +18,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::approvals::{ApprovalRequest, ApprovalSubject};
+use super::connections::{ConnectionDetails, ConnectionDetailsRequest, DeleteConnectionRequest, SaveConnectionRequest};
 use super::dumps::{
     ExportDatabaseRequest, ExportList, ExportedView, ImportDatabaseRequest, ImportedView, ListExportsRequest,
 };
@@ -439,6 +442,42 @@ impl Tools {
     }
 
     #[tool(
+        description = "Shows a connection's settings, without any secret: its engine, host, port, database, user, SSL mode and files, SSH tunnel (host, port, user, how it signs in, key file), tag and what agents may do with it. Its password, SSH password or passphrase and keys are never shown."
+    )]
+    async fn connection_details(
+        &self,
+        Parameters(request): Parameters<ConnectionDetailsRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ConnectionDetails>, String> {
+        self.note_agent(&context);
+        Ok(Json(self.details_of(request)?))
+    }
+
+    #[tool(
+        description = "Creates a connection in DBForge, or with id changes one you may use, keeping what you leave out. You never send a password or other secret: the user types them in DBForge when approving (on a change, typing none keeps the saved ones). You can't set what agents may do with a connection nor its tag: the user chooses a new connection's access when approving. The user approves every create and change in DBForge first; a declined one changes nothing. A connection with a console's transaction open can't be changed."
+    )]
+    async fn save_connection(
+        &self,
+        Parameters(request): Parameters<SaveConnectionRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ConnectionDetails>, String> {
+        let agent = self.note_agent(&context);
+        Ok(Json(self.save_conn(agent, request).await?))
+    }
+
+    #[tool(
+        description = "Deletes a connection you may use, with its saved password, from DBForge. The user approves it in DBForge first; a declined one deletes nothing. A connection with a console's transaction open can't be deleted."
+    )]
+    async fn delete_connection(
+        &self,
+        Parameters(request): Parameters<DeleteConnectionRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<String, String> {
+        let agent = self.note_agent(&context);
+        self.delete_conn(agent, request).await
+    }
+
+    #[tool(
         description = "Lists the backups (exports) in DBForge's exports folder that import_database can restore: each with its kind, the engines it restores into, its size and when it was written. Give connectionId to list only the ones that restore into that connection."
     )]
     async fn list_exports(
@@ -476,7 +515,7 @@ impl Tools {
 }
 
 /// What the agent is told about the server, the same from the app and from the stdio bridge.
-const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. The user's saved queries are there too: list_saved_queries and run_saved_query run them with values for their :name parameters, and save_query and delete_saved_query change them once the user approves. export_database backs up a whole database into DBForge's exports folder and import_database restores one of those exports (list_exports lists them); the user approves every backup and restore first.";
+const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. The user's saved queries are there too: list_saved_queries and run_saved_query run them with values for their :name parameters, and save_query and delete_saved_query change them once the user approves. export_database backs up a whole database into DBForge's exports folder and import_database restores one of those exports (list_exports lists them); the user approves every backup and restore first. connection_details shows a connection's settings without its secrets, and save_connection and delete_connection create, change or delete connections once the user approves; you never send or see a password, which the user types in DBForge.";
 
 /// How DBForge's MCP server introduces itself, wherever the agent reaches it.
 pub(crate) fn server_info() -> ServerConfig {

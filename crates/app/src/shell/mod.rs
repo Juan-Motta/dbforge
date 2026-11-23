@@ -38,6 +38,7 @@ use crate::admin::{AdminEvent, DropDatabaseDialog, NewObjectDialog, NewObjectKin
 use crate::backend::Backend;
 use crate::connections::{ConnectionDialog, ConnectionDialogEvent, DeleteConnectionDialog, DeleteConnectionEvent};
 use crate::dump::{DumpEvent, DumpMode, ExportDatabaseDialog, ImportDatabaseDialog};
+use crate::events::EventHub;
 use crate::export::{ExportDialog, ExportSource};
 use crate::i18n::{Locale, Translate};
 use crate::import::{ImportDialog, ImportEvent, ImportTarget};
@@ -167,6 +168,14 @@ impl Shell {
         subscriptions.push(cx.observe_in(&Approvals::global(cx), window, |this, _, window, cx| {
             this.sync_approval(window, cx);
         }));
+        // An agent created, edited or deleted a connection, once the user approved it.
+        if let Some(hub) = EventHub::try_global(cx) {
+            subscriptions.push(cx.subscribe(&hub, |this, _, event: &dbforge_core::Event, cx| {
+                if let dbforge_core::Event::ConnectionsChanged { id, deleted } = event {
+                    this.on_agent_connection_change(id, *deleted, cx);
+                }
+            }));
+        }
         // A check found an update, or the user asked: the dialog shows until it is dismissed.
         subscriptions.push(cx.observe_in(&Updates::global(cx), window, |this, _, window, cx| {
             this.sync_update(window, cx);
@@ -569,6 +578,20 @@ impl Shell {
                 this.refresh_statement_names(cx);
             });
         self.show_dialog(dialog, vec![deleted], window, cx);
+    }
+
+    /// An agent's approved change to connection `id`, as the user's own save
+    /// or delete is handled: the explorer reads the connections again, and a
+    /// deleted connection's tabs close.
+    fn on_agent_connection_change(&mut self, id: &str, deleted: bool, cx: &mut Context<Self>) {
+        if deleted {
+            self.explorer.update(cx, |explorer, cx| explorer.reload_connections(None, None, cx));
+            self.workspace.update(cx, |workspace, cx| workspace.close_connection(id, cx));
+        } else {
+            self.explorer.update(cx, |explorer, cx| explorer.reload_connections(Some(id), None, cx));
+        }
+        self.show_selected_connection(cx);
+        self.refresh_statement_names(cx);
     }
 
     /// The statement console names connections; one was saved or deleted.
@@ -1329,6 +1352,48 @@ mod tests {
         assert_eq!(shown(cx), None);
         assert_eq!(cx.update(|window, cx| window.focused(cx)), before, "the keyboard goes back to the settings");
         assert!(shell.read_with(cx, |shell, _| shell.dialog.is_some()), "Escape declined; it closed nothing else");
+    }
+
+    #[gpui::test]
+    fn an_agent_s_approved_change_to_the_connections_shows_in_the_explorer(cx: &mut TestAppContext) {
+        use dbforge_core::{Event, Events};
+        let _dir = crate::test_support::setup(cx);
+        let events = cx.update(|cx| {
+            let (events, received) = crate::events::channel();
+            crate::events::EventHub::start(received, cx);
+            Approvals::start(cx);
+            events
+        });
+        let (shell, cx) = cx.add_window_view(Shell::new);
+        let core = cx.update(|_, cx| Backend::global(cx).core().clone());
+        let connection = Connection {
+            id: "agents".into(),
+            name: "Agent's".into(),
+            engine: dbforge_core::connections::model::Engine::Postgres,
+            environment: None,
+            host: "localhost".into(),
+            port: 5432,
+            database: "shop".into(),
+            username: "app".into(),
+            ssl: Default::default(),
+            ssh: Default::default(),
+            srv: false,
+            agent_access: Default::default(),
+        };
+        core.connections().upsert(connection).unwrap();
+        let listed = |cx: &mut gpui::VisualTestContext| {
+            shell.read_with(cx, |shell, cx| shell.explorer.read(cx).connection("agents").is_some())
+        };
+        assert!(!listed(cx), "not read yet");
+
+        events.emit(Event::ConnectionsChanged { id: "agents".into(), deleted: false });
+        cx.run_until_parked();
+        assert!(listed(cx), "the created connection shows");
+
+        core.connections().delete("agents").unwrap();
+        events.emit(Event::ConnectionsChanged { id: "agents".into(), deleted: true });
+        cx.run_until_parked();
+        assert!(!listed(cx), "the deleted connection leaves");
     }
 
     #[gpui::test]

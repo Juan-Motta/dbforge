@@ -547,6 +547,35 @@ pub(super) mod tests {
             };
             (outcome, seen.into_inner().unwrap())
         }
+
+        /// Runs `work`, answering every approval it asks for as `answer`
+        /// says: approved or not, and what the user typed; its outcome and the requests asked.
+        pub(in crate::mcp) async fn answering_with<T>(
+            &mut self,
+            answer: impl Fn(&ApprovalRequest) -> (bool, Option<crate::mcp::ApprovalSecrets>),
+            work: impl Future<Output = T>,
+        ) -> (T, Vec<ApprovalRequest>) {
+            let approvals = self.tools.core.clone();
+            let asked = &mut self.asked;
+            let seen = Mutex::new(Vec::new());
+            let answering = async {
+                while let Some(request) = asked.recv().await {
+                    let (approve, secrets) = answer(&request);
+                    approvals.mcp_approvals().answer_with(&request.id, approve, secrets);
+                    seen.lock().unwrap().push(request);
+                }
+            };
+            let outcome = tokio::select! {
+                outcome = Box::pin(work) => outcome,
+                () = answering => unreachable!("the core keeps its events"),
+            };
+            (outcome, seen.into_inner().unwrap())
+        }
+
+        /// Every event the app would have heard so far.
+        pub(in crate::mcp) fn events(&self) -> Vec<Event> {
+            self.heard.events.lock().unwrap().clone()
+        }
     }
 
     pub(in crate::mcp) fn setup() -> Setup {

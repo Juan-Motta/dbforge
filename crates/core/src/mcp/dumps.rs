@@ -288,7 +288,7 @@ impl Tools {
     }
 
     /// The name of `connection`'s tag, if it has one.
-    fn tag_name(&self, connection: &Connection) -> Option<String> {
+    pub(super) fn tag_name(&self, connection: &Connection) -> Option<String> {
         let tags = self.core.tags().list();
         tags.into_iter().find(|tag| Some(&tag.id) == connection.environment.as_ref()).map(|tag| tag.name)
     }

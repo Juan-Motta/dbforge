@@ -1169,6 +1169,18 @@ pub(super) const MESSAGES: Messages = Messages {
                            la rechazas, el agente sabrá que no se ejecutó nada.",
         dump_import_note: "No se ejecuta nada hasta que lo apruebes. Si la rechazas, el agente sabrá que no se \
                            ejecutó nada.",
+        conn_approval_title: "¿Aprobar el cambio de un agente en tus conexiones?",
+        conn_create_who: |agent, name| format!("{agent} quiere crear la conexión “{name}”:"),
+        conn_update_who: |agent, name| format!("{agent} quiere editar la conexión “{name}”:"),
+        conn_delete_who: |agent, name| format!("{agent} quiere eliminar la conexión “{name}”:"),
+        conn_keep_secret: "Vacío conserva el actual",
+        conn_optional: "Opcional",
+        conn_ssh_port: "Puerto SSH",
+        conn_yes: "Sí",
+        conn_no: "No",
+        conn_approval_note: "No cambia nada hasta que lo apruebes. Lo que escribas aquí se queda en DBForge: el \
+                             agente nunca lo ve.",
+        conn_delete_note: "No se elimina nada hasta que lo apruebes. Su contraseña guardada se elimina con ella.",
         decline: "Rechazar",
         close: "Cerrar",
         enable: "Permitir que agentes de IA usen DBForge",
