@@ -3,7 +3,7 @@
 //! defaults and requests are checked without a window.
 
 use dbforge_core::dump::{
-    Content, DumpEngine, DumpOptions, MongodbOptions, MysqlOptions, PostgresOptions, SqliteFormat, SqliteOptions,
+    DumpEngine, DumpOptions, MongodbOptions, MysqlOptions, PostgresOptions, SqliteFormat, SqliteOptions,
 };
 
 /// An export's choices for its engine.
@@ -38,18 +38,13 @@ impl Collections {
 impl ExportChoices {
     /// What a new export of `engine` starts with: everything, read consistently.
     pub fn new(engine: DumpEngine) -> Self {
-        match engine {
-            DumpEngine::Postgres => {
-                Self::Postgres(PostgresOptions { content: Content::All, clean: false, keep_owners: false })
+        match DumpOptions::defaults(engine) {
+            DumpOptions::Postgres(options) => Self::Postgres(options),
+            DumpOptions::Mysql(options) => Self::Mysql(options),
+            DumpOptions::Mongodb(options) => {
+                Self::Mongodb(Collections { whole: options.collections.is_empty(), chosen: options.collections })
             }
-            DumpEngine::Mysql => Self::Mysql(MysqlOptions {
-                content: Content::All,
-                add_drop_table: false,
-                single_transaction: true,
-                routines: true,
-            }),
-            DumpEngine::Mongodb => Self::Mongodb(Collections { whole: true, chosen: Vec::new() }),
-            DumpEngine::Sqlite => Self::Sqlite(SqliteFormat::Script),
+            DumpOptions::Sqlite(options) => Self::Sqlite(options.format),
         }
     }
 
@@ -89,11 +84,7 @@ pub fn swap_extension(name: &str, from: &str, to: &str) -> String {
 
 /// The name a SQLite connection's export and dialogs go by: its file's, without the extension.
 pub fn sqlite_name(file: &str) -> String {
-    let name = super::file_name_of(file);
-    match name.rsplit_once('.') {
-        Some((stem, _)) if !stem.is_empty() => stem.to_owned(),
-        _ => name.to_owned(),
-    }
+    dbforge_core::dump::sqlite_name(file)
 }
 
 /// Where a SQLite restore writes: the connection's own file, or a new one once it is picked.
@@ -103,6 +94,8 @@ pub fn sqlite_target(own_file: &str, into_new: bool, new_file: Option<&str>) -> 
 
 #[cfg(test)]
 mod tests {
+    use dbforge_core::dump::Content;
+
     use super::*;
 
     #[test]

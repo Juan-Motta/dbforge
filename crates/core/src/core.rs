@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::connections::store::ConnectionStore;
 use crate::connections::tags::TagStore;
 use crate::credentials::Credentials;
-use crate::dump::ToolPaths;
+use crate::dump::{ExportFolder, ToolPaths};
 use crate::error::{AppError, Result};
 use crate::events::Events;
 use crate::files::SetAside;
@@ -71,6 +71,7 @@ pub struct Core {
     connections: Arc<ConnectionStore>,
     tags: TagStore,
     tool_paths: ToolPaths,
+    export_folder: ExportFolder,
     saved_queries: SavedQueries,
     query_sessions: QuerySessions,
     jobs: Jobs,
@@ -123,6 +124,7 @@ impl Core {
             connections,
             tags,
             tool_paths,
+            export_folder: ExportFolder::default(),
             saved_queries,
             query_sessions: QuerySessions::default(),
             jobs: Jobs::default(),
@@ -161,6 +163,11 @@ impl Core {
 
     pub fn tool_paths(&self) -> &ToolPaths {
         &self.tool_paths
+    }
+
+    /// Where exports go: the app keeps it as its preference says, for the MCP tools.
+    pub fn export_folder(&self) -> &ExportFolder {
+        &self.export_folder
     }
 
     /// The queries the user saved with a name.

@@ -24,7 +24,10 @@ mod sqlite;
 mod tool_paths;
 mod tools;
 
-pub use exports::ExportFiles;
+pub use exports::{
+    ExportFile, ExportFiles, ExportFolder, default_export_folder, export_extension, export_file_name, list_exports,
+    sqlite_name,
+};
 pub use mongodb::MongodbOptions;
 pub use mysql::MysqlOptions;
 pub use postgres::PostgresOptions;
@@ -98,6 +101,15 @@ impl DumpEngine {
     fn import_tool(self) -> Option<&'static str> {
         self.tools().get(1).copied()
     }
+
+    /// The extension of the files it restores, dot included: its exports'
+    /// (SQLite restores scripts, not copies of a database file).
+    pub fn restore_extension(self) -> &'static str {
+        match self {
+            Self::Postgres | Self::Mysql | Self::Sqlite => ".sql",
+            Self::Mongodb => ".archive.gz",
+        }
+    }
 }
 
 /// Whether DBForge exports and imports whole databases of `engine`.
@@ -121,7 +133,7 @@ fn engine_of(connection: &Connection) -> Result<DumpEngine> {
 }
 
 /// What a dump holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Content {
     All,
@@ -130,7 +142,7 @@ pub enum Content {
 }
 
 /// How to export, for the connection's engine (`"engine": "postgres"`, …, in JSON).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "engine", rename_all = "camelCase")]
 pub enum DumpOptions {
     Postgres(PostgresOptions),
@@ -141,7 +153,24 @@ pub enum DumpOptions {
 }
 
 impl DumpOptions {
-    fn engine(&self) -> DumpEngine {
+    /// What a new export of `engine` starts with: everything, read consistently.
+    pub fn defaults(engine: DumpEngine) -> Self {
+        match engine {
+            DumpEngine::Postgres => {
+                Self::Postgres(PostgresOptions { content: Content::All, clean: false, keep_owners: false })
+            }
+            DumpEngine::Mysql => Self::Mysql(MysqlOptions {
+                content: Content::All,
+                add_drop_table: false,
+                single_transaction: true,
+                routines: true,
+            }),
+            DumpEngine::Mongodb => Self::Mongodb(MongodbOptions::default()),
+            DumpEngine::Sqlite => Self::Sqlite(SqliteOptions { format: SqliteFormat::Script }),
+        }
+    }
+
+    pub fn engine(&self) -> DumpEngine {
         match self {
             Self::Postgres(_) => DumpEngine::Postgres,
             Self::Mysql(_) => DumpEngine::Mysql,

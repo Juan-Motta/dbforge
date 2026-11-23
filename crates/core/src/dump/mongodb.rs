@@ -17,7 +17,7 @@ use std::io::Read;
 use std::path::Path;
 
 use mongodb::bson::Document;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use super::secret_file::SecretFile;
@@ -28,7 +28,7 @@ use crate::drivers::mongodb as driver;
 use crate::error::{AppError, Result};
 use crate::tunnel::Route;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MongodbOptions {
     /// The collections to export; all of them when empty.

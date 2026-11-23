@@ -17,7 +17,7 @@ use std::io::BufReader;
 use std::path::Path;
 use std::process::Stdio;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use super::secret_file::SecretFile;
@@ -29,7 +29,7 @@ use crate::drivers::{NewObject, mysql};
 use crate::error::{AppError, Result};
 use crate::tunnel::Route;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MysqlOptions {
     pub content: Content,

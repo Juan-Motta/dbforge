@@ -5,11 +5,15 @@
 //! Decline has the focus, so Enter or Space pressed by mistake can't
 //! approve; Tab moves between the two buttons, and Enter or Space presses
 //! the one focused. Escape and the close button decline. Approve and run is
-//! the only way an agent's change runs from here.
+//! the only way an agent's change runs from here. Every backup and restore an
+//! agent asks for shows here too: the database, the connection, the export's
+//! file and the options, and for a restore a warning that it changes data.
 
 use dbforge_core::connections::model::Engine;
+use dbforge_core::dump::{Content, DumpOptions, SqliteFormat};
 use dbforge_core::mcp::{
-    ApprovalRequest, ApprovalSubject, DraftScope, SavedQueryChange, SavedQueryDraft, SavedQueryField,
+    ApprovalRequest, ApprovalSubject, DraftScope, DumpAction, DumpApproval, SavedQueryChange, SavedQueryDraft,
+    SavedQueryField,
 };
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding,
@@ -65,6 +69,8 @@ impl ApprovalDialog {
     pub fn new(request: ApprovalRequest, engine: Option<Engine>, cx: &mut Context<Self>) -> Self {
         let (engine, text, before) = match &request.subject {
             ApprovalSubject::Statement { statement, .. } => (engine.unwrap_or(Engine::Postgres), statement, None),
+            // No statement: the dialog lists the backup's or restore's details instead.
+            ApprovalSubject::Dump(dump) => (dump.engine, &String::new(), None),
             ApprovalSubject::SavedQuery(change) => match change.as_ref() {
                 SavedQueryChange::Create { query } | SavedQueryChange::Delete { query } => {
                     (query.engine, &query.sql, None)
@@ -130,6 +136,15 @@ impl ApprovalDialog {
                 };
                 (who(agent, change.name()), None)
             }
+            ApprovalSubject::Dump(dump) => {
+                let who = match &dump.action {
+                    DumpAction::Export { .. } => (m.dump_export_who)(agent, &dump.database, &dump.connection_name),
+                    DumpAction::Import { .. } => {
+                        (m.dump_import_who)(agent, &dump.file, &dump.database, &dump.connection_name)
+                    }
+                };
+                (who, dump.tag.as_deref())
+            }
         };
         div()
             .flex()
@@ -146,6 +161,44 @@ impl ApprovalDialog {
         let messages = cx.messages();
         let small = || div().text_size(px(12.)).text_color(theme.text3);
         match &self.request.subject {
+            ApprovalSubject::Dump(dump) => {
+                let row = |selector: &'static str, label: &'static str, value: String| {
+                    div()
+                        .debug_selector(move || selector.to_owned())
+                        .flex()
+                        .gap(px(8.))
+                        .text_size(px(12.))
+                        .child(div().w(px(110.)).flex_none().text_color(theme.text3).child(label))
+                        .child(div().min_w_0().flex_1().child(value))
+                };
+                let m = &messages.mcp;
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .child(row("approval-dump-file", m.dump_file, (m.dump_in_exports_folder)(&dump.file)))
+                            .children(
+                                dump_options(&dump.action, messages)
+                                    .map(|options| row("approval-dump-options", m.dump_options, options)),
+                            ),
+                    )
+                    .children(restore_warning(dump, messages).map(|warning| {
+                        div()
+                            .debug_selector(|| "approval-dump-warning".into())
+                            .flex()
+                            .items_start()
+                            .gap(px(8.))
+                            .text_size(px(12.))
+                            .text_color(theme.warn)
+                            .child(icon("warning", theme.warn, 13.))
+                            .child(div().min_w_0().flex_1().child(warning))
+                    }))
+            }
             ApprovalSubject::Statement { database, .. } => div()
                 .flex()
                 .flex_col()
@@ -187,6 +240,63 @@ impl ApprovalDialog {
             }
         }
     }
+}
+
+/// A backup's options or a restore's, in a line; `None` when a restore has none.
+fn dump_options(action: &DumpAction, m: &Messages) -> Option<String> {
+    let d = &m.dump;
+    let content = |content: Content| match content {
+        Content::All => d.all_label,
+        Content::Structure => d.structure_label,
+        Content::Data => d.data_label,
+    };
+    let parts: Vec<String> = match action {
+        DumpAction::Export { options } => match options {
+            DumpOptions::Postgres(options) => [
+                Some(content(options.content)),
+                options.clean.then_some(d.clean),
+                options.keep_owners.then_some(d.keep_owners),
+            ]
+            .into_iter()
+            .flatten()
+            .map(str::to_owned)
+            .collect(),
+            DumpOptions::Mysql(options) => [
+                Some(content(options.content)),
+                options.add_drop_table.then_some(d.add_drop_table),
+                options.single_transaction.then_some(d.single_transaction),
+                options.routines.then_some(d.routines),
+            ]
+            .into_iter()
+            .flatten()
+            .map(str::to_owned)
+            .collect(),
+            DumpOptions::Mongodb(options) if options.collections.is_empty() => vec![d.whole_database.to_owned()],
+            DumpOptions::Mongodb(options) => vec![(m.mcp.dump_collections)(&options.collections.join(", "))],
+            DumpOptions::Sqlite(options) => vec![
+                match options.format {
+                    SqliteFormat::Script => d.sqlite_script,
+                    SqliteFormat::File => d.sqlite_file,
+                }
+                .to_owned(),
+            ],
+        },
+        DumpAction::Import { drop_existing, .. } => {
+            drop_existing.then(|| d.drop_existing.to_owned()).into_iter().collect()
+        }
+    };
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// What a restore warns of: it changes data, and objects already there may be replaced.
+fn restore_warning(dump: &DumpApproval, m: &Messages) -> Option<String> {
+    let DumpAction::Import { target_exists, .. } = &dump.action else { return None };
+    let warning = match target_exists {
+        Some(true) => m.mcp.dump_restore_existing,
+        Some(false) => m.mcp.dump_restore_new,
+        None => m.mcp.dump_restore_unknown,
+    };
+    Some(warning(&dump.database))
 }
 
 /// A read-only editor showing `text` in `engine`'s language.
@@ -294,10 +404,13 @@ impl Render for ApprovalDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let m = &cx.messages().mcp;
-        let saved = matches!(self.request.subject, ApprovalSubject::SavedQuery(_));
-        let (title, note, approve) = match saved {
-            true => (m.saved_approval_title, m.saved_approval_note, m.approve_change),
-            false => (m.approval_title, m.approval_note, m.approve),
+        let (title, note, approve) = match &self.request.subject {
+            ApprovalSubject::SavedQuery(_) => (m.saved_approval_title, m.saved_approval_note, m.approve_change),
+            ApprovalSubject::Dump(dump) => match dump.action {
+                DumpAction::Export { .. } => (m.dump_export_title, m.dump_export_note, m.approve_change),
+                DumpAction::Import { .. } => (m.dump_import_title, m.dump_import_note, m.approve_change),
+            },
+            ApprovalSubject::Statement { .. } => (m.approval_title, m.approval_note, m.approve),
         };
         let decline_focused = self.decline.is_focused(window);
         let approve_focused = self.approve.is_focused(window);
@@ -555,5 +668,92 @@ mod tests {
         assert!(cx.debug_bounds("approval-field-name").is_some());
         assert!(cx.debug_bounds("approval-sql-before").is_none() && cx.debug_bounds("approval-sql-after").is_none());
         dialog.update(cx, |dialog, _| assert!(dialog.statement_before.is_none()));
+    }
+
+    fn dump(action: DumpAction) -> ApprovalRequest {
+        ApprovalRequest {
+            id: "d".into(),
+            agent: Some("codex".into()),
+            subject: ApprovalSubject::Dump(Box::new(DumpApproval {
+                connection_id: "shop".into(),
+                connection_name: "Shop".into(),
+                tag: Some("PROD".into()),
+                engine: Engine::Mysql,
+                database: "shop".into(),
+                file: "shop-2026-11-22-1030.sql".into(),
+                action,
+            })),
+        }
+    }
+
+    fn mysql_backup() -> DumpAction {
+        DumpAction::Export { options: DumpOptions::defaults(dbforge_core::dump::DumpEngine::Mysql) }
+    }
+
+    #[test]
+    fn a_backup_lists_its_options_and_a_restore_warns_it_changes_data() {
+        let m = crate::i18n::Language::En.messages();
+        assert_eq!(
+            dump_options(&mysql_backup(), m).as_deref(),
+            Some(
+                "Structure and data · Consistent snapshot (single transaction, InnoDB) · Routines, triggers and events"
+            )
+        );
+        let mongodb = DumpAction::Export {
+            options: DumpOptions::Mongodb(dbforge_core::dump::MongodbOptions {
+                collections: vec!["a".into(), "b".into()],
+            }),
+        };
+        assert_eq!(dump_options(&mongodb, m).as_deref(), Some("Collections: a, b"));
+        let restore = |target_exists| DumpAction::Import { drop_existing: false, target_exists };
+        assert_eq!(dump_options(&restore(None), m), None);
+        let ApprovalSubject::Dump(existing) = dump(restore(Some(true))).subject else { unreachable!() };
+        assert_eq!(
+            restore_warning(&existing, m).as_deref(),
+            Some("This changes data in shop, which already exists: objects in it may be replaced.")
+        );
+        let ApprovalSubject::Dump(backup) = dump(mysql_backup()).subject else { unreachable!() };
+        assert_eq!(restore_warning(&backup, m), None, "a backup changes nothing");
+        let es = crate::i18n::Language::Es.messages();
+        assert_eq!(
+            restore_warning(&existing, es).as_deref(),
+            Some("Esto cambia datos en shop, que ya existe: los objetos que tiene pueden reemplazarse.")
+        );
+    }
+
+    /// The dialog for `request`, drawn with Decline focused; the text it shows.
+    fn shown_dump(
+        request: ApprovalRequest,
+        cx: &mut TestAppContext,
+    ) -> (Entity<ApprovalDialog>, &mut VisualTestContext) {
+        cx.update(|cx| cx.bind_keys(key_bindings()));
+        let (dialog, cx) = cx.add_window_view(|_, cx| ApprovalDialog::new(request, None, cx));
+        dialog.update_in(cx, |dialog, window, _| dialog.focus(window));
+        draw(cx);
+        assert!(
+            dialog.update_in(cx, |dialog, window, _| dialog.decline.is_focused(window)),
+            "Decline has the keyboard"
+        );
+        (dialog, cx)
+    }
+
+    #[gpui::test]
+    fn shows_an_agent_s_backup_with_its_file_and_options(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let (_dialog, cx) = shown_dump(dump(mysql_backup()), cx);
+        assert!(cx.debug_bounds("approval-dump-file").is_some());
+        assert!(cx.debug_bounds("approval-dump-options").is_some());
+        assert!(cx.debug_bounds("approval-dump-warning").is_none(), "a backup changes no data");
+    }
+
+    #[gpui::test]
+    fn shows_an_agent_s_restore_with_its_warning(cx: &mut TestAppContext) {
+        let _dir = setup(cx);
+        let restore = DumpAction::Import { drop_existing: false, target_exists: Some(true) };
+        let (_dialog, cx) = shown_dump(dump(restore), cx);
+        assert!(cx.debug_bounds("approval-dump-file").is_some());
+        assert!(cx.debug_bounds("approval-dump-options").is_none(), "no options to list");
+        assert!(cx.debug_bounds("approval-dump-warning").is_some());
+        cx.simulate_keystrokes("enter");
     }
 }

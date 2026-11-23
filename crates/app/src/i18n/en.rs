@@ -1106,6 +1106,26 @@ pub(super) const MESSAGES: Messages = Messages {
         no_description: "No description",
         saved_approval_note: "Nothing changes until you approve. Declining tells the agent nothing was changed.",
         approve_change: "Approve",
+        dump_export_title: "Approve an agent’s backup?",
+        dump_import_title: "Approve an agent’s restore?",
+        dump_export_who: |agent, database, connection| format!("{agent} wants to back up {database} on {connection}:"),
+        dump_import_who: |agent, file, database, connection| {
+            format!("{agent} wants to restore {file} into {database} on {connection}:")
+        },
+        dump_file: "File",
+        dump_in_exports_folder: |file| format!("{file}, in your exports folder"),
+        dump_options: "Options",
+        dump_collections: |names| format!("Collections: {names}"),
+        dump_restore_existing: |database| {
+            format!("This changes data in {database}, which already exists: objects in it may be replaced.")
+        },
+        dump_restore_new: |database| format!("{database} doesn’t exist yet: the restore creates it."),
+        dump_restore_unknown: |database| {
+            format!("This changes data in {database}. If it already exists, objects in it may be replaced.")
+        },
+        dump_export_note: "Nothing runs until you approve. The backup holds every row it covers. Declining tells \
+                           the agent nothing ran.",
+        dump_import_note: "Nothing runs until you approve. Declining tells the agent nothing ran.",
         decline: "Decline",
         close: "Close",
         enable: "Let AI agents use DBForge",

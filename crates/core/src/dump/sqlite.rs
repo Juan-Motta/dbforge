@@ -12,7 +12,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use futures_util::TryStreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{AssertSqlSafe, Connection as _};
 use tokio_util::sync::CancellationToken;
@@ -23,7 +23,7 @@ use crate::error::{AppError, Result};
 use crate::files::partial_path;
 use crate::jobs::cancelled;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SqliteFormat {
     /// A SQL script of the schema and the data.
@@ -32,7 +32,7 @@ pub enum SqliteFormat {
     File,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SqliteOptions {
     pub format: SqliteFormat,

@@ -1,6 +1,6 @@
 //! Changes an agent asks to make that wait for the user: a statement on a
-//! connection whose tag asks before changes, and every change to the saved
-//! queries. The app shows what the change does and waits for the user to
+//! connection whose tag asks before changes, every change to the saved
+//! queries, and every backup and restore of a database. The app shows what the change does and waits for the user to
 //! approve or decline it. Nothing happens until the user says yes; no answer
 //! within the wait is a no.
 
@@ -12,6 +12,7 @@ use serde::Serialize;
 use tokio::sync::oneshot;
 
 use crate::connections::model::Engine;
+use crate::dump::DumpOptions;
 use crate::events::{Event, Events};
 
 /// How long a request waits for the user before it counts as declined.
@@ -29,10 +30,11 @@ pub struct ApprovalRequest {
 }
 
 impl ApprovalRequest {
-    /// The connection a statement would run on; none for a saved query's change.
+    /// The connection a statement, backup or restore would run on; none for a saved query's change.
     pub fn connection_id(&self) -> Option<&str> {
         match &self.subject {
             ApprovalSubject::Statement { connection_id, .. } => Some(connection_id),
+            ApprovalSubject::Dump(dump) => Some(&dump.connection_id),
             ApprovalSubject::SavedQuery(_) => None,
         }
     }
@@ -54,6 +56,40 @@ pub enum ApprovalSubject {
     /// Creating, changing or deleting a saved query. Boxed: an update holds
     /// the query twice, and every event would be that large.
     SavedQuery(Box<SavedQueryChange>),
+    /// Backing up a database to the exports folder, or restoring an export into one.
+    Dump(Box<DumpApproval>),
+}
+
+/// A backup or restore an agent wants to run.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DumpApproval {
+    pub connection_id: String,
+    pub connection_name: String,
+    /// The connection's tag (e.g. PROD), if any.
+    pub tag: Option<String>,
+    pub engine: Engine,
+    /// The database backed up or restored into; for SQLite, its file's name.
+    pub database: String,
+    /// The export's file name in the exports folder: written by a backup, read by a restore.
+    pub file: String,
+    pub action: DumpAction,
+}
+
+/// Which way a [`DumpApproval`] goes, with its options.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DumpAction {
+    /// Writes the database to `file`.
+    Export { options: DumpOptions },
+    /// Restores `file` into the database, changing its data.
+    #[serde(rename_all = "camelCase")]
+    Import {
+        /// MongoDB: drops each collection the archive holds before restoring it.
+        drop_existing: bool,
+        /// Whether the database is already there; `None` when that couldn't be told.
+        target_exists: Option<bool>,
+    },
 }
 
 /// A change an agent wants to make to the saved queries.

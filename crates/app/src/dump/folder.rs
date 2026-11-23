@@ -5,6 +5,7 @@
 use gpui::{App, BorrowAppContext};
 
 use super::default_export_folder;
+use crate::backend::Backend;
 use crate::preferences::{Preferences, keys};
 
 pub struct ExportFolder;
@@ -23,6 +24,18 @@ impl ExportFolder {
     /// Where exports go now.
     pub fn folder(cx: &App) -> Option<String> {
         Self::chosen(cx).or_else(Self::fallback)
+    }
+
+    /// Tells the core where exports go now and whenever the preferences
+    /// change, so agents' backups (MCP) go where the app's do.
+    pub fn keep_core_in_sync(cx: &mut App) {
+        Self::tell_core(cx);
+        cx.observe_global::<Preferences>(Self::tell_core).detach();
+    }
+
+    fn tell_core(cx: &mut App) {
+        let folder = Self::folder(cx).map(Into::into);
+        Backend::global(cx).core().export_folder().set(folder);
     }
 
     /// Keeps `folder` as where exports go; `None` goes back to the default.

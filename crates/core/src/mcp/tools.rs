@@ -16,6 +16,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::approvals::{ApprovalRequest, ApprovalSubject};
+use super::dumps::{
+    ExportDatabaseRequest, ExportList, ExportedView, ImportDatabaseRequest, ImportedView, ListExportsRequest,
+};
 use super::saved::{
     DeleteSavedRequest, ListSavedRequest, RunSavedRequest, SaveQueryRequest, SavedQueryList, SavedQueryView,
 };
@@ -49,7 +52,7 @@ impl Tools {
 
     /// Records the call as the agent's activity, so the app lists it; the
     /// agent's own name for itself, when it sent its client info.
-    fn note_agent(&self, context: &RequestContext<RoleServer>) -> Option<String> {
+    pub(super) fn note_agent(&self, context: &RequestContext<RoleServer>) -> Option<String> {
         let client = context.peer.peer_info().map(|info| info.client_info.clone())?;
         let version = Some(client.version.as_str()).filter(|version| !version.is_empty());
         self.core.mcp_agents().record(self.core.events().as_ref(), &client.name, version);
@@ -57,7 +60,7 @@ impl Tools {
     }
 
     /// Runs `work` with its statements recorded as the agent's, on `connection`.
-    async fn as_agent<T>(
+    pub(super) async fn as_agent<T>(
         &self,
         connection: &Connection,
         work: impl Future<Output = crate::error::Result<T>>,
@@ -434,10 +437,46 @@ impl Tools {
         let agent = self.note_agent(&context);
         self.delete_saved(agent, request).await
     }
+
+    #[tool(
+        description = "Lists the backups (exports) in DBForge's exports folder that import_database can restore: each with its kind, the engines it restores into, its size and when it was written. Give connectionId to list only the ones that restore into that connection."
+    )]
+    async fn list_exports(
+        &self,
+        Parameters(request): Parameters<ListExportsRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ExportList>, String> {
+        self.note_agent(&context);
+        Ok(Json(self.exports(request)?))
+    }
+
+    #[tool(
+        description = "Backs up a whole database (PostgreSQL, MySQL, MariaDB, MongoDB or SQLite) into a new file in DBForge's exports folder, named by DBForge after the database and the minute; you can't choose the path. Options are per engine and default to everything. The user approves every backup in DBForge first; a declined one runs nothing. Waits until the backup ends and returns the file's name, which import_database takes."
+    )]
+    async fn export_database(
+        &self,
+        Parameters(request): Parameters<ExportDatabaseRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ExportedView>, String> {
+        let agent = self.note_agent(&context);
+        Ok(Json(self.backup(agent, request).await?))
+    }
+
+    #[tool(
+        description = "Restores an export from DBForge's exports folder (a name from list_exports) into a database of a connection you may write to, creating the database when it doesn't exist; SQLite restores into the connection's own file. It changes data, and objects already there may be replaced. The user approves every restore in DBForge first; a declined one runs nothing. A failed restore removes a database it created."
+    )]
+    async fn import_database(
+        &self,
+        Parameters(request): Parameters<ImportDatabaseRequest>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ImportedView>, String> {
+        let agent = self.note_agent(&context);
+        Ok(Json(self.restore(agent, request).await?))
+    }
 }
 
 /// What the agent is told about the server, the same from the app and from the stdio bridge.
-const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. The user's saved queries are there too: list_saved_queries and run_saved_query run them with values for their :name parameters, and save_query and delete_saved_query change them once the user approves.";
+const INSTRUCTIONS: &str = "Query and change the databases saved in DBForge without their credentials. Start with list_connections; each connection says the language it takes and whether you may change data. The user sees every statement you run in DBForge's statement console. The user's saved queries are there too: list_saved_queries and run_saved_query run them with values for their :name parameters, and save_query and delete_saved_query change them once the user approves. export_database backs up a whole database into DBForge's exports folder and import_database restores one of those exports (list_exports lists them); the user approves every backup and restore first.";
 
 /// How DBForge's MCP server introduces itself, wherever the agent reaches it.
 pub(crate) fn server_info() -> ServerConfig {

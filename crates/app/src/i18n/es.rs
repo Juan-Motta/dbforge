@@ -1146,6 +1146,29 @@ pub(super) const MESSAGES: Messages = Messages {
         saved_approval_note: "No cambia nada hasta que lo apruebes. Si lo rechazas, el agente sabrá que no se \
                               cambió nada.",
         approve_change: "Aprobar",
+        dump_export_title: "¿Aprobar la copia de seguridad de un agente?",
+        dump_import_title: "¿Aprobar la restauración de un agente?",
+        dump_export_who: |agent, database, connection| {
+            format!("{agent} quiere hacer una copia de seguridad de {database} en {connection}:")
+        },
+        dump_import_who: |agent, file, database, connection| {
+            format!("{agent} quiere restaurar {file} en {database} de {connection}:")
+        },
+        dump_file: "Archivo",
+        dump_in_exports_folder: |file| format!("{file}, en tu carpeta de exportaciones"),
+        dump_options: "Opciones",
+        dump_collections: |names| format!("Colecciones: {names}"),
+        dump_restore_existing: |database| {
+            format!("Esto cambia datos en {database}, que ya existe: los objetos que tiene pueden reemplazarse.")
+        },
+        dump_restore_new: |database| format!("{database} aún no existe: la restauración la crea."),
+        dump_restore_unknown: |database| {
+            format!("Esto cambia datos en {database}. Si ya existe, los objetos que tiene pueden reemplazarse.")
+        },
+        dump_export_note: "No se ejecuta nada hasta que lo apruebes. La copia contiene cada fila que abarca. Si \
+                           la rechazas, el agente sabrá que no se ejecutó nada.",
+        dump_import_note: "No se ejecuta nada hasta que lo apruebes. Si la rechazas, el agente sabrá que no se \
+                           ejecutó nada.",
         decline: "Rechazar",
         close: "Cerrar",
         enable: "Permitir que agentes de IA usen DBForge",

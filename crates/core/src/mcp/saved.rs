@@ -437,7 +437,7 @@ impl Tools {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::sync::{Arc, Mutex};
 
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -450,7 +450,7 @@ mod tests {
     use crate::mcp::SavedQueryField;
 
     /// What the app would hear, the approvals handed to the test to answer.
-    struct Heard {
+    pub(in crate::mcp) struct Heard {
         events: Mutex<Vec<Event>>,
         asked: UnboundedSender<ApprovalRequest>,
     }
@@ -470,26 +470,32 @@ mod tests {
         }
     }
 
-    struct Setup {
+    pub(in crate::mcp) struct Setup {
         _dir: tempfile::TempDir,
-        dir: std::path::PathBuf,
-        tools: Tools,
+        pub(in crate::mcp) dir: std::path::PathBuf,
+        pub(in crate::mcp) tools: Tools,
         heard: Arc<Heard>,
         asked: UnboundedReceiver<ApprovalRequest>,
     }
 
     impl Setup {
-        fn core(&self) -> &Core {
+        pub(in crate::mcp) fn core(&self) -> &Core {
             &self.tools.core
         }
 
         /// Tools of their own, to call while [`Setup::answering`] holds the setup.
-        fn tools(&self) -> Tools {
+        pub(in crate::mcp) fn tools(&self) -> Tools {
             Tools::new(self.tools.core.clone())
         }
 
         /// A connection named `name` (also its id) agents may reach as `access`.
-        fn connection(&self, name: &str, engine: Engine, access: AgentAccess, tag: Option<&str>) -> Connection {
+        pub(in crate::mcp) fn connection(
+            &self,
+            name: &str,
+            engine: Engine,
+            access: AgentAccess,
+            tag: Option<&str>,
+        ) -> Connection {
             let database = self.dir.join(format!("{name}.db"));
             if engine == Engine::Sqlite && !database.exists() {
                 // An empty file is an empty SQLite database.
@@ -521,7 +527,11 @@ mod tests {
 
         /// Runs `work`, answering every approval it asks for with `approve`;
         /// its outcome and the requests asked.
-        async fn answering<T>(&mut self, approve: bool, work: impl Future<Output = T>) -> (T, Vec<ApprovalRequest>) {
+        pub(in crate::mcp) async fn answering<T>(
+            &mut self,
+            approve: bool,
+            work: impl Future<Output = T>,
+        ) -> (T, Vec<ApprovalRequest>) {
             let approvals = self.tools.core.clone();
             let asked = &mut self.asked;
             let seen = Mutex::new(Vec::new());
@@ -539,7 +549,7 @@ mod tests {
         }
     }
 
-    fn setup() -> Setup {
+    pub(in crate::mcp) fn setup() -> Setup {
         crate::tunnel::tests::setup();
         let dir = tempfile::tempdir().unwrap();
         let (asked_sender, asked) = unbounded_channel();
@@ -624,12 +634,12 @@ mod tests {
     }
 
     /// A table `items` with two rows.
-    async fn items(connection: &Connection) {
+    pub(in crate::mcp) async fn items(connection: &Connection) {
         let mut session = drivers::open_session(connection, None, None, None).await.unwrap();
         session.run("CREATE TABLE items (id INTEGER PRIMARY KEY, note TEXT); INSERT INTO items VALUES (1, 'a'), (2, 'it''s')", 10).await.unwrap();
     }
 
-    async fn count(connection: &Connection) -> String {
+    pub(in crate::mcp) async fn count(connection: &Connection) -> String {
         let outcome =
             drivers::run_read_only(connection, None, None, None, "SELECT count(*) FROM items", 1).await.unwrap();
         outcome.results[0].rows[0][0].clone().unwrap()

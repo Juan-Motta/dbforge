@@ -13,8 +13,7 @@ mod job;
 mod settings;
 mod tool_row;
 
-use chrono::{Datelike, NaiveDateTime, Timelike};
-pub use dbforge_core::dump::{Content, DumpEngine};
+pub use dbforge_core::dump::{Content, DumpEngine, export_file_name};
 
 pub use dialogs::{DumpEvent, ExportDatabaseDialog, ImportDatabaseDialog, key_bindings};
 pub use folder::ExportFolder;
@@ -80,17 +79,6 @@ pub fn default_export_folder(documents: &str) -> String {
     join_path(documents, "DBForge")
 }
 
-/// A file name for a database's export, unique to the minute, with the
-/// engine's `extension`: `shop-2026-11-10-1432.sql`, `….archive.gz`.
-pub fn export_file_name(database: &str, at: NaiveDateTime, extension: &str) -> String {
-    // Characters a file name can't hold on any system become dashes.
-    let safe: String = database
-        .chars()
-        .map(|c| if matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '-' } else { c })
-        .collect();
-    format!("{safe}-{}-{:02}-{:02}-{:02}{:02}{extension}", at.year(), at.month(), at.day(), at.hour(), at.minute())
-}
-
 /// The last part of a path, for a result line.
 pub fn file_name_of(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
@@ -119,7 +107,7 @@ pub fn ended(error: &str, stopped: &str, failed: &str) -> Outcome {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, NaiveDateTime};
 
     use super::*;
     use crate::i18n::Language;

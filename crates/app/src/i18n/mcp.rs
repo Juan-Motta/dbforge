@@ -27,6 +27,25 @@ pub struct McpMessages {
     pub saved_approval_note: &'static str,
     /// Approves a change to the saved queries, which runs nothing.
     pub approve_change: &'static str,
+    // The approval dialog, for a backup or restore of a database
+    pub dump_export_title: &'static str,
+    pub dump_import_title: &'static str,
+    /// The agent, the database, then the connection's name.
+    pub dump_export_who: fn(&str, &str, &str) -> String,
+    /// The agent, the export's file, the database, then the connection's name.
+    pub dump_import_who: fn(&str, &str, &str, &str) -> String,
+    pub dump_file: &'static str,
+    /// Where the file is: the exports folder.
+    pub dump_in_exports_folder: fn(&str) -> String,
+    pub dump_options: &'static str,
+    /// MongoDB: chosen collections, by name.
+    pub dump_collections: fn(&str) -> String,
+    /// A restore's warning: the database exists, doesn't, or couldn't be told.
+    pub dump_restore_existing: fn(&str) -> String,
+    pub dump_restore_new: fn(&str) -> String,
+    pub dump_restore_unknown: fn(&str) -> String,
+    pub dump_export_note: &'static str,
+    pub dump_import_note: &'static str,
     pub decline: &'static str,
     /// The dialog's close button, which declines.
     pub close: &'static str,

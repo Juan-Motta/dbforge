@@ -123,6 +123,8 @@ Turn on **Settings → Agents (MCP)**, pick your agent and copy its command. By 
 
 Agents also reach your saved queries on the connections they may use: they list them, run them with values for their `:name` parameters, and create, edit or delete them once you approve each change in DBForge.
 
+They can also back up a whole database (`export_database`) and restore one of those backups (`import_database`, with `list_exports` to see them), for every engine with dumps. Backups go only into DBForge's exports folder, under a name DBForge gives them, and restores read only from there. A backup needs the connection's Read access, a restore Read and write; DBForge asks you to approve every one first, showing the database, the connection, the file and the options.
+
 ## Build from source
 
 DBForge is a native Rust app: its window is drawn with [GPUI](https://www.gpui.rs). You need Rust 1.90 or later
