@@ -764,7 +764,8 @@ mod tests {
         /// The statements logged for `session`'s connection, as (origin, text).
         fn logged(&self) -> Vec<(Origin, String)> {
             let entries: Vec<Entry> = self.log.entries();
-            entries.into_iter().map(|entry| (entry.origin, entry.text)).collect()
+            // SQL Server logs each batch with the line break that ended it.
+            entries.into_iter().map(|entry| (entry.origin, entry.text.trim_end().to_owned())).collect()
         }
 
         fn console(&self, text: &str) -> (Origin, String) {
@@ -1111,7 +1112,10 @@ mod tests {
         fx.log.clear();
         fx.manual("c1");
         fx.run("c1", "INSERT INTO t VALUES (1)").await.unwrap();
-        assert_eq!(fx.logged()[0], fx.console("SET autocommit = 0"));
+        // After the session's own SELECT CONNECTION_ID(), which cancelling needs.
+        let logged = fx.logged();
+        let at = |text: &str| logged.iter().position(|entry| *entry == fx.console(text));
+        assert!(at("SET autocommit = 0").is_some_and(|set| Some(set) < at("INSERT INTO t VALUES (1)")), "{logged:?}");
 
         // DDL commits implicitly, past the app's check; what follows stays uncommitted.
         fx.run("c1", "CREATE TABLE IF NOT EXISTS other (id INT)").await.unwrap();
