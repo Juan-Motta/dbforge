@@ -34,6 +34,9 @@ pub struct TableMessages {
     pub inspect_in_table: &'static str,
     pub edit_document: &'static str,
     pub copy_document: &'static str,
+    /// A document card's copy button, and a line's.
+    pub copy_whole_document: &'static str,
+    pub copy_line_value: &'static str,
     pub copy_key_value: fn(&str) -> String,
     pub copy_selected_documents: fn(usize) -> String,
     pub delete_document: &'static str,

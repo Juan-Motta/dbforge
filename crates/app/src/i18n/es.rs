@@ -406,6 +406,8 @@ pub(super) const MESSAGES: Messages = Messages {
         inspect_in_table: "Las celdas se inspeccionan en la tabla",
         edit_document: "Editar documento",
         copy_document: "Documento",
+        copy_whole_document: "Copiar documento",
+        copy_line_value: "Copiar valor",
         copy_key_value: |name| format!("Su {name}"),
         copy_selected_documents: |n| format!("{n} documentos seleccionados como arreglo"),
         delete_document: "Eliminar documento",

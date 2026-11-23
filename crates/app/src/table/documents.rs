@@ -17,10 +17,10 @@ use std::rc::Rc;
 use dbforge_core::drivers::RowChange;
 use dbforge_core::edit::preview_changes;
 use gpui::{
-    AnyElement, App, AppContext, ClickEvent, Context, DismissEvent, Entity, FontWeight, HighlightStyle,
+    AnyElement, App, AppContext, ClickEvent, Context, DismissEvent, Div, ElementId, Entity, FontWeight, HighlightStyle,
     InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
-    ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText,
-    WeakEntity, Window, actions, div, list, prelude::FluentBuilder, px,
+    ParentElement, Pixels, Point, SharedString, Stateful, StatefulInteractiveElement, StrikethroughStyle, Styled,
+    StyledText, WeakEntity, Window, actions, div, list, prelude::FluentBuilder, px,
 };
 
 use super::cell_menu::Action;
@@ -34,7 +34,7 @@ use crate::sql::document::{TokenKind, document_tokens};
 use crate::theme::{ActiveTheme, MONO, Theme, color};
 use crate::ui::code_editor::{self, LINE_HEIGHT, PADDING_TOP};
 use crate::ui::field::Tooltip;
-use crate::ui::{CodeEditor, MenuItem, PopoverMenu, button, enabled, primary_button};
+use crate::ui::{CodeEditor, MenuItem, PopoverMenu, button, enabled, icon, primary_button};
 
 actions!(table_documents, [KeepDocument]);
 
@@ -58,6 +58,10 @@ const CODE_LINE: f32 = 18.;
 /// Space around the cards and between them.
 const LIST_PADDING: f32 = 10.;
 const CARD_GAP: f32 = 8.;
+/// How long a copy button shows its check.
+const COPIED_FOR: std::time::Duration = std::time::Duration::from_millis(1500);
+/// The group a document's line hovers as, so its copy button shows.
+const LINE_GROUP: &str = "document-line";
 
 /// A document among those shown: a loaded row's, by its key among the
 /// edits, or a new one, by its number.
@@ -122,6 +126,102 @@ pub fn line_tokens(text: &str) -> Vec<Vec<(Range<usize>, TokenKind)>> {
     lines
 }
 
+/// Where a line's value starts in it: past its key and colon, or at its
+/// first character for an array's item. `None` for a blank line or one that
+/// closes an object or array.
+fn value_start(line: &str) -> Option<usize> {
+    let indent = line.len() - line.trim_start().len();
+    let mut at = indent;
+    if line[at..].starts_with('"') {
+        let key_end = at + string_end(&line[at..])?;
+        let rest = &line[key_end..];
+        if let Some(after_colon) = rest.trim_start().strip_prefix(':') {
+            at = line.len() - after_colon.trim_start().len();
+        }
+    }
+    match line[at..].chars().next() {
+        None | Some('}' | ']') => None,
+        Some(_) => Some(at),
+    }
+}
+
+/// The length of the string literal `text` starts with, its quotes included.
+fn string_end(text: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (at, char) in text.char_indices().skip(1) {
+        match char {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '"' => return Some(at + 1),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Where the object or array opening at `start` closes, just past its bracket.
+fn closing(text: &str, start: usize) -> Option<usize> {
+    let (mut depth, mut in_string, mut escaped) = (0usize, false, false);
+    for (at, char) in text[start..].char_indices() {
+        if in_string {
+            match char {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match char {
+            '"' => in_string = true,
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start + at + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A line holds a value its copy button can copy.
+pub fn has_value(line: &str) -> bool {
+    value_start(line).is_some()
+}
+
+/// The value on line `line` of a document, as it is copied: a string's
+/// text without its quotes, an object or array whole (its lines no longer
+/// indented as deep as the line it opens on), anything else as written.
+pub fn line_value(text: &str, line: usize) -> Option<String> {
+    let line_start: usize = text.split('\n').take(line).map(|line| line.len() + 1).sum();
+    let line_text = text.split('\n').nth(line)?;
+    let at = value_start(line_text)?;
+    if line_text[at..].starts_with(['{', '[']) {
+        let start = line_start + at;
+        let whole = &text[start..closing(text, start)?];
+        let indent = line_text.len() - line_text.trim_start().len();
+        let lines: Vec<&str> = whole
+            .split('\n')
+            .map(|inner| {
+                let spaces = inner.len() - inner.trim_start_matches(' ').len();
+                &inner[spaces.min(indent)..]
+            })
+            .collect();
+        return Some(lines.join("\n"));
+    }
+    let value = line_text[at..].trim_end();
+    let value = value.strip_suffix(',').unwrap_or(value).trim_end();
+    if value.starts_with('"')
+        && let Ok(text) = serde_json::from_str::<String>(value)
+    {
+        return Some(text);
+    }
+    Some(value.to_owned())
+}
+
 /// A loaded document's key: each key column's value, in the columns' order.
 type KeyValues = Vec<(String, Option<String>)>;
 
@@ -134,6 +234,17 @@ pub(super) struct Documents {
     pub editor: Option<DocumentEditor>,
     /// Counts the checks of edited documents, so a stale one is dropped.
     checks: u64,
+    /// What was just copied: a document whole, or one of its lines' value.
+    copied: Option<Copied>,
+    /// Counts the copies, so only the last one's check goes away.
+    copies: u64,
+}
+
+/// A document, or the value on one of its lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Copied {
+    id: DocumentId,
+    line: Option<usize>,
 }
 
 impl Default for Documents {
@@ -144,6 +255,8 @@ impl Default for Documents {
             selected: BTreeSet::new(),
             editor: None,
             checks: 0,
+            copied: None,
+            copies: 0,
         }
     }
 }
@@ -264,6 +377,34 @@ impl TableView {
             .map(|(column, value)| (column.name.clone(), value.clone()))
             .collect();
         Some((key, page.documents.as_ref()?.get(index)?.clone()))
+    }
+
+    /// A card's copy button: the document whole, or with `line` the value
+    /// on that line. The button shows a check for a moment.
+    fn copy_from_document(&mut self, id: DocumentId, line: Option<usize>, cx: &mut Context<Self>) {
+        let Some(card) = self.document_cards().into_iter().find(|card| card.id == id) else { return };
+        let text = match line {
+            None => card.text.to_string(),
+            Some(line) => match line_value(&card.text, line) {
+                Some(value) => value,
+                None => return,
+            },
+        };
+        self.copy(text, cx);
+        self.documents.copied = Some(Copied { id, line });
+        self.documents.copies += 1;
+        let copy = self.documents.copies;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.documents.copies == copy {
+                    this.documents.copied = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     /// The cards changed (an edit, an editor opened or closed): they are
@@ -592,6 +733,7 @@ impl TableView {
                 problem: open.problem.clone(),
                 saving: open.saving,
             }),
+            copied: self.documents.copied.clone(),
             view: cx.entity().downgrade(),
         });
         div()
@@ -659,6 +801,7 @@ struct CardContext {
     cards: Vec<DocumentCard>,
     selected: BTreeSet<DocumentId>,
     editing: Option<Editing>,
+    copied: Option<Copied>,
     view: WeakEntity<TableView>,
 }
 
@@ -704,10 +847,15 @@ fn card(index: usize, context: &CardContext, _cx: &mut App) -> AnyElement {
         .when(!card.label.is_empty(), |header| header.child(card.label.clone()))
         .when_some(state, |header, (label, tint)| {
             header.child(div().font_weight(FontWeight::SEMIBOLD).text_color(tint).child(label.to_uppercase()))
-        });
+        })
+        .child(div().flex_1())
+        .child(
+            copy_button(("copy-document", index), &card.id, None, context)
+                .tooltip(Tooltip::text(m.copy_whole_document)),
+        );
     let body = match editing {
         Some(editing) => editor_body(editing, context),
-        None => code_body(index, card, theme),
+        None => code_body(index, card, context),
     };
     let (view, id) = (context.view.clone(), card.id.clone());
     let menu_view = context.view.clone();
@@ -738,12 +886,14 @@ fn card(index: usize, context: &CardContext, _cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-/// A document's text, highlighted, scrolling sideways when a line is long.
-fn code_body(index: usize, card: &DocumentCard, theme: &Theme) -> AnyElement {
+/// A document's text, highlighted, a long line wrapping under its own indent.
+fn code_body(index: usize, card: &DocumentCard, context: &CardContext) -> AnyElement {
+    let theme = &context.theme;
     let deleted = card.state == Some(DocumentState::Deleted);
     let text: &str = card.text.as_ref();
     let mut lines = Vec::new();
-    for (line, tokens) in text.split('\n').zip(line_tokens(text)) {
+    for (number, (line, tokens)) in text.split('\n').zip(line_tokens(text)).enumerate() {
+        let copyable = has_value(line);
         let highlights: Vec<(Range<usize>, HighlightStyle)> = if deleted {
             let struck = StrikethroughStyle { thickness: px(1.), color: Some(theme.text3) };
             vec![(0..line.len(), HighlightStyle { strikethrough: Some(struck), ..HighlightStyle::default() })]
@@ -762,30 +912,83 @@ fn code_body(index: usize, card: &DocumentCard, theme: &Theme) -> AnyElement {
                 })
                 .collect()
         };
-        let line = SharedString::from(line.to_owned());
-        let highlights = highlights.into_iter().filter(|(range, _)| !range.is_empty());
+        // The indent stays apart, so a long line wraps under its own start.
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let (lead, rest) = line.split_at(indent);
+        let highlights: Vec<(Range<usize>, HighlightStyle)> = highlights
+            .into_iter()
+            .map(|(range, style)| (range.start.max(indent) - indent..range.end.max(indent) - indent, style))
+            .filter(|(range, _)| !range.is_empty())
+            .collect();
+        // A line with a value has its copy button after it, there but
+        // unseen until the line is hovered, so nothing moves.
+        let copy = copyable.then(|| {
+            let copied =
+                context.copied.as_ref().is_some_and(|copied| copied.id == card.id && copied.line == Some(number));
+            copy_button(("copy-value", number), &card.id, Some(number), context)
+                .tooltip(Tooltip::text(context.m.copy_line_value))
+                .when(!copied, |button| button.opacity(0.).group_hover(LINE_GROUP, |button| button.opacity(1.)))
+        });
         lines.push(
             div()
-                .h(px(CODE_LINE))
+                .group(LINE_GROUP)
+                .min_h(px(CODE_LINE))
                 .flex_none()
-                .whitespace_nowrap()
-                .child(StyledText::new(line).with_highlights(highlights)),
+                .flex()
+                .items_start()
+                .gap(px(6.))
+                .when(indent > 0, |row| row.child(div().flex_none().whitespace_nowrap().child(lead.to_owned())))
+                .child(
+                    div()
+                        .min_w_0()
+                        .child(StyledText::new(SharedString::from(rest.to_owned())).with_highlights(highlights)),
+                )
+                .children(copy),
         );
     }
     div()
         .id(("document-code", index))
-        .overflow_x_scroll()
         .px(px(12.))
         .py(px(8.))
         .flex()
         .flex_col()
-        .items_start()
         .font_family(MONO)
         .text_size(px(CODE_SIZE))
         .line_height(px(CODE_LINE))
         .text_color(if deleted { theme.text3 } else { theme.text2 })
         .children(lines)
         .into_any_element()
+}
+
+/// A copy button: the document `id` whole, or the value on `line`; a check
+/// for a moment once it copied. Its clicks stay its own, so the card is
+/// not picked or opened.
+fn copy_button(
+    element: impl Into<ElementId>,
+    id: &DocumentId,
+    line: Option<usize>,
+    context: &CardContext,
+) -> Stateful<Div> {
+    let theme = &context.theme;
+    let copied = context.copied.as_ref().is_some_and(|copied| &copied.id == id && copied.line == line);
+    let (view, id) = (context.view.clone(), id.clone());
+    div()
+        .id(element)
+        .flex_none()
+        .size(px(18.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.))
+        .cursor_pointer()
+        .hover(|button| button.bg(theme.sel))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            let _ = view.update(cx, |view, cx| view.copy_from_document(id.clone(), line, cx));
+        })
+        .child(if copied { icon("check", theme.ok, 12.) } else { icon("copy", theme.text3, 12.) })
 }
 
 /// The editor, its height fixed when it opened, and under it what the
@@ -882,5 +1085,38 @@ mod tests {
             ]
         );
         assert_eq!(lines[2], [(0..1, TokenKind::Plain)]);
+    }
+
+    const DOCUMENT: &str = "{\n  \"id\": \"0dc8\",\n  \"note\": \"say \\\"hi\\\", bye\",\n  \"tokens\": 9471,\n  \"user_id\": null,\n  \"meta\": {\n    \"a\": [\n      1,\n      2\n    ]\n  },\n  \"empty\": {},\n  \"tags\": [\n    \"x\"\n  ]\n}";
+
+    fn value(line: usize) -> Option<String> {
+        line_value(DOCUMENT, line)
+    }
+
+    #[test]
+    fn copies_a_line_s_value_strings_without_their_quotes() {
+        assert_eq!(value(1).as_deref(), Some("0dc8"));
+        assert_eq!(value(2).as_deref(), Some("say \"hi\", bye"));
+        assert_eq!(value(3).as_deref(), Some("9471"));
+        assert_eq!(value(4).as_deref(), Some("null"));
+        assert_eq!(value(13).as_deref(), Some("x"), "an array's item");
+    }
+
+    #[test]
+    fn copies_an_object_or_array_whole_without_the_line_s_indent() {
+        assert_eq!(value(5).as_deref(), Some("{\n  \"a\": [\n    1,\n    2\n  ]\n}"));
+        assert_eq!(value(6).as_deref(), Some("[\n  1,\n  2\n]"));
+        assert_eq!(value(11).as_deref(), Some("{}"));
+        assert_eq!(value(0).as_deref(), Some(DOCUMENT), "the document's opening line");
+    }
+
+    #[test]
+    fn a_closing_line_has_no_value() {
+        assert_eq!(value(9), None);
+        assert_eq!(value(10), None);
+        assert_eq!(value(15), None);
+        assert_eq!(value(99), None);
+        assert!(has_value(DOCUMENT.split('\n').nth(1).unwrap()));
+        assert!(!has_value("  },"));
     }
 }

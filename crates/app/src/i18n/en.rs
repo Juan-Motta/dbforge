@@ -391,6 +391,8 @@ pub(super) const MESSAGES: Messages = Messages {
         inspect_in_table: "Cells are inspected in the table",
         edit_document: "Edit document",
         copy_document: "Document",
+        copy_whole_document: "Copy document",
+        copy_line_value: "Copy value",
         copy_key_value: |name| format!("Its {name}"),
         copy_selected_documents: |n| format!("{n} selected documents as an array"),
         delete_document: "Delete document",
