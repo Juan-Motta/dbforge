@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use dbforge_core::query::{close_session, open_transactions};
 use dbforge_core::{Core, Dirs};
 use gpui::{
     App, AppContext, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions, point, px,
@@ -112,7 +113,8 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys(crate::mcp::key_bindings());
     cx.bind_keys(crate::updates::dialog_key_bindings());
     cx.bind_keys(crate::menu_bar::key_bindings());
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.bind_keys(crate::transactions::key_bindings());
+    cx.on_action(|_: &Quit, cx| quit_unless_asked(cx));
     crate::menu_bar::register(cx);
     set_menus(cx);
     // Closing the window quits, as the former Tauri app did.
@@ -122,12 +124,32 @@ fn bind_keys(cx: &mut App) {
         }
     })
     .detach();
-    // A change still waiting to be written is saved before the process ends.
+    // A change still waiting to be written is saved before the process ends,
+    // and a transaction still open (a quit that couldn't ask: the Dock, a
+    // logout) is rolled back. Best effort: GPUI waits a moment, and a
+    // connection that closes unfinished is rolled back by its server.
     cx.on_app_quit(|cx| {
         Preferences::global(cx).flush();
-        async {}
+        Backend::global(cx).spawn(cx, |core| async move {
+            let (sessions, log) = (core.query_sessions(), core.statement_log());
+            for open in open_transactions(sessions) {
+                let _ = close_session(sessions, log, open.session_id).await;
+            }
+        })
     })
     .detach();
+}
+
+/// ⌘Q and the menu's Quit: quits, unless transactions are open, which the
+/// window asks about first.
+fn quit_unless_asked(cx: &mut App) {
+    let asking =
+        cx.windows().into_iter().filter_map(|window| window.downcast::<Shell>()).any(|window| {
+            window.update(cx, |shell, window, cx| !shell.ask_before_quitting(window, cx)).unwrap_or(false)
+        });
+    if !asking {
+        cx.quit();
+    }
 }
 
 /// The menu bar ([`crate::menu_bar`]) in the language in use. Set again when the language changes.

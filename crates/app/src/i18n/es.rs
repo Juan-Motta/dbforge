@@ -1249,6 +1249,93 @@ pub(super) const MESSAGES: Messages = Messages {
             zoom: "Zoom",
         },
     },
+    transactions: super::TransactionMessages {
+        auto_commit: "Auto-commit",
+        manual: "Manual",
+        auto_tooltip: "Cada sentencia se confirma en cuanto se ejecuta",
+        manual_tooltip: "Los cambios esperan a Confirmar o Revertir",
+        auto_locked: "Confirma o revierte primero la transacción abierta",
+        manual_by_default: |tag| format!("Los cambios esperan a Confirmar o Revertir. Manual por defecto en {tag}"),
+        open: "Transacción abierta",
+        failed: "Transacción fallida",
+        only_rollback: "solo se puede revertir",
+        aborted_refused: "Una sentencia falló en esta transacción, así que la base de datos ignora todo hasta \
+                          revertirla. Reviértela y vuelve a ejecutar. No se ejecutó nada.",
+        idle: |minutes| format!("Abierta {minutes} min · retiene bloqueos"),
+        changes: |n| if n == 1 { "1 cambio".into() } else { format!("{n} cambios") },
+        rows: |n| if n == 1 { "1 fila".into() } else { format!("{} filas", thousands(n)) },
+        open_for: "Abierta hace",
+        commit: "Confirmar",
+        rollback: "Revertir",
+        committing: "Confirmando…",
+        rolling_back: "Revirtiendo…",
+        commit_tooltip: |shortcut| format!("Confirmar la transacción ({shortcut})"),
+        rollback_tooltip: "Descartar los cambios de la transacción",
+        committed: |changes, rows| {
+            let rows = if rows == 1 { "1 fila".to_owned() } else { format!("{} filas", thousands(rows)) };
+            if changes == 1 {
+                format!("Se confirmó 1 cambio ({rows})")
+            } else {
+                format!("Se confirmaron {changes} cambios ({rows})")
+            }
+        },
+        rolled_back: |changes, rows| {
+            let rows = if rows == 1 { "1 fila".to_owned() } else { format!("{} filas", thousands(rows)) };
+            if changes == 1 {
+                format!("Se revirtió 1 cambio ({rows})")
+            } else {
+                format!("Se revirtieron {changes} cambios ({rows})")
+            }
+        },
+        idle_notice: |connection, minutes| {
+            format!("Hay una transacción abierta hace {minutes} minutos en {connection}: retiene bloqueos")
+        },
+        control_refused: |keyword| {
+            format!(
+                "{keyword} no se puede ejecutar en modo Manual: termina la transacción con los botones Confirmar o \
+                 Revertir de la barra. No se ejecutó nada."
+            )
+        },
+        implicit_commit_refused: |keyword| {
+            format!(
+                "{keyword} confirmaría la transacción abierta: confírmala o reviértela primero, o cambia a \
+                 Auto-commit. No se ejecutó nada."
+            )
+        },
+        analyze_locked: "Desactivado mientras hay una transacción abierta: Analyze se ejecuta en otra conexión y \
+                         podría esperar para siempre las filas que esta transacción bloqueó",
+        change_refused: "Hay una transacción abierta en esta consola: confírmala o reviértela antes de cambiar de \
+                         base de datos.",
+        connection_busy: |name| {
+            format!(
+                "Hay una transacción abierta en {name}: confírmala o reviértela antes de editar o eliminar la conexión."
+            )
+        },
+        tab_dot: "Transacción abierta: al cerrar la pestaña se pregunta si confirmarla o revertirla",
+        dialog: super::LeaveMessages {
+            close_title: |title| format!("¿Cerrar «{title}» con una transacción abierta?"),
+            quit_title: |n| {
+                if n == 1 {
+                    "¿Salir de DBForge con una transacción abierta?".into()
+                } else {
+                    format!("¿Salir de DBForge con {n} transacciones abiertas?")
+                }
+            },
+            not_committed: "Sin confirmar",
+            open_for: |time| format!("abierta {time}"),
+            explanation: "Confirmar hace visibles estos cambios para todos los demás. Revertir los descarta. En ambos \
+                          casos se liberan los bloqueos que retienen.",
+            only_rollback: "Una sentencia falló en una transacción, así que solo se puede revertir.",
+            cancel: "Cancelar",
+            rollback_and_close: "Revertir y cerrar",
+            commit_and_close: "Confirmar y cerrar",
+            rollback_and_quit: |n| if n == 1 { "Revertir y salir".into() } else { "Revertir todas y salir".into() },
+            commit_and_quit: |n| if n == 1 { "Confirmar y salir".into() } else { "Confirmar todas y salir".into() },
+            rolling_back: "Revirtiendo…",
+            committing: "Confirmando…",
+            keys: |default| format!("↵ {default} · esc Cancelar"),
+        },
+    },
     editor: EditorMessages {
         find: "Buscar",
         replace: "Reemplazar",

@@ -18,6 +18,7 @@ mod shell;
 mod statements;
 mod structure;
 mod table;
+mod transactions;
 mod transfer;
 mod updates;
 
@@ -37,6 +38,7 @@ pub use self::shell::{AppMenuMessages, ShellMessages};
 pub use self::statements::StatementMessages;
 pub use self::structure::StructureMessages;
 pub use self::table::TableMessages;
+pub use self::transactions::{LeaveMessages, TransactionMessages};
 pub use self::transfer::{BackupMessages, DumpMessages, ExportMessages, ImportMessages};
 pub use self::updates::UpdateMessages;
 use crate::preferences::{Preferences, keys};
@@ -191,6 +193,8 @@ pub struct Messages {
     pub updates: UpdateMessages,
     /// The toolbar's connection details, the explorer's Copy menu, notices, error lines and the menu bar.
     pub shell: ShellMessages,
+    /// A console's transaction mode, its open transaction, and leaving one open.
+    pub transactions: TransactionMessages,
     /// The code editor: its find and replace bar.
     pub editor: EditorMessages,
 }

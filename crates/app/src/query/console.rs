@@ -16,6 +16,13 @@
 //! was opened from one) ⌘S updates it, its tab takes its name, and the tab
 //! shows a dot while the text differs from the saved one. Running it with
 //! `:parameters` asks for their values first.
+//!
+//! A SQL console runs in Auto-commit or Manual, chosen beside Run (Manual
+//! from the start on a connection whose tag asks first). In Manual the first
+//! run opens a transaction; while it is open a capsule in the toolbar says
+//! what it holds and for how long, with Rollback and Commit (⇧⌘↵), its tab
+//! shows an amber dot, and after ten idle minutes it warns that it holds
+//! locks. Manual refuses scripts that start or end a transaction themselves.
 
 use crate::ui::Ellipsis;
 use std::rc::Rc;
@@ -25,14 +32,18 @@ use dbforge_core::connections::model::Engine;
 use dbforge_core::drivers::{ObjectKind, StatementResult};
 use dbforge_core::explorer::{completion_schema, list_objects};
 use dbforge_core::history::HistoryEntry;
-use dbforge_core::query::{QueryScope, cancel_query, close_session, explain_query, run_query};
+use dbforge_core::query::{
+    OpenTransaction, QueryScope, TransactionEnd, TransactionMode, cancel_query, close_session, commit_transaction,
+    explain_query, rollback_transaction, run_query, set_transaction_mode, supports_manual_transactions,
+    transaction_state,
+};
 use dbforge_core::saved_queries::params::parameters;
 use dbforge_core::saved_queries::{SavedQuery, SavedQueryInput};
 use gpui::{
     AnyElement, AnyView, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, StatefulInteractiveElement,
-    Styled, Subscription, Window, actions, deferred, div, linear_color_stop, linear_gradient, point,
-    prelude::FluentBuilder, px,
+    HighlightStyle, InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
+    StatefulInteractiveElement, Styled, StyledText, Subscription, Window, actions, deferred, div, linear_color_stop,
+    linear_gradient, point, prelude::FluentBuilder, px,
 };
 
 use super::plan::parse_plan;
@@ -48,19 +59,26 @@ use crate::sql::Syntax;
 use crate::sql::completion::CompletionNames;
 use crate::sql::statements::changes_structure;
 use crate::theme::{ActiveTheme, color};
+use crate::transactions::now_ms;
+use crate::transactions::rules::{
+    CapsuleTone, Refusal, capsule as transaction_capsule, default_mode, idle_minutes, idle_warnings, refusal,
+};
 use crate::ui::field::Tooltip;
 use crate::ui::notice::{Tone, notify};
 use crate::ui::{
-    Checkbox, CodeEditor, CodeEditorEvent, MenuItem, PopoverMenu, any, button, capsule, card, enabled, group, icon,
-    popover, segment, shadow,
+    Checkbox, CodeEditor, CodeEditorEvent, MenuItem, PopoverMenu, any, button, capsule, card, dot, enabled,
+    ghost_button, group, icon, popover, primary_button, segment, segment_face, segmented, shadow,
 };
 
-actions!(query_console, [Run, ToggleLibrary, SaveQuery]);
+actions!(query_console, [Run, ToggleLibrary, SaveQuery, CommitTransaction]);
 
 const CONTEXT: &str = "QueryConsole";
 
 /// How often the running time is redrawn.
 const TICK: Duration = Duration::from_millis(100);
+
+/// How often an open transaction is read again: its clock, its idle warning.
+const TRANSACTION_TICK: Duration = Duration::from_secs(1);
 
 /// Space between the console's cards.
 const GAP: f32 = 10.;
@@ -71,6 +89,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-enter", Run, context),
         KeyBinding::new("secondary-y", ToggleLibrary, context),
         KeyBinding::new("secondary-s", SaveQuery, context),
+        KeyBinding::new("secondary-shift-enter", CommitTransaction, context),
     ]
 }
 
@@ -94,6 +113,8 @@ pub enum ConsoleEvent {
     AskParameters { query: SavedQuery, sql: String, action: RunAction },
     /// Show this dialog over the window, or close the one shown.
     Dialog(Option<AnyView>),
+    /// A transaction opened or ended: its tab's dot.
+    TransactionChanged,
 }
 
 /// A run going now.
@@ -138,6 +159,18 @@ pub struct QueryConsole {
     picker_menu: Option<(Entity<PopoverMenu>, Point<Pixels>, Subscription)>,
     /// Counts completion-name loads, so a stale one is dropped.
     names_generation: u64,
+    /// Auto-commit or Manual; `None` on engines that only auto-commit.
+    mode: Option<TransactionMode>,
+    /// The tag that made the console start in Manual, for the hint.
+    manual_tag: Option<String>,
+    /// The transaction open in Manual, as last read from the core.
+    transaction: Option<OpenTransaction>,
+    /// Commit or Rollback, going now.
+    ending: Option<TransactionEnd>,
+    /// The idle warnings given for the transaction's last run: when it ended, and how many.
+    idle_warned: (i64, u32),
+    /// The open transaction is read again every second.
+    ticking: bool,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -172,6 +205,15 @@ impl QueryConsole {
         });
         let store = SavedStore::global(cx);
         let following = cx.observe(&store, Self::follow_saved);
+        let (mode, manual_tag) = if supports_manual_transactions(engine) {
+            let tag = crate::tags::confirming_tag_of(cx, &connection_id);
+            let mode = default_mode(tag.as_deref());
+            // A new console has no transaction, so its mode is always taken.
+            let _ = set_transaction_mode(Backend::global(cx).core().query_sessions(), &session_id, mode);
+            (Some(mode), tag.filter(|_| mode == TransactionMode::Manual))
+        } else {
+            (None, None)
+        };
         let mut console = Self {
             session_id,
             connection_id,
@@ -194,6 +236,12 @@ impl QueryConsole {
             cancel_error: None,
             picker_menu: None,
             names_generation: 0,
+            mode,
+            manual_tag,
+            transaction: None,
+            ending: None,
+            idle_warned: (0, 0),
+            ticking: false,
             focus: cx.focus_handle(),
             _subscriptions: vec![exporting, typing, following],
         };
@@ -249,9 +297,141 @@ impl QueryConsole {
         self.explaining
     }
 
-    /// A run or an explain is going: neither starts another.
+    /// A run, an explain, a commit or a rollback is going: none starts another.
     fn busy(&self) -> bool {
-        self.running.is_some() || self.explaining
+        self.running.is_some() || self.explaining || self.ending.is_some()
+    }
+
+    /// Auto-commit or Manual; `None` on engines that only auto-commit (MongoDB, Cosmos DB).
+    pub fn transaction_mode(&self) -> Option<TransactionMode> {
+        self.mode
+    }
+
+    /// The transaction open in Manual, if any.
+    pub fn transaction(&self) -> Option<&OpenTransaction> {
+        self.transaction.as_ref()
+    }
+
+    /// Commit or Rollback, going now.
+    pub fn ending(&self) -> Option<TransactionEnd> {
+        self.ending
+    }
+
+    /// Switches between Auto-commit and Manual. Back to Auto is refused
+    /// while a transaction is open; the notice says why.
+    pub fn set_mode(&mut self, mode: TransactionMode, cx: &mut Context<Self>) {
+        if self.mode.is_none_or(|current| current == mode) {
+            return;
+        }
+        match set_transaction_mode(Backend::global(cx).core().query_sessions(), &self.session_id, mode) {
+            Ok(()) => self.mode = Some(mode),
+            Err(error) => notify(error.to_string(), Tone::Error, cx),
+        }
+        cx.notify();
+    }
+
+    /// Reads the console's transaction from the core, after a run, a commit
+    /// or a rollback and every second while one is open.
+    fn sync_transaction(&mut self, cx: &mut Context<Self>) {
+        let was_open = self.transaction.is_some();
+        self.transaction = transaction_state(Backend::global(cx).core().query_sessions(), &self.session_id);
+        if self.transaction.is_some() {
+            self.tick_while_open(cx);
+            self.warn_if_idle(cx);
+        }
+        if was_open != self.transaction.is_some() {
+            cx.emit(ConsoleEvent::TransactionChanged);
+        }
+        cx.notify();
+    }
+
+    /// Reads the open transaction again every second, for its clock and its idle warning, until it ends.
+    fn tick_while_open(&mut self, cx: &mut Context<Self>) {
+        if self.ticking {
+            return;
+        }
+        self.ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(TRANSACTION_TICK).await;
+                let open = this.update(cx, |this, cx| {
+                    this.sync_transaction(cx);
+                    this.ticking = this.transaction.is_some();
+                    this.ticking
+                });
+                if !matches!(open, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Says once, and again every further ten minutes, that the transaction
+    /// has been idle long enough to worry about the locks it holds.
+    fn warn_if_idle(&mut self, cx: &mut Context<Self>) {
+        let Some(transaction) = &self.transaction else { return };
+        let since = transaction.last_activity_ms;
+        let due = idle_warnings(now_ms() - since);
+        let given = if self.idle_warned.0 == since { self.idle_warned.1 } else { 0 };
+        self.idle_warned = (since, given.max(due));
+        if due > given {
+            let text = (cx.messages().transactions.idle_notice)(&self.connection_name(cx), idle_minutes(due));
+            notify(text, Tone::Error, cx);
+        }
+    }
+
+    /// Commits or rolls back the open transaction; a notice says what it
+    /// did, and a failure shows where a run's would.
+    pub fn end_transaction(&mut self, end: TransactionEnd, cx: &mut Context<Self>) {
+        let Some(transaction) = &self.transaction else { return };
+        if self.busy() || (end == TransactionEnd::Committed && transaction.aborted) {
+            return;
+        }
+        self.ending = Some(end);
+        let session = self.session_id.clone();
+        let ending = Backend::global(cx).spawn(cx, move |core| async move {
+            let (sessions, log) = (core.query_sessions(), core.statement_log());
+            match end {
+                TransactionEnd::Committed => commit_transaction(sessions, log, session).await,
+                TransactionEnd::RolledBack => rollback_transaction(sessions, log, session).await,
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let outcome = ending.await;
+            let _ = this.update(cx, |this, cx| {
+                this.ending = None;
+                this.sync_transaction(cx);
+                match outcome {
+                    Ok(outcome) => {
+                        let m = &cx.messages().transactions;
+                        let (changes, rows) = (outcome.transaction.changes, outcome.transaction.rows);
+                        let text = match outcome.ended {
+                            TransactionEnd::Committed => (m.committed)(changes, rows),
+                            TransactionEnd::RolledBack => (m.rolled_back)(changes, rows),
+                        };
+                        notify(text, Tone::Info, cx);
+                    }
+                    Err(error) => {
+                        this.results.update(cx, |results, cx| results.show(LastRun::Failed(error.to_string()), cx));
+                    }
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The name of the console's connection, or its id when it is gone.
+    fn connection_name(&self, cx: &gpui::App) -> String {
+        Backend::global(cx)
+            .core()
+            .connections()
+            .list()
+            .into_iter()
+            .find(|connection| connection.id == self.connection_id)
+            .map(|connection| connection.name)
+            .unwrap_or_else(|| self.connection_id.clone())
     }
 
     pub fn set_analyze(&mut self, analyze: bool, cx: &mut Context<Self>) {
@@ -360,6 +540,9 @@ impl QueryConsole {
     /// Queries `database` from the next run on; a container picked in the
     /// previous one is not in it.
     pub fn pick_database(&mut self, database: Option<String>, cx: &mut Context<Self>) {
+        if self.database != database && self.refuse_change(cx) {
+            return;
+        }
         if self.database != database {
             self.database = database;
             self.picked_container = None;
@@ -371,8 +554,21 @@ impl QueryConsole {
 
     /// Cosmos DB: queries `container` from the next run on.
     pub fn pick_container(&mut self, container: String, cx: &mut Context<Self>) {
+        if self.refuse_change(cx) {
+            return;
+        }
         self.picked_container = Some(container);
         cx.notify();
+    }
+
+    /// Whether another database or container is refused: a transaction is
+    /// open, and a new session would leave it behind. The notice says so.
+    fn refuse_change(&self, cx: &mut Context<Self>) -> bool {
+        if self.transaction.is_none() {
+            return false;
+        }
+        notify(cx.messages().transactions.change_refused, Tone::Error, cx);
+        true
     }
 
     /// What ⌘↵ and Run run: the selection, or the whole script.
@@ -386,6 +582,10 @@ impl QueryConsole {
     /// their names again.
     pub fn run(&mut self, sql: String, cx: &mut Context<Self>) {
         if sql.trim().is_empty() || self.busy() {
+            return;
+        }
+        if let Some(refused) = self.refused_in_manual(&sql, cx) {
+            self.results.update(cx, |results, cx| results.show(LastRun::Failed(refused), cx));
             return;
         }
         let started = Instant::now();
@@ -428,11 +628,39 @@ impl QueryConsole {
                 if changes_structure(&sql) {
                     this.load_names(cx);
                 }
+                this.sync_transaction(cx);
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+
+    /// Why Manual refuses `sql`: it starts or ends a transaction itself,
+    /// which the Commit and Rollback buttons do, so the console would no
+    /// longer know whether one is open; or, on MySQL and MariaDB, it would
+    /// commit the open transaction implicitly.
+    fn refused_in_manual(&self, sql: &str, cx: &gpui::App) -> Option<String> {
+        if self.mode != Some(TransactionMode::Manual) {
+            return None;
+        }
+        let m = &cx.messages().transactions;
+        // A failed transaction (PostgreSQL) answers every statement with an error until it is
+        // rolled back: say what to do instead of sending it.
+        if self.transaction.as_ref().is_some_and(|transaction| transaction.aborted) {
+            return Some(m.aborted_refused.to_owned());
+        }
+        Some(match refusal(sql, self.syntax.dialect()?)? {
+            Refusal::Control(keyword) => (m.control_refused)(&keyword),
+            Refusal::ImplicitCommit(keyword) => (m.implicit_commit_refused)(&keyword),
+        })
+    }
+
+    /// Whether Explain measures with Analyze: never while a transaction is
+    /// open, since Analyze runs on another connection and could wait forever
+    /// on the rows the transaction locked, leaving Commit and Rollback off.
+    pub fn analyzes(&self) -> bool {
+        self.analyze && self.transaction.is_none()
     }
 
     /// Shows the plan of `sql` in place of the results. It runs only with
@@ -444,7 +672,7 @@ impl QueryConsole {
         }
         self.explaining = true;
         self.results.update(cx, |results, cx| results.set_running(Some(Instant::now()), cx));
-        let (connection, scope, analyze) = (self.connection_id.clone(), self.scope(), self.analyze);
+        let (connection, scope, analyze) = (self.connection_id.clone(), self.scope(), self.analyzes());
         let explaining = Backend::global(cx).spawn(cx, move |core| async move {
             explain_query(core.connections(), core.statement_log(), connection, scope, sql, analyze).await
         });
@@ -642,14 +870,7 @@ impl QueryConsole {
             form.read(cx).focus(window, cx);
             return;
         }
-        let connection_name = Backend::global(cx)
-            .core()
-            .connections()
-            .list()
-            .into_iter()
-            .find(|connection| connection.id == self.connection_id)
-            .map(|connection| connection.name)
-            .unwrap_or_else(|| self.connection_id.clone());
+        let connection_name = self.connection_name(cx);
         let draft = Draft {
             connection_id: self.connection_id.clone(),
             connection_name,
@@ -907,6 +1128,112 @@ impl QueryConsole {
         .into_any_element()
     }
 
+    /// Auto-commit | Manual, for SQL engines. Auto can't be chosen while a
+    /// transaction is open; a connection whose tag asks first says Manual is its default.
+    fn mode_choice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let mode = self.mode?;
+        let theme = *cx.theme();
+        let m = &cx.messages().transactions;
+        let manual = mode == TransactionMode::Manual;
+        let can_auto = !manual || (self.transaction.is_none() && !self.busy());
+        let auto_tooltip = if can_auto { m.auto_tooltip } else { m.auto_locked };
+        let manual_tooltip = match &self.manual_tag {
+            Some(tag) => (m.manual_by_default)(tag),
+            None => m.manual_tooltip.to_owned(),
+        };
+        let auto = enabled(segment_face(&theme, None, m.auto_commit, !manual), can_auto)
+            .id("mode-auto")
+            .tooltip(Tooltip::text(auto_tooltip))
+            .when(can_auto, |auto| {
+                auto.on_click(cx.listener(|this, _, _, cx| this.set_mode(TransactionMode::Auto, cx)))
+            });
+        let manual_segment = segment_face(&theme, None, m.manual, manual)
+            .id("mode-manual")
+            .cursor_pointer()
+            .tooltip(Tooltip::text(manual_tooltip))
+            .on_click(cx.listener(|this, _, _, cx| this.set_mode(TransactionMode::Manual, cx)));
+        let chosen = Some(usize::from(manual));
+        Some(segmented(&theme, "transaction-mode", chosen, vec![any(auto), any(manual_segment)]).into_any_element())
+    }
+
+    /// The open transaction: what it holds and for how long, with Rollback
+    /// and Commit. Amber while open; stronger, with a warning, once idle or failed.
+    fn transaction_capsule(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let transaction = self.transaction.as_ref()?;
+        let theme = *cx.theme();
+        let m = &cx.messages().transactions;
+        let shown = transaction_capsule(m, transaction, now_ms());
+        let tint = theme.txn;
+        let warning = shown.tone != CapsuleTone::Open;
+        let idle = !self.busy();
+        let can_commit = idle && !transaction.aborted;
+        let rollback = if self.ending == Some(TransactionEnd::RolledBack) { m.rolling_back } else { m.rollback };
+        let commit = if self.ending == Some(TransactionEnd::Committed) { m.committing } else { m.commit };
+        let marker = if warning { icon("warning", tint, 14.).into_any_element() } else { any(dot(tint)) };
+        Some(
+            div()
+                .id("transaction")
+                .h(px(34.))
+                .min_w_0()
+                .flex_shrink()
+                .max_w(px(560.))
+                .overflow_hidden()
+                .pl(px(13.))
+                .pr(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(17.))
+                .bg(tint.opacity(if warning { 0.26 } else { 0.16 }))
+                .border_1()
+                .border_color(tint.opacity(if warning { 0.8 } else { 0.48 }))
+                .text_size(px(12.5))
+                .child(marker)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .ellipsis()
+                        .child(StyledText::new(format!("{} · {}", shown.title, shown.detail)).with_highlights([(
+                            0..shown.title.len(),
+                            HighlightStyle {
+                                color: Some(tint),
+                                font_weight: Some(FontWeight::SEMIBOLD),
+                                ..Default::default()
+                            },
+                        )]))
+                        .text_color(theme.text),
+                )
+                .child(
+                    enabled(ghost_button(&theme, rollback).h(px(26.)).px(px(12.)).text_size(px(12.5)), idle)
+                        .id("rollback")
+                        .tooltip(Tooltip::text(m.rollback_tooltip))
+                        .when(idle, |button| {
+                            button.on_click(
+                                cx.listener(|this, _, _, cx| this.end_transaction(TransactionEnd::RolledBack, cx)),
+                            )
+                        }),
+                )
+                .child(
+                    enabled(primary_button(&theme, commit).h(px(26.)).px(px(12.)).text_size(px(12.5)), can_commit)
+                        .id("commit")
+                        .tooltip(Tooltip::text((m.commit_tooltip)(shortcuts::COMMIT)))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(color(0xFFFFFFCC))
+                                .child(shortcuts::COMMIT),
+                        )
+                        .when(can_commit, |button| {
+                            button.on_click(
+                                cx.listener(|this, _, _, cx| this.end_transaction(TransactionEnd::Committed, cx)),
+                            )
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// What Save does: save the console, or update the saved query it is.
     fn save_tooltip(&self, cx: &gpui::App) -> String {
         let m = &cx.messages().saved;
@@ -957,12 +1284,22 @@ impl QueryConsole {
                 ],
             ))
             .child(
-                div().id("analyze").tooltip(Tooltip::text(m.analyze_title)).child(
-                    Checkbox::new("analyze-checkbox", m.analyze, self.analyze)
-                        .on_change(cx.listener(|this, analyze: &bool, _, cx| this.set_analyze(*analyze, cx))),
-                ),
+                div()
+                    .id("analyze")
+                    .tooltip(Tooltip::text(match self.transaction {
+                        Some(_) => cx.messages().transactions.analyze_locked,
+                        None => m.analyze_title,
+                    }))
+                    .child(
+                        Checkbox::new("analyze-checkbox", m.analyze, self.analyzes())
+                            .disabled(self.transaction.is_some())
+                            .on_change(cx.listener(|this, analyze: &bool, _, cx| this.set_analyze(*analyze, cx))),
+                    ),
             )
             .child(self.explain_button(cx))
+            // An open transaction takes the mode choice's place (the mode can't change while it
+            // is open) and the room the spacer gives up; it shrinks before it overlaps anything.
+            .children(self.transaction_capsule(cx).or_else(|| self.mode_choice(cx)))
             .child(self.run_slot(cx))
             .into_any_element()
     }
@@ -977,6 +1314,9 @@ impl Render for QueryConsole {
             .on_action(cx.listener(|this, _: &Run, _, cx| this.run_requested(cx)))
             .on_action(cx.listener(|this, _: &ToggleLibrary, window, cx| this.toggle_library(window, cx)))
             .on_action(cx.listener(|this, _: &SaveQuery, window, cx| this.save(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &CommitTransaction, _, cx| this.end_transaction(TransactionEnd::Committed, cx)),
+            )
             .relative()
             .flex_1()
             .min_h_0()

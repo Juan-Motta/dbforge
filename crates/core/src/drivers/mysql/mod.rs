@@ -408,11 +408,11 @@ fn quote_ident(name: &str) -> String {
 /// Runs against a real server. Start one and run `cargo test -- --ignored`:
 /// `docker run -d --name dbforge-test-mysql -e MYSQL_ROOT_PASSWORD=dbforge -e MYSQL_DATABASE=shop -p 53306:3306 mysql:8.4`
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::connections::model::Engine;
 
-    pub(super) const PASSWORD: Option<&str> = Some("dbforge");
+    pub(crate) const PASSWORD: Option<&str> = Some("dbforge");
 
     #[tokio::test]
     #[ignore = "needs the TLS MySQL container on port 53316"]
@@ -455,7 +455,7 @@ mod tests {
         assert!(server_version(&tunnelled, PASSWORD).await.unwrap().contains("8."));
     }
 
-    pub(super) fn local() -> Connection {
+    pub(crate) fn local() -> Connection {
         Connection {
             id: "test-mysql".into(),
             name: "test-mysql".into(),

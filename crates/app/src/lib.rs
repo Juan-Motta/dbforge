@@ -37,6 +37,7 @@ pub mod tags;
 #[cfg(test)]
 pub mod test_support;
 pub mod theme;
+pub mod transactions;
 pub mod ui;
 pub mod updates;
 pub mod workspace;

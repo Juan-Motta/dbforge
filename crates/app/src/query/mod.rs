@@ -7,7 +7,7 @@ pub mod plan;
 pub mod plan_view;
 pub mod results;
 
-pub use console::{ConsoleEvent, QueryConsole, Run, SaveQuery, ToggleLibrary, key_bindings};
+pub use console::{CommitTransaction, ConsoleEvent, QueryConsole, Run, SaveQuery, ToggleLibrary, key_bindings};
 
 /// The console's shortcuts as each OS writes them.
 pub mod shortcuts {
@@ -16,4 +16,6 @@ pub mod shortcuts {
     pub const RUN: &str = if MAC { "⌘↵" } else { "Ctrl+Enter" };
     /// Shows or hides the Library: the history and the saved queries.
     pub const LIBRARY: &str = if MAC { "⌘Y" } else { "Ctrl+Y" };
+    /// Commits the console's open transaction.
+    pub const COMMIT: &str = if MAC { "⇧⌘↵" } else { "Ctrl+Shift+Enter" };
 }

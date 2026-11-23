@@ -616,7 +616,7 @@ fn quote_ident(name: &str) -> String {
 /// (Azure SQL Edge runs natively on Apple silicon; SQL Server images don't start
 /// under Rosetta.) Each test creates its own database.
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::connections::model::Engine;
 

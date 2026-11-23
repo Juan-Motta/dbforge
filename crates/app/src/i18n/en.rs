@@ -1210,6 +1210,90 @@ pub(super) const MESSAGES: Messages = Messages {
             zoom: "Zoom",
         },
     },
+    transactions: super::TransactionMessages {
+        auto_commit: "Auto-commit",
+        manual: "Manual",
+        auto_tooltip: "Every statement commits as soon as it runs",
+        manual_tooltip: "Changes wait for Commit or Rollback",
+        auto_locked: "Commit or roll back the open transaction first",
+        manual_by_default: |tag| format!("Changes wait for Commit or Rollback. Manual by default on {tag}"),
+        open: "Transaction open",
+        failed: "Transaction failed",
+        only_rollback: "only Rollback works",
+        aborted_refused: "A statement failed in this transaction, so the database ignores everything until it is \
+                          rolled back. Roll back, then run again. Nothing ran.",
+        idle: |minutes| format!("Open {minutes} min · holds locks"),
+        changes: |n| if n == 1 { "1 change".into() } else { format!("{n} changes") },
+        rows: |n| if n == 1 { "1 row".into() } else { format!("{} rows", thousands(n)) },
+        open_for: "Open for",
+        commit: "Commit",
+        rollback: "Rollback",
+        committing: "Committing…",
+        rolling_back: "Rolling back…",
+        commit_tooltip: |shortcut| format!("Commit the transaction ({shortcut})"),
+        rollback_tooltip: "Discard the transaction's changes",
+        committed: |changes, rows| {
+            let rows = if rows == 1 { "1 row".to_owned() } else { format!("{} rows", thousands(rows)) };
+            if changes == 1 {
+                format!("Committed 1 change ({rows})")
+            } else {
+                format!("Committed {changes} changes ({rows})")
+            }
+        },
+        rolled_back: |changes, rows| {
+            let rows = if rows == 1 { "1 row".to_owned() } else { format!("{} rows", thousands(rows)) };
+            if changes == 1 {
+                format!("Rolled back 1 change ({rows})")
+            } else {
+                format!("Rolled back {changes} changes ({rows})")
+            }
+        },
+        idle_notice: |connection, minutes| {
+            format!("Transaction open for {minutes} minutes on {connection} — it holds locks")
+        },
+        control_refused: |keyword| {
+            format!(
+                "{keyword} can't run in Manual mode: end the transaction with the Commit or Rollback buttons in the \
+                 toolbar. Nothing ran."
+            )
+        },
+        implicit_commit_refused: |keyword| {
+            format!(
+                "{keyword} would commit the open transaction: commit or roll back first, or switch to Auto-commit. \
+                 Nothing ran."
+            )
+        },
+        analyze_locked: "Off while a transaction is open: Analyze runs on another connection and could wait forever \
+                         on the rows this transaction locked",
+        change_refused: "A transaction is open on this console: commit or roll back before changing the database.",
+        connection_busy: |name| {
+            format!("A transaction is open on {name}: commit or roll back before editing or deleting the connection.")
+        },
+        tab_dot: "Transaction open: closing the tab asks to commit or roll back",
+        dialog: super::LeaveMessages {
+            close_title: |title| format!("Close “{title}” with a transaction open?"),
+            quit_title: |n| {
+                if n == 1 {
+                    "Quit DBForge with a transaction open?".into()
+                } else {
+                    format!("Quit DBForge with {n} transactions open?")
+                }
+            },
+            not_committed: "Not committed",
+            open_for: |time| format!("open {time}"),
+            explanation: "Commit makes these changes visible to everyone else. Roll back discards them. Either way, \
+                          the locks they hold are released.",
+            only_rollback: "A statement failed in a transaction, so it can only be rolled back.",
+            cancel: "Cancel",
+            rollback_and_close: "Roll back and close",
+            commit_and_close: "Commit and close",
+            rollback_and_quit: |n| if n == 1 { "Roll back and quit".into() } else { "Roll back all and quit".into() },
+            commit_and_quit: |n| if n == 1 { "Commit and quit".into() } else { "Commit all and quit".into() },
+            rolling_back: "Rolling back…",
+            committing: "Committing…",
+            keys: |default| format!("↵ {default} · esc Cancel"),
+        },
+    },
     editor: EditorMessages {
         find: "Find",
         replace: "Replace",

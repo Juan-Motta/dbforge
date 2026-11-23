@@ -9,6 +9,9 @@
 //! open one, else a new tab titled with its name) on the connection it was
 //! saved for, or for one saved for any connection of its engine, on the
 //! connection at hand. One with `:parameters` asks for their values first.
+//!
+//! Closing a console's tab with a transaction open asks first whether to
+//! roll it back or commit it; the tab closes once that is done.
 
 mod strip;
 pub mod tabs;
@@ -17,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use dbforge_core::connections::model::{Connection, Engine};
 use dbforge_core::drivers::{RowFilter, TableRef};
-use dbforge_core::query::QueryScope;
+use dbforge_core::query::{QueryScope, open_transactions};
 use dbforge_core::saved_queries::params::parameters;
 use dbforge_core::saved_queries::{ParamValue, SavedQuery};
 use gpui::{
@@ -41,6 +44,7 @@ use crate::shell::explorer::tree::NodeKind;
 use crate::sql::snippets::table_ref;
 use crate::table::{TablePage, TablePageEvent, TableTabView};
 use crate::theme::ActiveTheme;
+use crate::transactions::{LeaveDialog, LeaveEvent, Leaving, Pending};
 use crate::ui::card;
 use crate::ui::notice::{Tone, notify};
 
@@ -91,6 +95,12 @@ struct OpenRunDialog {
     _events: Vec<Subscription>,
 }
 
+/// The dialog asking before a tab with a transaction open closes, and what the workspace hears from it.
+struct OpenLeaveDialog {
+    dialog: Entity<LeaveDialog>,
+    _events: Vec<Subscription>,
+}
+
 /// An open key browser and what the workspace hears from it.
 struct OpenKeyspace {
     browser: Entity<KeyBrowser>,
@@ -118,6 +128,7 @@ pub struct Workspace {
     /// The connection selected in the explorer, and where in it: what "New query" queries.
     target: Option<(Connection, Vec<String>)>,
     run_dialog: Option<OpenRunDialog>,
+    leave_dialog: Option<OpenLeaveDialog>,
 }
 
 impl EventEmitter<WorkspaceEvent> for Workspace {}
@@ -207,7 +218,7 @@ impl Workspace {
                 self.tabs.set_title(&tab, query.name.clone());
                 cx.notify();
             }
-            ConsoleEvent::EditedChanged => cx.notify(),
+            ConsoleEvent::EditedChanged | ConsoleEvent::TransactionChanged => cx.notify(),
             ConsoleEvent::RunSaved(query) => self.run_saved(query.clone(), Some((connection_id, engine)), window, cx),
             ConsoleEvent::OpenSaved(query) => {
                 self.open_saved(query.clone(), Some((connection_id, engine)), window, cx);
@@ -515,8 +526,64 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Closes tab `id`; a console's session closes with it.
+    /// The title of tab `id`, if it is open.
+    pub fn tab_title(&self, id: &str) -> Option<&str> {
+        self.tabs.tabs().iter().find(|tab| tab.id == id).map(|tab| tab.title.as_str())
+    }
+
+    /// The dialog asking before a tab with a transaction open closes, if one is open.
+    pub fn leave_dialog(&self) -> Option<&Entity<LeaveDialog>> {
+        self.leave_dialog.as_ref().map(|open| &open.dialog)
+    }
+
+    /// Closes tab `id`; a console's session closes with it. A console with a
+    /// transaction open asks first whether to roll it back or commit it.
     pub fn close_tab(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let open = open_transactions(Backend::global(cx).core().query_sessions());
+        match open.into_iter().find(|open| open.session_id == id) {
+            Some(transaction) => self.ask_before_closing(id, transaction, window, cx),
+            None => self.close_tab_now(id, window, cx),
+        }
+    }
+
+    /// Asks whether to roll back or commit `transaction` before tab `id`
+    /// closes; it closes once that is done, and stays when the user cancels.
+    fn ask_before_closing(
+        &mut self,
+        id: &str,
+        transaction: dbforge_core::query::ConsoleTransaction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.leave_dialog.is_some() {
+            return;
+        }
+        let title = self.tab_title(id).unwrap_or_default().to_owned();
+        let pending = vec![Pending { title: title.clone(), transaction }];
+        let dialog = cx.new(|cx| LeaveDialog::new(Leaving::Tab(title), pending, cx));
+        dialog.read(cx).focus(window);
+        let tab = id.to_owned();
+        let ended = cx.subscribe_in(&dialog, window, move |this, _, _: &LeaveEvent, window, cx| {
+            this.close_leave_dialog(cx);
+            this.close_tab_now(&tab, window, cx);
+        });
+        let dismissed = cx.subscribe_in(&dialog, window, |this, _, _: &DismissEvent, window, cx| {
+            this.close_leave_dialog(cx);
+            if let Some(id) = this.tabs.active_id().map(str::to_owned) {
+                this.activate(&id, window, cx);
+            }
+        });
+        self.leave_dialog = Some(OpenLeaveDialog { dialog: dialog.clone(), _events: vec![ended, dismissed] });
+        cx.emit(WorkspaceEvent::Dialog(Some(dialog.into())));
+    }
+
+    fn close_leave_dialog(&mut self, cx: &mut Context<Self>) {
+        self.leave_dialog = None;
+        cx.emit(WorkspaceEvent::Dialog(None));
+    }
+
+    /// Closes tab `id` without asking.
+    fn close_tab_now(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs.close(id).is_some() {
             self.forget(id, cx);
             if let Some(next) = self.tabs.active_id().map(str::to_owned) {
