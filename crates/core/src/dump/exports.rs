@@ -1,7 +1,7 @@
 //! The exports DBForge wrote into a folder: how much they take, and clearing
 //! them. Only files named the way an export is named
-//! (`shop-2026-11-10-1432.sql`, or an unfinished `….sql.dbforge-partial`)
-//! count, at the top of the folder; anything else there is left alone, since
+//! (`shop-2026-11-10-1432.sql`, a MongoDB `….archive.gz`, a SQLite copy
+//! `….db`, or an unfinished `….dbforge-partial` of one) count, at the top of the folder; anything else there is left alone, since
 //! the folder may be one the user keeps other files in.
 
 use std::io::ErrorKind;
@@ -19,10 +19,14 @@ pub struct ExportFiles {
     pub bytes: u64,
 }
 
-/// Whether `name` is an export's file name: anything, then `-YYYY-MM-DD-HHMM.sql`.
+/// The extensions of the files exports write, as [`super::DumpOptions::extension`] gives them.
+const EXTENSIONS: [&str; 3] = [".sql", ".archive.gz", ".db"];
+
+/// Whether `name` is an export's file name: anything, then `-YYYY-MM-DD-HHMM`
+/// and one of the [`EXTENSIONS`].
 fn is_export(name: &str) -> bool {
     let name = name.strip_suffix(".dbforge-partial").unwrap_or(name);
-    let Some(stem) = name.strip_suffix(".sql") else { return false };
+    let Some(stem) = EXTENSIONS.iter().find_map(|extension| name.strip_suffix(extension)) else { return false };
     // "-2026-11-10-1432": a dash, then digits and dashes in this shape.
     const SHAPE: &[u8] = b"-dddd-dd-dd-dddd";
     let bytes = stem.as_bytes();
@@ -92,6 +96,20 @@ mod tests {
     }
 
     #[test]
+    fn mongodb_archives_and_sqlite_copies_are_exports_too() {
+        assert!(is_export("shop-2026-11-10-1432.archive.gz"));
+        assert!(is_export("shop-2026-11-10-1432.archive.gz.dbforge-partial"));
+        assert!(is_export("app-2026-11-10-1432.db"));
+        assert!(is_export("app-2026-11-10-1432.db.dbforge-partial"));
+        assert!(!is_export("shop-2026-11-10-1432.gz"));
+        assert!(!is_export("shop.archive.gz"));
+        assert!(!is_export("app.db"));
+        assert!(!is_export("app-2026-11-10.db"));
+        assert!(!is_export("shop-2026-11-10-1432.archive"));
+        assert!(!is_export("-2026-11-10-1432.db"));
+    }
+
+    #[test]
     fn counts_and_clears_only_exports() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path();
@@ -100,15 +118,18 @@ mod tests {
         std::fs::write(folder.join("schema.sql"), "keep").unwrap();
         std::fs::create_dir(folder.join("old-2026-01-01-0000.sql")).unwrap();
         std::fs::write(folder.join("nested-2026-01-01-0000.txt"), "keep").unwrap();
+        std::fs::write(folder.join("orders-2026-11-10-1432.archive.gz"), "12").unwrap();
+        std::fs::write(folder.join("app-2026-11-10-1432.db"), "1").unwrap();
+        std::fs::write(folder.join("app.db"), "keep").unwrap();
 
-        assert_eq!(usage(folder).unwrap(), ExportFiles { count: 2, bytes: 8 });
-        assert_eq!(clear(folder).unwrap(), ExportFiles { count: 2, bytes: 8 });
+        assert_eq!(usage(folder).unwrap(), ExportFiles { count: 4, bytes: 11 });
+        assert_eq!(clear(folder).unwrap(), ExportFiles { count: 4, bytes: 11 });
         assert_eq!(usage(folder).unwrap(), ExportFiles::default());
 
         let mut left: Vec<_> =
             std::fs::read_dir(folder).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         left.sort();
-        assert_eq!(left, ["nested-2026-01-01-0000.txt", "old-2026-01-01-0000.sql", "schema.sql"]);
+        assert_eq!(left, ["app.db", "nested-2026-01-01-0000.txt", "old-2026-01-01-0000.sql", "schema.sql"]);
     }
 
     #[test]

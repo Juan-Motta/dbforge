@@ -46,6 +46,8 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt"
 tokio-util = { version = "0.7", features = ["compat", "rt"] }
 uuid = { version = "1.29", features = ["v4"] }
 tempfile = "3"
+# Reads which database a gzipped mongodump archive holds; already built for russh.
+flate2 = "1"
 chacha20poly1305 = "0.11"
 hkdf = "0.13"
 machine-uid = "0.6"

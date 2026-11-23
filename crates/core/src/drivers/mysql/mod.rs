@@ -11,7 +11,7 @@ mod explain;
 mod read_only;
 mod structure;
 
-pub use admin::{create_object, drop_database};
+pub use admin::{create_object, database_exists, drop_database};
 pub use diagram::schema_diagram;
 pub use edit::{apply_changes, import_rows, preview_changes};
 pub use explain::explain;
@@ -478,7 +478,7 @@ pub(crate) mod tests {
 
     /// MariaDB on 127.0.0.1:53307 (`docker run -d --name dbforge-test-mariadb
     /// -e MARIADB_ROOT_PASSWORD=dbforge -e MARIADB_DATABASE=shop -p 53307:3306 mariadb:11.4`).
-    pub(super) fn mariadb() -> Connection {
+    pub(crate) fn mariadb() -> Connection {
         Connection {
             id: "test-mariadb".into(),
             name: "test-mariadb".into(),

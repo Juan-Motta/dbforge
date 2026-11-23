@@ -19,6 +19,17 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     Ok(())
 }
 
+/// Whether the server has a database `name`.
+pub async fn database_exists(connection: &Connection, password: Option<&str>, name: &str) -> Result<bool> {
+    let mut conn = connect(connection, password, None).await?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?")
+        .bind(name)
+        .fetch_one(&mut conn)
+        .await?;
+    conn.close().await?;
+    Ok(count > 0)
+}
+
 /// Drops the database `name` and everything in it.
 pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {
     let mut conn = connect(connection, password, None).await?;

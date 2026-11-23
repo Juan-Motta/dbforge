@@ -35,6 +35,12 @@ pub async fn create_object(connection: &Connection, password: Option<&str>, obje
     Ok(())
 }
 
+/// Whether the server has a database `name`.
+pub async fn database_exists(connection: &Connection, password: Option<&str>, name: &str) -> Result<bool> {
+    let client = connect(connection, password).await?;
+    Ok(client.list_database_names().await?.iter().any(|existing| existing == name))
+}
+
 /// Drops the database `name` and its collections. The server drops a missing
 /// database without a word, so that is checked first.
 pub async fn drop_database(connection: &Connection, password: Option<&str>, name: &str) -> Result<()> {

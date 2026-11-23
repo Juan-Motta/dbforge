@@ -19,7 +19,10 @@ use std::path::Path;
 
 use chrono::Local;
 use dbforge_core::connections::model::Connection;
-use dbforge_core::dump::{Content, DumpOptions, ExportRequest, ImportRequest, export_database, import_database};
+use dbforge_core::dump::{
+    Content, DumpOptions, ExportRequest, ImportRequest, PostgresOptions, RestoreOptions, export_database,
+    import_database,
+};
 use dbforge_core::explorer::list_objects;
 use gpui::{
     AnyElement, App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
@@ -198,7 +201,11 @@ impl ExportDatabaseDialog {
             connection_id: self.connection.id.clone(),
             database: self.database.clone(),
             path: path.clone(),
-            options: DumpOptions { content: self.content, clean: self.clean, keep_owners: self.keep_owners },
+            options: DumpOptions::Postgres(PostgresOptions {
+                content: self.content,
+                clean: self.clean,
+                keep_owners: self.keep_owners,
+            }),
         };
         let exporting = Backend::global(cx).spawn(cx, move |core| async move {
             let (events, store, jobs, tools, log) =
@@ -509,6 +516,7 @@ impl ImportDatabaseDialog {
             connection_id: self.connection.id.clone(),
             database: name.clone(),
             path: path.clone(),
+            options: RestoreOptions::default(),
         };
         let importing = Backend::global(cx).spawn(cx, move |core| async move {
             let (events, store, jobs, tools, log) =
