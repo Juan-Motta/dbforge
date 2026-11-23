@@ -1053,7 +1053,8 @@ pub(super) const MESSAGES: Messages = Messages {
         import_note_sqlite: "Se ejecuta en una sola transacción: si una sentencia falla, no cambia nada. Importa \
                              solo archivos de confianza.",
         drop_existing: "Eliminar primero las colecciones que ya existen",
-        drop_existing_description: "Si no, los documentos cuyo _id ya está se dejan como están.",
+        drop_existing_description: "Si no, la restauración se detiene en el primer documento cuyo _id ya existe, \
+             y no se restaura nada de lo que viene después.",
         restore_into: "Restaurar en",
         into_this_file: "En el archivo de esta conexión",
         into_new_file: "En un archivo nuevo",

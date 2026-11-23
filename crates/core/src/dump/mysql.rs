@@ -5,11 +5,15 @@
 //! send them elsewhere.
 //!
 //! An export holds one database's objects without naming the database, so it
-//! restores into a database of any name. A restore stops at the first error;
+//! restores into a database of any name; a file that names its database
+//! (`USE`, `CREATE DATABASE`) is refused unless it names the target. A restore stops at the first error;
 //! MySQL can't undo the tables it already created then (its DDL commits on
 //! its own), but a database created for the restore is dropped again.
 
+mod script;
+
 use std::ffi::OsString;
+use std::io::BufReader;
 use std::path::Path;
 use std::process::Stdio;
 
@@ -18,7 +22,7 @@ use tokio::process::Command;
 
 use super::secret_file::SecretFile;
 use super::tools::{self, Tool};
-use super::{Content, Restored, Run, stop_if};
+use super::{Content, Restored, Run, blocking, stop_if};
 use crate::connections::model::{Connection, Engine};
 use crate::connections::transport::{Ssl, SslMode};
 use crate::drivers::{NewObject, mysql};
@@ -60,7 +64,8 @@ pub(super) async fn dump(
 }
 
 /// Runs the SQL file at `path` into `database` with mysql, creating it first
-/// when it doesn't exist.
+/// when it doesn't exist. A file that would switch to another database (as a
+/// `mysqldump --databases` export does) is refused before anything runs.
 pub(super) async fn restore(
     connection: &Connection,
     password: Option<&str>,
@@ -70,6 +75,12 @@ pub(super) async fn restore(
     on_line: impl FnMut(&str),
 ) -> Result<Restored> {
     let tool = run.tool()?;
+    let file = path.to_path_buf();
+    let target = database.to_string();
+    let switch = blocking(move || script::leaves(BufReader::new(std::fs::File::open(&file)?), &target)).await?;
+    if let Some(switch) = switch {
+        return Err(switch.refusal(database));
+    }
     stop_if(run.cancel)?;
     let created = !mysql::database_exists(connection, password, database).await?;
     stop_if(run.cancel)?;
@@ -481,6 +492,44 @@ mod tests {
         assert_eq!(error.to_string(), "Cancelled.");
         assert!(started.elapsed() < std::time::Duration::from_secs(20));
         assert!(!exists(&server, "dbforge_dump_stopped").await);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a local MySQL on port 53306 and its client tools"]
+    async fn mysql_a_file_for_another_database_is_refused_before_anything_runs() {
+        let server = local();
+        sql(
+            &server,
+            "DROP DATABASE IF EXISTS dbforge_dump_named; CREATE DATABASE dbforge_dump_named;
+             CREATE TABLE dbforge_dump_named.items (id INT PRIMARY KEY);
+             INSERT INTO dbforge_dump_named.items VALUES (1), (2);
+             DROP DATABASE IF EXISTS dbforge_dump_elsewhere;",
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("named.sql");
+        let tool = tool_for(&server, "mysqldump").await;
+        let defaults = SecretFile::new(
+            &option_file(&server, &crate::tunnel::route(&server).await.unwrap(), PASSWORD, false),
+            ".cnf",
+        )
+        .unwrap();
+        let mut command = command(&tool, &defaults);
+        command.args(dump_args(&ALL, &tool, Engine::Mysql, &file)).args(["--databases", "dbforge_dump_named"]);
+        tools::run(command, &CancellationToken::new(), |_| {}).await.unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("USE `dbforge_dump_named`"), "{text}");
+
+        let error =
+            restore_into(&server, "dbforge_dump_elsewhere", &file, &CancellationToken::new()).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "This file creates another database (CREATE DATABASE `dbforge_dump_named`), so it would not restore \
+             into dbforge_dump_elsewhere. Export it again without --databases, or restore it into `dbforge_dump_named`."
+        );
+        assert!(!exists(&server, "dbforge_dump_elsewhere").await, "nothing is created");
+        assert_eq!(count(&server, "SELECT COUNT(*) FROM dbforge_dump_named.items").await, 2, "the source is untouched");
+        sql(&server, "DROP DATABASE dbforge_dump_named").await;
     }
 
     #[tokio::test]

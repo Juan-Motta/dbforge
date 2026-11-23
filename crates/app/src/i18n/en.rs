@@ -1016,7 +1016,8 @@ pub(super) const MESSAGES: Messages = Messages {
         import_note_sqlite: "Runs in one transaction: if any statement fails, nothing changes. Import only files \
                              you trust.",
         drop_existing: "Drop collections that already exist first",
-        drop_existing_description: "Otherwise documents whose _id is already there are left as they are.",
+        drop_existing_description: "Otherwise the restore stops at the first document whose _id is already there, \
+             and nothing after it is restored.",
         restore_into: "Restore into",
         into_this_file: "Into this connection’s file",
         into_new_file: "Into a new file",

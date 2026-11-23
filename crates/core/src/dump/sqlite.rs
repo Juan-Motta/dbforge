@@ -4,7 +4,9 @@
 //!
 //! A restore runs a script in one transaction: into the connection's own file,
 //! where a failure or a cancel rolls everything back, or into a new file,
-//! which is written beside its place first and removed when the restore fails.
+//! which is written beside its place first, removed when the restore fails,
+//! and never moved over a file that appeared there meanwhile. A script that
+//! commits or begins transactions of its own is refused.
 
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -198,6 +200,13 @@ pub(super) async fn restore(
     let script = String::from_utf8(bytes)
         .map_err(|_| AppError::Invalid(format!("{} isn't a SQL script: it isn't UTF-8 text.", path.display())))?;
     let script = without_own_transaction(&script);
+    if let Some(statement) = transaction_control(&script) {
+        return Err(AppError::Invalid(format!(
+            "{} has transaction statements of its own ({statement}), so it can't be restored in one transaction. \
+             Remove its BEGIN, COMMIT, END, ROLLBACK, SAVEPOINT and RELEASE statements and try again.",
+            path.display()
+        )));
+    }
     stop_if(cancel)?;
     if target == connection.database {
         let mut conn = open(target, false).await?;
@@ -228,8 +237,38 @@ pub(super) async fn restore(
         remove_database(&partial);
         return Err(error);
     }
-    std::fs::rename(&partial, &target)?;
+    place(&partial, &target)?;
     Ok(Restored::created(true))
+}
+
+/// Moves the restored database at `partial` to `target`, never over a file
+/// that appeared there meanwhile: a hard link fails when `target` exists (a
+/// copy into a file only created when missing where links aren't supported).
+/// `partial` and its journal files are removed either way.
+fn place(partial: &Path, target: &Path) -> Result<()> {
+    let placed = match std::fs::hard_link(partial, target) {
+        Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => copy_new(partial, target),
+        linked => linked,
+    };
+    remove_database(partial);
+    match placed {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(AppError::Invalid(format!(
+            "There's already a file at {}. Restore into the connection's own file or a new one.",
+            target.display()
+        ))),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Copies `from` to `to`, a file created only when there's none yet.
+fn copy_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    let copied = std::io::copy(&mut std::fs::File::open(from)?, &mut out).and_then(|_| out.sync_all());
+    if copied.is_err() {
+        let _ = std::fs::remove_file(to);
+    }
+    copied
 }
 
 /// Removes the database file at `path` and what SQLite keeps beside it.
@@ -293,6 +332,78 @@ fn without_own_transaction(script: &str) -> String {
     let mut text = lines.join("\n");
     text.push('\n');
     text
+}
+
+/// The first statement in `script` that starts, ends or marks a transaction
+/// (`BEGIN`, `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`), by its
+/// first word. Strings, quoted names and comments are skipped, and a trigger's
+/// body is part of its `CREATE TRIGGER`, which ends at `END;` as SQLite reads it.
+fn transaction_control(script: &str) -> Option<String> {
+    const CONTROL: [&str; 6] = ["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"];
+    let chars: Vec<char> = script.chars().collect();
+    // The statement's first words (a token that isn't a word counts as an empty one).
+    let mut words: Vec<String> = Vec::new();
+    let mut trigger = false;
+    let mut after_end = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '-' && next == Some('-') {
+            i = chars[i..].iter().position(|&c| c == '\n').map_or(chars.len(), |at| i + at);
+            continue;
+        }
+        if c == '/' && next == Some('*') {
+            i = (i + 2..chars.len().saturating_sub(1))
+                .find(|&at| chars[at] == '*' && chars[at + 1] == '/')
+                .map_or(chars.len(), |at| at + 2);
+            continue;
+        }
+        if c == ';' {
+            if !trigger || after_end {
+                words.clear();
+                trigger = false;
+            }
+            after_end = false;
+            i += 1;
+            continue;
+        }
+        let word = if c.is_alphanumeric() || c == '_' {
+            let end =
+                chars[i..].iter().position(|&c| !(c.is_alphanumeric() || c == '_')).map_or(chars.len(), |at| i + at);
+            let word: String = chars[i..end].iter().collect::<String>().to_ascii_uppercase();
+            i = end;
+            word
+        } else {
+            let close = match c {
+                '\'' | '"' | '`' => Some(c),
+                '[' => Some(']'),
+                _ => None,
+            };
+            i += 1;
+            if let Some(close) = close {
+                i = chars[i..].iter().position(|&c| c == close).map_or(chars.len(), |at| i + at + 1);
+            }
+            String::new()
+        };
+        if words.is_empty() && CONTROL.contains(&word.as_str()) {
+            return Some(word);
+        }
+        after_end = word == "END";
+        if words.len() < 3 {
+            words.push(word);
+            trigger = trigger
+                || matches!(
+                    words.iter().map(String::as_str).collect::<Vec<_>>().as_slice(),
+                    ["CREATE", "TRIGGER"] | ["CREATE", "TEMP" | "TEMPORARY", "TRIGGER"]
+                );
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -468,6 +579,68 @@ mod tests {
         // A trigger's END stays.
         let trigger = "CREATE TRIGGER x AFTER INSERT ON t BEGIN\n  SELECT 1;\nEND;\n";
         assert_eq!(without_own_transaction(trigger), trigger);
+    }
+
+    #[test]
+    fn transaction_statements_are_found_outside_strings_comments_and_triggers() {
+        let found = |script: &str| transaction_control(script);
+        assert_eq!(found("CREATE TABLE t(x);\nCOMMIT;\nINSERT INTO t VALUES(1);"), Some("COMMIT".into()));
+        assert_eq!(found("INSERT INTO t VALUES(1); begin immediate;"), Some("BEGIN".into()));
+        for keyword in ["END", "ROLLBACK", "SAVEPOINT", "RELEASE"] {
+            assert_eq!(found(&format!("SELECT 1;\n  /* note */ {keyword} x;")), Some(keyword.into()), "{keyword}");
+        }
+        let fine = "-- COMMIT;\n/* BEGIN; */\nINSERT INTO t VALUES('x; COMMIT;', \"a;\"\"COMMIT\", `b; END`, [c; END]);\n\
+             CREATE TRIGGER counted AFTER INSERT ON t BEGIN\n  UPDATE t SET x = 1;\n  SELECT CASE WHEN 1 THEN 2 END AS y;\nEND;\n\
+             CREATE TEMP TRIGGER u AFTER DELETE ON t BEGIN SELECT 1; END;\n\
+             CREATE TABLE commit_log(begin_at, end_at);\nINSERT INTO t VALUES(1);\n";
+        assert_eq!(found(fine), None);
+        assert_eq!(found(&format!("{fine}END TRANSACTION;")), Some("END".into()), "after a trigger, counted again");
+    }
+
+    #[tokio::test]
+    async fn a_script_with_its_own_transactions_is_refused_before_it_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let own = dir.path().join("own.db");
+        execute(&own, "CREATE TABLE kept (id INTEGER);").await;
+        let script = dir.path().join("commits.sql");
+        std::fs::write(
+            &script,
+            "BEGIN TRANSACTION;\nCREATE TABLE early (id INTEGER);\nCOMMIT;\nINSERT INTO missing VALUES (1);\nCOMMIT;\n",
+        )
+        .unwrap();
+        let error = restore_into(&sqlite(&own), &own, &script, &CancellationToken::new()).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("has transaction statements of its own (COMMIT), so it can't be restored in one transaction"),
+            "{error}"
+        );
+        assert_eq!(rows(&own, "SELECT group_concat(name) FROM sqlite_master").await, ["kept"]);
+        let new = dir.path().join("new.db");
+        restore_into(&sqlite(&own), &new, &script, &CancellationToken::new()).await.unwrap_err();
+        assert!(!new.exists());
+    }
+
+    #[test]
+    fn a_file_that_appeared_meanwhile_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("new.db");
+        let partial = partial_path(&target);
+        std::fs::write(&partial, "restored").unwrap();
+        std::fs::write(PathBuf::from(format!("{}-journal", partial.display())), "journal").unwrap();
+        std::fs::write(&target, "someone else's").unwrap();
+        let error = place(&partial, &target).unwrap_err();
+        assert!(error.to_string().starts_with("There's already a file at"), "{error}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "someone else's");
+        let left: Vec<_> =
+            std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        assert_eq!(left, ["new.db"], "the partial file and its journal are removed");
+
+        std::fs::write(&partial, "restored").unwrap();
+        let free = dir.path().join("free.db");
+        place(&partial, &free).unwrap();
+        assert_eq!(std::fs::read_to_string(&free).unwrap(), "restored");
+        assert!(!partial.exists());
     }
 
     #[test]
