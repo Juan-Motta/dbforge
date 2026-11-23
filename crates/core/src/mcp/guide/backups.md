@@ -44,7 +44,7 @@ PostgreSQL, MySQL, MariaDB and MongoDB backups run the engine's client tools (pg
 Needs `write` access. Takes:
 
 - `connectionId`;
-- `file`: an export's `name` from `list_exports`, without a folder. Its kind must match the connection: `.sql` for PostgreSQL, MySQL, MariaDB and SQLite, `.archive.gz` for MongoDB. Restore an export into the engine it was made from;
+- `file`: an export's `name` from `list_exports`, without a folder. Its kind must match the connection: `.sql` for PostgreSQL, MySQL, MariaDB and SQLite, `.archive.gz` for MongoDB. An export restores only into the engine it was made from (a MySQL or MariaDB export into MySQL or MariaDB): a PostgreSQL `.sql` into a SQLite connection, say, is refused, and `list_exports` with a `connectionId` lists only those that fit;
 - `database`: the database to restore into, created when it doesn't exist. Needed, except for SQLite, which takes none;
 - `dropExisting`: MongoDB only, default `false`.
 

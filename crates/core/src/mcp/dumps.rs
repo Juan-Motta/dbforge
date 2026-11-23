@@ -331,8 +331,19 @@ impl Tools {
     /// Whether agents may be offered the export at `path`: DBForge made it,
     /// from a connection agents may reach.
     fn offered(&self, path: &Path) -> bool {
-        let record = self.core.export_records().of(path);
-        record.is_some_and(|record| self.reachable_connection(&record.connection_id).is_ok())
+        self.made_by(path).is_some()
+    }
+
+    /// The reachable connection DBForge made the export at `path` from, if any.
+    fn made_by(&self, path: &Path) -> Option<Connection> {
+        let record = self.core.export_records().of(path)?;
+        self.reachable_connection(&record.connection_id).ok()
+    }
+
+    /// Whether the export at `path` came from a connection of `engine`'s kind: a .sql
+    /// script of one engine is no script for another.
+    fn restores_into(&self, path: &Path, engine: DumpEngine) -> bool {
+        self.made_by(path).is_some_and(|source| DumpEngine::of(source.engine) == Some(engine))
     }
 
     pub(super) fn exports(&self, request: ListExportsRequest) -> Result<ExportList, String> {
@@ -346,6 +357,7 @@ impl Tools {
             .into_iter()
             .filter(|file| engine.is_none_or(|engine| file.extension == engine.restore_extension()))
             .filter(|file| self.offered(&folder.join(&file.name)))
+            .filter(|file| engine.is_none_or(|engine| self.restores_into(&folder.join(&file.name), engine)))
             .map(|file| {
                 let (kind, restores_into) = kind_of(file.extension);
                 ExportView {
@@ -491,6 +503,16 @@ impl Tools {
         };
         if let Some(missing) = missing() {
             return Err(missing);
+        }
+        if !self.restores_into(&path, engine)
+            && let Some(source) = self.made_by(&path)
+        {
+            return Err(format!(
+                "{} is a {} export, so it can't be restored into a {label} connection. Restore it into a {} connection.",
+                request.file,
+                source.engine.label(),
+                source.engine.label()
+            ));
         }
         let path_text = path.to_str().ok_or("The exports folder's path isn't valid UTF-8.")?.to_owned();
         let target_exists = match engine {
@@ -995,6 +1017,28 @@ mod tests {
         assert_eq!(count(&shop).await, "2", "nothing restored");
         let (restored, _) = s.answering(true, tools.restore(None, import("shop", "shop-2026-11-10-1432.sql"))).await;
         restored.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_export_restores_only_into_the_engine_it_came_from() {
+        let (mut s, folder) = exporting();
+        let shop = s.connection("shop", Engine::Sqlite, AgentAccess::Write, None);
+        items(&shop).await;
+        // A PostgreSQL script: a .sql file too, but not one SQLite can run.
+        s.connection("warehouse", Engine::Postgres, AgentAccess::Read, None);
+        made(&s, &folder, "warehouse-2026-11-10-1432.sql", "warehouse", "DELETE FROM items;");
+        let tools = s.tools();
+
+        let listed = tools.exports(ListExportsRequest { connection_id: Some("shop".into()) }).unwrap();
+        assert!(listed.exports.is_empty(), "not offered for a SQLite connection: {:?}", listed.exports);
+        let (error, asked) =
+            s.answering(true, tools.restore(None, import("shop", "warehouse-2026-11-10-1432.sql"))).await;
+        assert_eq!(
+            error.unwrap_err(),
+            "warehouse-2026-11-10-1432.sql is a PostgreSQL export, so it can't be restored into a SQLite connection. Restore it into a PostgreSQL connection."
+        );
+        assert!(asked.is_empty(), "refused before asking");
+        assert_eq!(count(&shop).await, "2", "nothing restored");
     }
 
     /// Saves `connection` with `password` in the setup's own credential file.
